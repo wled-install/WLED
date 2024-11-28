@@ -1743,7 +1743,7 @@ uint16_t mode_tricolor_fade(void) {
 
   return FRAMETIME;
 }
-static const char _data_FX_MODE_TRICOLOR_FADE[] PROGMEM = "Tri Fade@!;1,2,3;!";
+static const char _data_FX_MODE_TRICOLOR_FADE[] PROGMEM = "Tri Fade@!;1,2,3;!;01";
 
 
 /*
@@ -4720,7 +4720,7 @@ uint16_t mode_tv_simulator(void) {
 
   return FRAMETIME;
 }
-static const char _data_FX_MODE_TV_SIMULATOR[] PROGMEM = "TV Simulator@!,!;;";
+static const char _data_FX_MODE_TV_SIMULATOR[] PROGMEM = "TV Simulator@!,!;;!;01";
 
 
 /*
@@ -4763,7 +4763,7 @@ class AuroraWave {
       alive = true;
     }
 
-    CRGB getColorForLED(int ledIndex) {
+    CRGB getColorForLED(int ledIndex) const {
       if(ledIndex < center - width || ledIndex > center + width) return 0; //Position out of range of this wave
 
       CRGB rgb;
@@ -4818,7 +4818,7 @@ class AuroraWave {
       }
     };
 
-    bool stillAlive() {
+    bool stillAlive() const {
       return alive;
     };
 };
@@ -6214,9 +6214,9 @@ uint16_t mode_2Dsquaredswirl(void) {            // By: Mark Kriegsman. https://g
 
   uint16_t ms = strip.now;
 
-  SEGMENT.addPixelColorXY(i, m, ColorFromPalette(SEGPALETTE, ms/29, 255, LINEARBLEND));
-  SEGMENT.addPixelColorXY(j, n, ColorFromPalette(SEGPALETTE, ms/41, 255, LINEARBLEND));
-  SEGMENT.addPixelColorXY(k, p, ColorFromPalette(SEGPALETTE, ms/73, 255, LINEARBLEND));
+  if (i<cols && m<rows) SEGMENT.addPixelColorXY(i, m, ColorFromPalette(SEGPALETTE, ms/29, 255, LINEARBLEND));
+  if (j<cols && n<rows) SEGMENT.addPixelColorXY(j, n, ColorFromPalette(SEGPALETTE, ms/41, 255, LINEARBLEND));
+  if (k<cols && p<rows) SEGMENT.addPixelColorXY(k, p, ColorFromPalette(SEGPALETTE, ms/73, 255, LINEARBLEND));
 
   return FRAMETIME;
 } // mode_2Dsquaredswirl()
@@ -6943,10 +6943,10 @@ uint16_t mode_2DSwirl(void) {
 
   SEGMENT.blur(SEGMENT.custom1);
 
-  uint8_t  i = beatsin8( 27*SEGMENT.speed/255, borderWidth, cols - borderWidth);
-  uint8_t  j = beatsin8( 41*SEGMENT.speed/255, borderWidth, rows - borderWidth);
-  uint8_t ni = (cols - 1) - i;
-  uint8_t nj = (cols - 1) - j;
+  unsigned  i = beatsin8( 27*SEGMENT.speed/255, borderWidth, cols - borderWidth);
+  unsigned  j = beatsin8( 41*SEGMENT.speed/255, borderWidth, rows - borderWidth);
+  unsigned ni = (cols - 1) - i;
+  unsigned nj = (cols - 1) - j;
   uint16_t ms = strip.now;
 
   um_data_t *um_data = getAudioData();
@@ -6955,12 +6955,12 @@ uint16_t mode_2DSwirl(void) {
 
   // printUmData();
 
-  SEGMENT.addPixelColorXY( i, j, ColorFromPalette(SEGPALETTE, (ms / 11 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 11, 200, 255);
-  SEGMENT.addPixelColorXY( j, i, ColorFromPalette(SEGPALETTE, (ms / 13 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 13, 200, 255);
-  SEGMENT.addPixelColorXY(ni,nj, ColorFromPalette(SEGPALETTE, (ms / 17 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 17, 200, 255);
-  SEGMENT.addPixelColorXY(nj,ni, ColorFromPalette(SEGPALETTE, (ms / 29 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 29, 200, 255);
-  SEGMENT.addPixelColorXY( i,nj, ColorFromPalette(SEGPALETTE, (ms / 37 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 37, 200, 255);
-  SEGMENT.addPixelColorXY(ni, j, ColorFromPalette(SEGPALETTE, (ms / 41 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 41, 200, 255);
+  if (i<cols && j<rows)   SEGMENT.addPixelColorXY( i, j, ColorFromPalette(SEGPALETTE, (ms / 11 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 11, 200, 255);
+  if (j<cols && i<rows)   SEGMENT.addPixelColorXY( j, i, ColorFromPalette(SEGPALETTE, (ms / 13 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 13, 200, 255);
+  if (ni<cols && nj<rows) SEGMENT.addPixelColorXY(ni,nj, ColorFromPalette(SEGPALETTE, (ms / 17 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 17, 200, 255);
+  if (nj<cols && ni<rows) SEGMENT.addPixelColorXY(nj,ni, ColorFromPalette(SEGPALETTE, (ms / 29 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 29, 200, 255);
+  if (i<cols && nj<rows)  SEGMENT.addPixelColorXY( i,nj, ColorFromPalette(SEGPALETTE, (ms / 37 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 37, 200, 255);
+  if (ni<cols && j<rows)  SEGMENT.addPixelColorXY(ni, j, ColorFromPalette(SEGPALETTE, (ms / 41 + volumeSmth*4), volumeRaw * SEGMENT.intensity / 64, LINEARBLEND)); //CHSV( ms / 41, 200, 255);
 
   return FRAMETIME;
 } // mode_2DSwirl()
@@ -7589,6 +7589,8 @@ uint16_t mode_blurz(void) {                    // Blurz. By Andrew Tuline.
   um_data_t *um_data = getAudioData();
   uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
   float volumeSmth   = *(float*)um_data->u_data[0];
+  float FFT_MajorPeak = *(float*)um_data->u_data[4];
+  if (FFT_MajorPeak < 1) FFT_MajorPeak = 1;
 
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds(); // not sure if necessary
@@ -7598,6 +7600,10 @@ uint16_t mode_blurz(void) {                    // Blurz. By Andrew Tuline.
     SEGENV.step = 0;  // last pixel color
   }
 
+  #if defined(ARDUINO_ARCH_ESP32)
+    random16_add_entropy(esp_random() & 0xFFFF); // improves randonmess
+  #endif
+
   int fadeoutDelay = (256 - SEGMENT.speed) / 24;
   if ((fadeoutDelay <= 1 ) || ((SEGENV.call % fadeoutDelay) == 0))
        SEGMENT.fadeToBlackBy(max(SEGMENT.speed, (uint8_t)1));
@@ -7606,10 +7612,25 @@ uint16_t mode_blurz(void) {                    // Blurz. By Andrew Tuline.
   }
   if ((SEGENV.aux1 < SEGLEN) && (volumeSmth > 1.0f)) SEGMENT.setPixelColor(SEGENV.aux1,SEGENV.step); // "repaint" last pixel after blur
 
+  unsigned freqBand = SEGENV.aux0 % 16;
   uint16_t segLoc = random16(SEGLEN);
+
+  if (SEGENV.check1) {                                                                                   // FreqMap mode : blob location by major frequency
+    int freqLocn;
+    unsigned maxLen = (SEGENV.check2) ? max(1, SEGLEN-16): SEGLEN;                                       // usable segment length - leave 16 pixels when embedding "GEQ scan"
+    freqLocn = roundf((log10f((float)FFT_MajorPeak) - 1.78f) * float(maxLen)/(MAX_FREQ_LOG10 - 1.78f));  // log10 frequency range is from 1.78 to 3.71. Let's scale to SEGLEN. // WLEDMM proper rounding
+    if (freqLocn < 1) freqLocn = 0; // avoid underflow
+    segLoc =  (SEGENV.check2) ? freqLocn + freqBand : freqLocn;
+  } else if (SEGENV.check2) {                                                                            // GEQ Scanner mode: blob location is defined by frequency band + random offset
+    float bandWidth = float(SEGLEN)  / 16.0f;
+    int bandStart = roundf(bandWidth * freqBand);
+    segLoc = bandStart + random16(max(1, int(bandWidth)));
+  }
+  segLoc = max(uint16_t(0), min(uint16_t(SEGLEN-1), segLoc));  // fix overflows
+
   if (SEGLEN < 2) segLoc = 0; // WLEDMM just to be sure
-  unsigned pixColor = (2*fftResult[SEGENV.aux0%16]*240)/max(1, SEGLEN-1);                  // WLEDMM avoid uint8 overflow, and preserve pixel parameters for redraw
-  unsigned pixIntensity = min((unsigned)(2.0f*fftResult[SEGENV.aux0%16]), 255U);
+  unsigned pixColor = (2*fftResult[freqBand]*240)/max(1, SEGLEN-1);                  // WLEDMM avoid uint8 overflow, and preserve pixel parameters for redraw
+  unsigned pixIntensity = min((unsigned)(2.0f*fftResult[freqBand]), 255U);
 
   if (volumeSmth > 1.0f) {
     SEGMENT.setPixelColor(segLoc, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette((uint16_t)pixColor, false, PALETTE_SOLID_WRAP, 0),(uint8_t)pixIntensity));
@@ -7619,12 +7640,12 @@ uint16_t mode_blurz(void) {                    // Blurz. By Andrew Tuline.
     SEGMENT.blur(max(SEGMENT.intensity, (uint8_t)1));
     SEGENV.aux0 ++;
     SEGENV.aux0 %= 16; // make sure it doesn't cross 16
-    SEGMENT.setPixelColor(segLoc, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette((uint16_t)pixColor, false, PALETTE_SOLID_WRAP, 0),(uint8_t)pixIntensity)); // repaint center pixel after blur
+    SEGMENT.addPixelColor(segLoc, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette((uint16_t)pixColor, false, PALETTE_SOLID_WRAP, 0),(uint8_t)pixIntensity/2)); // repaint center pixel after blur
   } else SEGMENT.blur(max(SEGMENT.intensity, (uint8_t)1));  // silence - just blur it again
 
-  return FRAMETIME_FIXED;
+  return SEGENV.check2 ? FRAMETIME : (3*FRAMETIME_FIXED/4);          // faster updates in GEQ Scanner mode
 } // mode_blurz()
-static const char _data_FX_MODE_BLURZ[] PROGMEM = "Blurz ☾@Fade rate,Blur;!,Color mix;!;01f;sx=48,ix=127,m12=0,si=0"; // Pixels, Beatsin
+static const char _data_FX_MODE_BLURZ[] PROGMEM = "Blurz Plus ☾@Fade rate,Blur,,,,FreqMap ☾,GEQ Scanner ☾,;!,Color mix;!;01f;sx=48,ix=127,m12=7,si=0"; // Pinwheel, Beatsin
 #endif
 
 /////////////////////////
