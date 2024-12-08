@@ -561,7 +561,7 @@ bool Segment::setColor(uint8_t slot, uint32_t c) { //returns true if changed
     if (slot == 0 && c == BLACK) return false; // on/off segment cannot have primary color black
     if (slot == 1 && c != BLACK) return false; // on/off segment cannot have secondary color non black
   }
-  if (fadeTransition) startTransition(strip.getTransition()); // start transition prior to change
+  if (fadeTransition && on) startTransition(strip.getTransition()); // start transition prior to change // WLEDMM only on real change
   colors[slot] = c;
   stateChanged = true; // send UDP/WS broadcast
   return true;
@@ -574,7 +574,7 @@ void Segment::setCCT(uint16_t k) {
     k = (k - 1900) >> 5;
   }
   if (cct == k) return;
-  if (fadeTransition) startTransition(strip.getTransition()); // start transition prior to change
+  if (fadeTransition && on) startTransition(strip.getTransition()); // start transition prior to change
   cct = k;
   stateChanged = true; // send UDP/WS broadcast
 }
@@ -638,7 +638,7 @@ void Segment::setPalette(uint8_t pal) {
   if (pal < 245 && pal > GRADIENT_PALETTE_COUNT+13) pal = 0; // built in palettes
   if (pal > 245 && (strip.customPalettes.size() == 0 || 255U-pal > strip.customPalettes.size()-1)) pal = 0; // custom palettes
   if (pal != palette) {
-    if (strip.paletteFade) startTransition(strip.getTransition());
+    if (strip.paletteFade && on) startTransition(strip.getTransition());
     palette = pal;
     stateChanged = true; // send UDP/WS broadcast
   }
@@ -1408,17 +1408,6 @@ void Segment::refreshLightCapabilities() {
  */
 void __attribute__((hot)) Segment::fill(uint32_t c) {
   if (!isActive()) return; // not active
-  
-  #if 0 && defined(WLED_ENABLE_HUB75MATRIX) && defined(WLEDMM_FASTPATH)
-  // DIRTY HACK - this ignores the first fill(black) in each frame, knowing that HUB75 has already blanked out the display.
-  if (_firstFill) {
-    _firstFill = false;
-    if (c == BLACK) {
-      if (ledsrgb && ledsrgbSize > 0) memset(ledsrgb, 0, ledsrgbSize);
-      return;
-    }
-  }
-  #endif
 
   const uint_fast16_t cols = is2D() ? virtualWidth() : virtualLength();             // WLEDMM use fast int types
   const uint_fast16_t rows = virtualHeight(); // will be 1 for 1D
