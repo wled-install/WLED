@@ -190,6 +190,7 @@ class Bus {
     inline        uint8_t getAutoWhiteMode()          const { return _autoWhiteMode; }
     inline static void    setGlobalAWMode(uint8_t m)  { if (m < 5) _gAWM = m; else _gAWM = AW_GLOBAL_DISABLED; }
     inline static uint8_t getGlobalAWMode()           { return _gAWM; }
+    inline        bool    isValid()                   const {return _valid;}
 
     inline static uint32_t restore_Color_Lossy(uint32_t c, uint8_t restoreBri) { // shamelessly grabbed from upstream, who grabbed from NPB, who ..
       if (restoreBri < 255) {
@@ -457,6 +458,14 @@ class BusManager {
 
     void show();
 
+    void invalidateCache(bool isRTMode) {
+      // WLEDMM clear cached Bus info
+      lastBus = nullptr;
+      laststart = 0;
+      lastend = 0;
+      slowMode = isRTMode;
+    }
+
     void setStatusPixel(uint32_t c);
 
     void setPixelColor(uint16_t pix, uint32_t c, int16_t cct=-1);
@@ -495,6 +504,7 @@ class BusManager {
     Bus *lastBus = nullptr;
     unsigned laststart = 0;
     unsigned lastend = 0;
+    bool slowMode = false; // WLEDMM not sure why we need this. But its necessary.
 
     inline uint8_t getNumVirtualBusses() const {
       int j = 0;
