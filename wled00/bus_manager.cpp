@@ -1063,7 +1063,7 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   USER_PRINT(F("heap usage: ")); USER_PRINTLN(int(lastHeap - ESP.getFreeHeap()));
 }
 
-void __attribute__((hot)) BusHub75Matrix::setPixelColor(uint16_t pix, uint32_t c) {
+void __attribute__((hot)) IRAM_ATTR BusHub75Matrix::setPixelColor(uint16_t pix, uint32_t c) {
   if (!_valid || pix >= _len) return;
   // if (_cct >= 1900) c = colorBalanceFromKelvin(_cct, c); //color correction from CCT
 
@@ -1104,12 +1104,12 @@ void __attribute__((hot)) BusHub75Matrix::setPixelColor(uint16_t pix, uint32_t c
   #endif
 }
 
-uint32_t BusHub75Matrix::getPixelColor(uint16_t pix) const {
+uint32_t IRAM_ATTR BusHub75Matrix::getPixelColor(uint16_t pix) const {
   if (!_valid || pix >= _len || !_ledBuffer) return BLACK;
   return uint32_t(_ledBuffer[pix].scale8(_bri)) & 0x00FFFFFF;  // scale8() is needed to mimic NeoPixelBus, which returns scaled-down colours
 }
 
-uint32_t __attribute__((hot)) BusHub75Matrix::getPixelColorRestored(uint16_t pix) const {
+uint32_t __attribute__((hot)) IRAM_ATTR BusHub75Matrix::getPixelColorRestored(uint16_t pix) const {
   if (!_valid || pix >= _len || !_ledBuffer) return BLACK;
   return uint32_t(_ledBuffer[pix]) & 0x00FFFFFF;
 }
@@ -1124,7 +1124,7 @@ void BusHub75Matrix::setBrightness(uint8_t b, bool immediate) {
   if (display) display->setBrightness(_bri);
 }
 
-void __attribute__((hot)) BusHub75Matrix::show(void) {
+void __attribute__((hot)) IRAM_ATTR BusHub75Matrix::show(void) {
   if (!_valid) return;
   MatrixPanel_I2S_DMA* display = BusHub75Matrix::activeDisplay;
   if (!display) return;
@@ -1268,6 +1268,7 @@ int BusManager::add(BusConfig &bc) {
   lastBus = nullptr;
   laststart = 0;
   lastend = 0;
+  slowMode = false;
   return numBusses++;
 }
 
@@ -1275,17 +1276,26 @@ int BusManager::add(BusConfig &bc) {
 void BusManager::removeAll() {
   DEBUG_PRINTLN(F("Removing all."));
   //prevents crashes due to deleting busses while in use.
+#if !defined(ARDUINO_ARCH_ESP32)
   while (!canAllShow()) yield();
+#else
+  while (!canAllShow()) delay(2); // WLEDMM on esp32, yield() doesn't work as you think it would
+#endif
   for (uint8_t i = 0; i < numBusses; i++) delete busses[i];
   numBusses = 0;
   // WLEDMM clear cached Bus info
   lastBus = nullptr;
   laststart = 0;
   lastend = 0;
+  slowMode = false;
 }
 
-void BusManager::show() {
-  for (uint8_t i = 0; i < numBusses; i++) {
+void __attribute__((hot)) BusManager::show() {
+  for (unsigned i = 0; i < numBusses; i++) {
+#if 1 && defined(ARDUINO_ARCH_ESP32)
+    unsigned long t0 = millis();
+    while ((busses[i]->canShow() == false) && (millis() - t0 < 80)) delay(1); // WLEDMM experimental: wait until bus driver is ready (max 80ms) - costs us 1-2 fps but reduces flickering
+#endif
     busses[i]->show();
   }
 }
@@ -1297,7 +1307,7 @@ void BusManager::setStatusPixel(uint32_t c) {
 }
 
 void IRAM_ATTR __attribute__((hot)) BusManager::setPixelColor(uint16_t pix, uint32_t c, int16_t cct) {
-  if ((pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
+  if ( !slowMode && (pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
     // WLEDMM same bus as last time - no need to search again
     lastBus->setPixelColor(pix - laststart, c);
     return;
@@ -1305,15 +1315,18 @@ void IRAM_ATTR __attribute__((hot)) BusManager::setPixelColor(uint16_t pix, uint
 
   for (uint_fast8_t i = 0; i < numBusses; i++) {    // WLEDMM use fast native types
     Bus* b = busses[i];
+    if (b->isValid() == false) continue;  // WLEDMM ignore invalid (=not ready) busses
     uint_fast16_t bstart = b->getStart();
     if (pix < bstart || pix >= bstart + b->getLength()) continue;
     else {
-      // WLEDMM remember last Bus we took
-      lastBus = b;
-      laststart = bstart; 
-      lastend = bstart + b->getLength();
+      if (!slowMode) {
+        // WLEDMM remember last Bus we took
+        lastBus = b;
+        laststart = bstart; 
+        lastend = bstart + b->getLength();
+      }
       b->setPixelColor(pix - bstart, c);
-      break; // WLEDMM found the right Bus -> so we can stop searching
+      if (!slowMode) break; // WLEDMM found the right Bus -> so we can stop searching - unless we have busses that overlap
     }
   }
 }
@@ -1334,20 +1347,23 @@ void __attribute__((cold)) BusManager::setSegmentCCT(int16_t cct, bool allowWBCo
 }
 
 uint32_t IRAM_ATTR  __attribute__((hot)) BusManager::getPixelColor(uint_fast16_t pix) {     // WLEDMM use fast native types, IRAM_ATTR
-  if ((pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
+  if ( !slowMode && (pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
     // WLEDMM same bus as last time - no need to search again
     return lastBus->getPixelColor(pix - laststart);
   }
 
   for (uint_fast8_t i = 0; i < numBusses; i++) {
     Bus* b = busses[i];
+    if (b->isValid() == false) continue;  // WLEDMM ignore invalid (=not ready) busses
     uint_fast16_t bstart = b->getStart();
     if (pix < bstart || pix >= bstart + b->getLength()) continue;
     else {
-      // WLEDMM remember last Bus we took
-      lastBus = b;
-      laststart = bstart; 
-      lastend = bstart + b->getLength();
+      if (!slowMode) {
+        // WLEDMM remember last Bus we took
+        lastBus = b;
+        laststart = bstart; 
+        lastend = bstart + b->getLength();
+      }
       return b->getPixelColor(pix - bstart);
     }
   }
@@ -1355,20 +1371,23 @@ uint32_t IRAM_ATTR  __attribute__((hot)) BusManager::getPixelColor(uint_fast16_t
 }
 
 uint32_t IRAM_ATTR  __attribute__((hot)) BusManager::getPixelColorRestored(uint_fast16_t pix) {     // WLEDMM uses bus::getPixelColorRestored()
-  if ((pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
+  if ( !slowMode && (pix >= laststart) && (pix < lastend ) && (lastBus != nullptr)) {
     // WLEDMM same bus as last time - no need to search again
     return lastBus->getPixelColorRestored(pix - laststart);
   }
 
   for (uint_fast8_t i = 0; i < numBusses; i++) {
     Bus* b = busses[i];
+    if (b->isValid() == false) continue;  // WLEDMM ignore invalid (=not ready) busses
     uint_fast16_t bstart = b->getStart();
     if (pix < bstart || pix >= bstart + b->getLength()) continue;
     else {
-      // WLEDMM remember last Bus we took
-      lastBus = b;
-      laststart = bstart; 
-      lastend = bstart + b->getLength();
+      if (!slowMode) {
+        // WLEDMM remember last Bus we took
+        lastBus = b;
+        laststart = bstart; 
+        lastend = bstart + b->getLength();
+      }
       return b->getPixelColorRestored(pix - bstart);
     }
   }

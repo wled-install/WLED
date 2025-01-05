@@ -270,9 +270,6 @@ void Segment::startFrame(void) {
   _2dHeight   = calc_virtualHeight();
   _2dWidth    = _isValid2D ? calc_virtualWidth() : calc_virtualLength();
   _virtuallength = calc_virtualLength();
-  #if 0 && defined(WLED_ENABLE_HUB75MATRIX)
-    _firstFill = true; // dirty HACK
-  #endif
 #endif
 }
 // WLEDMM end
@@ -283,7 +280,7 @@ void Segment::startFrame(void) {
 
 // Simplified version of Segment::setPixelColorXY - without error checking. Does not support grouping or spacing
 // * expects scaled color (final brightness) as additional input parameter, plus segment  virtualWidth() and virtualHeight()
-void IRAM_ATTR __attribute__((hot)) Segment::setPixelColorXY_fast(int x, int y, uint32_t col, uint32_t scaled_col, int cols, int rows) //WLEDMM
+void IRAM_ATTR __attribute__((hot)) Segment::setPixelColorXY_fast(int x, int y, uint32_t col, uint32_t scaled_col, int cols, int rows) const //WLEDMM
 {
   unsigned i = UINT_MAX;
   bool sameColor = false;
@@ -413,7 +410,7 @@ void Segment::setPixelColorXY(float x, float y, uint32_t col, bool aa, bool fast
   if (Segment::maxHeight==1) return; // not a matrix set-up
   if (x<0.0f || x>1.0f || y<0.0f || y>1.0f) return; // not normalized
 
-#if 0 // depricated
+#if 0 // deprecated
   const uint_fast16_t cols = virtualWidth();
   const uint_fast16_t rows = virtualHeight();
 
@@ -465,8 +462,18 @@ void Segment::setPixelColorXY(float x, float y, uint32_t col, bool aa, bool fast
 #endif
 }
 
-// returns RGBW values of pixel
-uint32_t IRAM_ATTR_YN Segment::getPixelColorXY(int x, int y) const {
+// WLEDMM this function is only called by getPixelColorXY, in case we don't have the ledsrgb buffer!
+uint32_t IRAM_ATTR_YN Segment::getPixelColorXY_part2(int x, int y, int cols, int rows) const {
+  if (reverse  ) x = cols - x - 1;
+  if (reverse_y) y = rows - y - 1;
+  if (transpose) std::swap(x,y); // swap X & Y if segment transposed
+  const uint_fast16_t groupLength_ = groupLength(); // WLEDMM small optimization
+  x *= groupLength_; // expand to physical pixels
+  y *= groupLength_; // expand to physical pixels
+  return strip.getPixelColorXYRestored(start + x, startY + y);
+}
+
+uint32_t IRAM_ATTR_YN Segment::getPixelColorXY_slow(int x, int y) const { // WLEDMM fallback for non-fastpath builds
   if (x<0 || y<0 || !isActive()) return 0; // not active or out-of range
   if (ledsrgb) {
     int i = XY(x,y);
