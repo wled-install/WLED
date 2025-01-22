@@ -176,7 +176,7 @@ void WiFiEvent(arduino_event_id_t event) // TROYHACKS P4
       if (!apActive) {
         // WiFi.disconnect(true);
       }
-      if (staticIP != (uint32_t)0x00000000 && staticGateway != (uint32_t)0x00000000) {
+      if ((uint32_t)staticIP != (uint32_t)0x00000000 && (uint32_t)staticGateway != (uint32_t)0x00000000) {
         ETH.config(staticIP, staticGateway, staticSubnet, IPAddress(8, 8, 8, 8));
       } else {
         ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
