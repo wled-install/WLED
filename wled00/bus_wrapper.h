@@ -17,9 +17,9 @@
 #define WLED_NO_I2S1_PIXELBUS
 #endif
 
-#if !defined(WLED_NO_RMT_PIXELBUS) && (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32P4))  // NPB only supports BitBang on -C6 at the moment
-#define WLED_NO_RMT_PIXELBUS
-#endif
+// #if !defined(WLED_NO_RMT_PIXELBUS) && (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32P4))  // NPB only supports BitBang on -C6 at the moment
+// #define WLED_NO_RMT_PIXELBUS
+// #endif
 
 // temporary end
 
@@ -194,7 +194,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32BitBangWs2812xMethod, NeoGammaNullMethod>
 #else
-#define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+#define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtXWs2812xMethod, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s0800KbpsMethod, NeoGammaNullMethod>
@@ -207,7 +207,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_NEO_4 NeoPixelBusLg<NeoGrbwFeature, NeoEsp32BitBangWs2812xMethod, NeoGammaNullMethod>
 #else
-#define B_32_RN_NEO_4 NeoPixelBusLg<NeoGrbwFeature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+#define B_32_RN_NEO_4 NeoPixelBusLg<NeoGrbwFeature, NeoEsp32RmtXWs2812xMethod, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_NEO_4 NeoPixelBusLg<NeoGrbwFeature, NeoEsp32I2s0800KbpsMethod, NeoGammaNullMethod>
@@ -220,7 +220,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_400_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32BitBang400KbpsMethod, NeoGammaNullMethod>
 #else
-#define B_32_RN_400_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtN400KbpsMethod, NeoGammaNullMethod>
+#define B_32_RN_400_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtX400KbpsMethod, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_400_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s0400KbpsMethod, NeoGammaNullMethod>
@@ -233,7 +233,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_TM1_4 NeoPixelBusLg<NeoWrgbTm1814Feature, NeoEsp32BitBangTm1814Method, NeoGammaNullMethod>
 #else
-#define B_32_RN_TM1_4 NeoPixelBusLg<NeoWrgbTm1814Feature, NeoEsp32RmtNTm1814Method, NeoGammaNullMethod>
+#define B_32_RN_TM1_4 NeoPixelBusLg<NeoWrgbTm1814Feature, NeoEsp32RmtXTm1814Method, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_TM1_4 NeoPixelBusLg<NeoWrgbTm1814Feature, NeoEsp32I2s0Tm1814Method, NeoGammaNullMethod>
@@ -246,7 +246,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_TM2_3 NeoPixelBusLg<NeoBrgFeature, NeoEsp32BitBangTm1829Method, NeoGammaNullMethod>
 #else
-#define B_32_RN_TM2_3 NeoPixelBusLg<NeoBrgFeature, NeoEsp32RmtNTm1829Method, NeoGammaNullMethod>
+#define B_32_RN_TM2_3 NeoPixelBusLg<NeoBrgFeature, NeoEsp32RmtXTm1829Method, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_TM2_3 NeoPixelBusLg<NeoBrgFeature, NeoEsp32I2s0Tm1829Method, NeoGammaNullMethod>
@@ -259,7 +259,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_UCS_3 NeoPixelBusLg<NeoRgbUcs8903Feature, NeoEsp32BitBangWs2812xMethod, NeoGammaNullMethod>
 #else
-#define B_32_RN_UCS_3 NeoPixelBusLg<NeoRgbUcs8903Feature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+#define B_32_RN_UCS_3 NeoPixelBusLg<NeoRgbUcs8903Feature, NeoEsp32RmtXWs2812xMethod, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_UCS_3 NeoPixelBusLg<NeoRgbUcs8903Feature, NeoEsp32I2s0800KbpsMethod, NeoGammaNullMethod>
@@ -272,7 +272,7 @@ bool canUseSerial(void);   // WLEDMM (wled_serial.cpp) returns true if Serial ca
 #if defined(WLED_NO_RMT_PIXELBUS)
 #define B_32_RN_UCS_4 NeoPixelBusLg<NeoRgbwUcs8904Feature, NeoEsp32BitBangWs2812xMethod, NeoGammaNullMethod>
 #else
-#define B_32_RN_UCS_4 NeoPixelBusLg<NeoRgbwUcs8904Feature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+#define B_32_RN_UCS_4 NeoPixelBusLg<NeoRgbwUcs8904Feature, NeoEsp32RmtXWs2812xMethod, NeoGammaNullMethod>
 #endif
 #ifndef WLED_NO_I2S0_PIXELBUS
 #define B_32_I0_UCS_4 NeoPixelBusLg<NeoRgbwUcs8904Feature, NeoEsp32I2s0800KbpsMethod, NeoGammaNullMethod>
@@ -1263,13 +1263,13 @@ class PolyBus {
       // On ESP32-C3 only the first 2 RMT channels are usable for transmitting
       if (num > 1) return I_NONE;
       //if (num > 1) offset = 1; // I2S not supported yet (only 1 I2S)
-      #elif defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32P4)
+      #elif defined(CONFIG_IDF_TARGET_ESP32C6)
       // toDo: double-check everything is the same -C3
       // On ESP32-C6 only the first 2 RMT channels are usable for transmitting
       if (num > 1) return I_NONE;
       //if (num > 1) offset = 1; // I2S not supported yet (only 1 I2S)
-      #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-      // On ESP32-S3 only the first 4 RMT channels are usable for transmitting
+      #elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+      // On the ESP32-S3 and ESP32-P4 only the first 4 RMT channels are usable for transmitting
       if (num > 3) return I_NONE;
       //if (num > 3) offset = num -4; // I2S not supported yet
       #else
