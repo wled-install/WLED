@@ -1263,13 +1263,13 @@ class PolyBus {
       // On ESP32-C3 only the first 2 RMT channels are usable for transmitting
       if (num > 1) return I_NONE;
       //if (num > 1) offset = 1; // I2S not supported yet (only 1 I2S)
-      #elif defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32P4)
+      #elif defined(CONFIG_IDF_TARGET_ESP32C6)
       // toDo: double-check everything is the same -C3
       // On ESP32-C6 only the first 2 RMT channels are usable for transmitting
       if (num > 1) return I_NONE;
       //if (num > 1) offset = 1; // I2S not supported yet (only 1 I2S)
-      #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-      // On ESP32-S3 only the first 4 RMT channels are usable for transmitting
+      #elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+      // On the ESP32-S3 and ESP32-P4 only the first 4 RMT channels are usable for transmitting
       if (num > 3) return I_NONE;
       //if (num > 3) offset = num -4; // I2S not supported yet
       #else
