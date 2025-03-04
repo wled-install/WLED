@@ -3410,7 +3410,7 @@ uint16_t candle(bool multi)
   if (multi)
   {
     //allocate segment data
-    uint16_t dataSize = max(uint32_t(1), SEGLEN -1) *3; //max. 1365 pixels (ESP8266)
+    uint32_t dataSize = max(uint32_t(1), SEGLEN -1) *3; //max. 1365 pixels (ESP8266)
     if (!SEGENV.allocateData(dataSize)) return candle(false); //allocation failed
   }
 
