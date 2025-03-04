@@ -651,7 +651,7 @@ void handleNotifications()
 
 void setRealtimePixel(uint16_t i, byte r, byte g, byte b, byte w)
 {
-  uint16_t pix = i + arlsOffset;
+  uint32_t pix = i + arlsOffset;
   if (pix < strip.getLengthTotal()) {
     if (!arlsDisableGammaCorrection && gammaCorrectCol) {
       r = gamma8(r);
