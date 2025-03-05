@@ -1127,7 +1127,7 @@ uint16_t mode_running_random(void) {
 
   uint8_t z = it % zoneSize;
   bool nzone = (!z && it != SEGENV.aux1);
-  for (uint32_t i=SEGLEN-1; i >= 0; i--) {  // WLEDMM bugfix
+  for (int32_t i=SEGLEN-1; i >= 0; i--) {  // WLEDMM bugfix
     if (nzone || z >= zoneSize) {
       uint8_t lastrand = PRNG16 >> 8;
       int16_t diff = 0;
@@ -1141,7 +1141,7 @@ uint16_t mode_running_random(void) {
       }
       z = 0;
     }
-    SEGMENT.setPixelColor(i, SEGMENT.color_wheel(PRNG16 >> 8));
+    SEGMENT.setPixelColor(uint32_t(i), SEGMENT.color_wheel(PRNG16 >> 8));
     z++;
   }
 
@@ -1868,12 +1868,12 @@ uint16_t mode_random_chase(void) {
   uint32_t color = SEGENV.step;
   random16_set_seed(SEGENV.aux0);
 
-  for (uint32_t i = SEGLEN -1; i >= 0; i--) {  // WLEDMM bugfix
+  for (int32_t i = SEGLEN -1; i >= 0; i--) {  // use signed int to allow negative values
     uint8_t r = random8(6) != 0 ? (color >> 16 & 0xFF) : random8();
     uint8_t g = random8(6) != 0 ? (color >> 8  & 0xFF) : random8();
     uint8_t b = random8(6) != 0 ? (color       & 0xFF) : random8();
     color = RGBW32(r, g, b, 0);
-    SEGMENT.setPixelColor(i, r, g, b);
+    SEGMENT.setPixelColor(uint32_t(i), r, g, b);
     if (i == SEGLEN -1 && SEGENV.aux1 != (it & 0xFFFF)) { //new first color in next frame
       SEGENV.step = color;
       SEGENV.aux0 = random16_get_seed();
