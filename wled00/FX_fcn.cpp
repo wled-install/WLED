@@ -2658,21 +2658,21 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     if ((size > 0) && (customMappingTable != nullptr)) {
       #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && defined(WLED_USE_PSRAM)
       if (psramFound()) {
-        customMappingTable = (uint16_t*) ps_realloc(customMappingTable, sizeof(uint16_t) * size); // TroyHacks: This should work? We always have tons of PSRAM
+        customMappingTable = (uint32_t*) ps_realloc(customMappingTable, sizeof(uint32_t) * size); // TroyHacks: This should work? We always have tons of PSRAM
       } else {
-        customMappingTable = (uint16_t*) reallocf(customMappingTable, sizeof(uint16_t) * size);  // reallocf will free memory if it cannot resize
+        customMappingTable = (uint32_t*) reallocf(customMappingTable, sizeof(uint32_t) * size);  // reallocf will free memory if it cannot resize
       }
       #else
-      customMappingTable = (uint16_t*) reallocf(customMappingTable, sizeof(uint16_t) * size);  // reallocf will free memory if it cannot resize
+      customMappingTable = (uint32_t*) reallocf(customMappingTable, sizeof(uint32_t) * size);  // reallocf will free memory if it cannot resize
       #endif
     }
     if ((size > 0) && (customMappingTable == nullptr)) { // second try
       DEBUG_PRINTLN("deserializeMap: trying to get fresh memory block.");
       #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && defined(WLED_USE_PSRAM)
       if (psramFound()) {
-        customMappingTable = (uint16_t*) ps_calloc(size, sizeof(uint16_t));
+        customMappingTable = (uint32_t*) ps_calloc(size, sizeof(uint32_t));
       } else {
-        customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
+        customMappingTable = (uint32_t*) calloc(size, sizeof(uint32_t));
       }
       #else
       customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
@@ -2697,7 +2697,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     do { //for each element in the array
       int mapi = f.readStringUntil(',').toInt();
       // USER_PRINTF(", %d(%d)", mapi, i);
-      if (i < customMappingSize) customMappingTable[i++] = (uint16_t) (mapi<0 ? 0xFFFFU : mapi);  // WLEDMM do not write past array bounds
+      if (i < customMappingSize) customMappingTable[i++] = (uint32_t) (mapi<0 ? 0xFFFFU : mapi);  // WLEDMM do not write past array bounds
     } while (f.available());
 
     loadedLedmap = n;
@@ -2705,7 +2705,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
 
     USER_PRINTF("Custom ledmap: %d size=%d\n", loadedLedmap, customMappingSize);
     #ifdef WLED_DEBUG_MAPS
-      for (uint16_t j=0; j<customMappingSize; j++) { // fixing a minor warning: declaration of 'i' shadows a previous local
+      for (uint32_t j=0; j<customMappingSize; j++) { // fixing a minor warning: declaration of 'i' shadows a previous local
         if (!(j%Segment::maxWidth)) DEBUG_PRINTLN();
         DEBUG_PRINTF("%4d,", customMappingTable[j]);
       }

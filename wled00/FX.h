@@ -903,7 +903,7 @@ class WS2812FX {  // 96 bytes
     }
 
     static WS2812FX* getInstance(void) { return instance; }
-    uint16_t* getCustomMappingTable() const { return customMappingTable; } // TroyHacks for doing dumb things
+    uint32_t* getCustomMappingTable() const { return customMappingTable; } // TroyHacks for doing dumb things
     
     void
 #ifdef WLED_DEBUG
@@ -1118,9 +1118,9 @@ class WS2812FX {  // 96 bytes
 
     show_callback _callback;
 
-    uint16_t* customMappingTable;
+    uint32_t* customMappingTable;
     uint32_t  customMappingTableSize; //WLEDMM
-    uint16_t  customMappingSize;
+    uint32_t  customMappingSize;
 
     /*uint32_t*/ unsigned long _lastShow; // WLEDMM avoid losing precision
     unsigned long _lastServiceShow;       // WLEDMM last call of strip.show (timestamp)

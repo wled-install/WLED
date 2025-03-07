@@ -72,7 +72,7 @@ void WS2812FX::setUpMatrix() {
 
       // don't use new / delete
       if ((size > 0) && (customMappingTable != nullptr)) {  // resize
-        customMappingTable = (uint16_t*) reallocf(customMappingTable, sizeof(uint16_t) * size); // reallocf will free memory if it cannot resize
+        customMappingTable = (uint32_t*) reallocf(customMappingTable, sizeof(uint32_t) * size); // reallocf will free memory if it cannot resize
       }
       if ((size > 0) && (customMappingTable == nullptr)) { // second try
         DEBUG_PRINTLN("setUpMatrix: trying to get fresh memory block.");
@@ -85,7 +85,7 @@ void WS2812FX::setUpMatrix() {
         // #else
         // customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
         // #endif
-        customMappingTable = (uint16_t*) heap_caps_calloc_prefer(size, sizeof(uint16_t),2,MALLOC_CAP_SPIRAM,MALLOC_CAP_INTERNAL);
+        customMappingTable = (uint32_t*) heap_caps_calloc_prefer(size, sizeof(uint32_t),2,MALLOC_CAP_SPIRAM,MALLOC_CAP_INTERNAL);
         if (customMappingTable == nullptr) { 
           USER_PRINTLN("setUpMatrix: alloc failed");
           errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
@@ -114,7 +114,7 @@ void WS2812FX::setUpMatrix() {
       // allowed values are: -1 (missing pixel/no LED attached), 0 (inactive/unused pixel), 1 (active/used pixel)
       char    fileName[32]; strcpy_P(fileName, PSTR("/2d-gaps.json")); // reduce flash footprint
       bool    isFile = WLED_FS.exists(fileName);
-      size_t  gapSize = 0;
+      uint32_t  gapSize = 0;
       int8_t *gapTable = nullptr;
 
       if (isFile && requestJSONBufferLock(20)) {
@@ -141,7 +141,7 @@ void WS2812FX::setUpMatrix() {
 
       if (needLedMap && customMappingTable != nullptr) {  // softhack007
       uint_fast16_t x, y, pix=0; //pixel
-      for (size_t pan = 0; pan < panel.size(); pan++) {
+      for (uint32_t pan = 0; pan < panel.size(); pan++) {
         Panel &p = panel[pan];
         uint_fast16_t h = p.vertical ? p.height : p.width;
         uint_fast16_t v = p.vertical ? p.width  : p.height;
@@ -187,7 +187,7 @@ void WS2812FX::setUpMatrix() {
   // softhack007 hack: delete mapping table in case it only contains "identity"
   if (customMappingTable != nullptr && customMappingTableSize > 0) {
     bool isIdentity = true;
-    for (size_t i = 0; (i< customMappingSize) && isIdentity; i++) { //WLEDMM use customMappingTableSize
+    for (uint32_t i = 0; (i< customMappingSize) && isIdentity; i++) { //WLEDMM use customMappingTableSize
       if (customMappingTable[i] != (uint16_t)i ) isIdentity = false;
     }
     if (isIdentity) {
@@ -208,7 +208,7 @@ void WS2812FX::setUpMatrix() {
 // absolute matrix version of setPixelColor(), without error checking
 void IRAM_ATTR __attribute__((hot)) WS2812FX::setPixelColorXY_fast(int x, int y, uint32_t col) //WLEDMM: IRAM_ATTR conditionally
 {
-  uint_fast16_t index = y * Segment::maxWidth + x;
+  uint_fast32_t index = y * Segment::maxWidth + x;
   if (index < customMappingSize) index = customMappingTable[index];
   if (index >= _length) return;
   busses.setPixelColor(index, col);
@@ -219,7 +219,7 @@ void IRAM_ATTR_YN WS2812FX::setPixelColorXY(int x, int y, uint32_t col) //WLEDMM
 {
 #ifndef WLED_DISABLE_2D
   if (!isMatrix) return; // not a matrix set-up
-  uint_fast16_t index = y * Segment::maxWidth + x;
+  uint_fast32_t index = y * Segment::maxWidth + x;
 #else
   uint16_t index = x;
 #endif
@@ -231,7 +231,7 @@ void IRAM_ATTR_YN WS2812FX::setPixelColorXY(int x, int y, uint32_t col) //WLEDMM
 // returns RGBW values of pixel
 uint32_t __attribute__((hot)) WS2812FX::getPixelColorXY(uint16_t x, uint16_t y) const {
 #ifndef WLED_DISABLE_2D
-  uint_fast16_t index = (y * Segment::maxWidth + x); //WLEDMM: use fast types
+  uint_fast32_t index = (y * Segment::maxWidth + x); //WLEDMM: use fast types
 #else
   uint16_t index = x;
 #endif
@@ -242,7 +242,7 @@ uint32_t __attribute__((hot)) WS2812FX::getPixelColorXY(uint16_t x, uint16_t y) 
 
 uint32_t __attribute__((hot)) WS2812FX::getPixelColorXYRestored(uint16_t x, uint16_t y)  const {  // WLEDMM gets the original color from the driver (without downscaling by _bri)
   #ifndef WLED_DISABLE_2D
-    uint_fast16_t index = (y * Segment::maxWidth + x); //WLEDMM: use fast types
+    uint_fast32_t index = (y * Segment::maxWidth + x); //WLEDMM: use fast types
   #else
     uint16_t index = x;
   #endif
