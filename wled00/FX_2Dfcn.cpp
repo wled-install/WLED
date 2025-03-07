@@ -64,7 +64,7 @@ void WS2812FX::setUpMatrix() {
 
     //WLEDMM recreate customMappingTable if more space needed
     if (Segment::maxWidth * Segment::maxHeight > customMappingTableSize) {
-      size_t size = max(ledmapMaxSize, size_t(Segment::maxWidth * Segment::maxHeight)); // TroyHacks
+      uint32_t size = max(ledmapMaxSize, uint32_t(Segment::maxWidth * Segment::maxHeight)); // TroyHacks
       if (!needLedMap) size = 0;                                                        // softhack007
       USER_PRINTF("setupmatrix customMappingTable alloc %d from %d\n", size, customMappingTableSize);
       //if (customMappingTable != nullptr) delete[] customMappingTable;
@@ -101,8 +101,8 @@ void WS2812FX::setUpMatrix() {
       if (!needLedMap) customMappingSize = 0;                                                        // softhack007
 
       // fill with empty in case we don't fill the entire matrix
-      for (size_t i = 0; i< customMappingTableSize; i++) { //WLEDMM use customMappingTableSize
-        customMappingTable[i] = (uint16_t)-1;
+      for (uint32_t i = 0; i< customMappingTableSize; i++) { //WLEDMM use customMappingTableSize
+        customMappingTable[i] = (uint32_t)-1;
       }
 
       // we will try to load a "gap" array (a JSON file)

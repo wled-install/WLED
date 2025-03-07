@@ -1119,7 +1119,7 @@ class WS2812FX {  // 96 bytes
     show_callback _callback;
 
     uint16_t* customMappingTable;
-    uint16_t  customMappingTableSize; //WLEDMM
+    uint32_t  customMappingTableSize; //WLEDMM
     uint16_t  customMappingSize;
 
     /*uint32_t*/ unsigned long _lastShow; // WLEDMM avoid losing precision
