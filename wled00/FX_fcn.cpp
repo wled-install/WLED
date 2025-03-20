@@ -104,7 +104,7 @@ Segment::Segment(const Segment &orig) {
 //WLEDMM: recreate ledsrgb if more space needed (will not free ledsrgb!)
 void Segment::allocLeds() {
   uint32_t size = sizeof(CRGB)*max((uint32_t) length(), ledmapMaxSize); // TroyHacks
-  if ((size < sizeof(CRGB)) || (size > 164000)) {                   //softhack too small (<3) or too large (>160Kb)
+  if ((size < sizeof(CRGB))) { //softhack too small (<3) or too large (>160Kb) // TroyHacks Removed  "|| (size > 164000)" for P4 because we can be big
     DEBUG_PRINTF("allocLeds warning: size == %u !!\n", size);
     if (ledsrgb && (ledsrgbSize == 0)) {
       USER_PRINTLN("allocLeds warning: ledsrgbSize == 0 but ledsrgb!=NULL");
@@ -2685,19 +2685,26 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     if (customMappingTable != nullptr) customMappingTableSize = size;
   }
 
+  
+
   if (customMappingTable != nullptr) {
     customMappingSize  = Segment::maxWidth * Segment::maxHeight;
     // WLEDMM reset mapping table before loading
     //memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint16_t)); // FFFF = no pixel
-    for (unsigned i=0; i<customMappingTableSize; i++) customMappingTable[i]=i;     // "neutral" 1:1 mapping
+    
+    // for (unsigned i=0; i<customMappingTableSize; i++) customMappingTable[i]=i;     // "neutral" 1:1 mapping // TroyHacks disabled for reverse-map style
+    memset(customMappingTable, UINT32_MAX, customMappingTableSize * sizeof(uint32_t)); // TroyHacks fill with equivelent to -1 (max uint32_t)
 
     //WLEDMM: find the map values
     f.find("\"map\":[");
-    uint16_t i=0;
+    uint32_t i=0;
     do { //for each element in the array
       int mapi = f.readStringUntil(',').toInt();
       // USER_PRINTF(", %d(%d)", mapi, i);
-      if (i < customMappingSize) customMappingTable[i++] = (uint32_t) (mapi<0 ? 0xFFFFU : mapi);  // WLEDMM do not write past array bounds
+      // if (i < customMappingSize) customMappingTable[i++] = (uint32_t) (mapi<0 ? UINT32_MAX : mapi);  // WLEDMM do not write past array bounds
+
+      if (i < customMappingSize) customMappingTable[mapi] = (uint32_t) (i++);  // Reverse map logic - instead of every position, we only have the remapped ones
+
     } while (f.available());
 
     loadedLedmap = n;

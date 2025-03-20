@@ -797,7 +797,7 @@ WLED_GLOBAL volatile bool OTAisRunning _INIT(false);        // WLEDMM temporaril
 #ifndef ESP8266
 WLED_GLOBAL char *ledmapNames[WLED_MAX_LEDMAPS-1] _INIT_N(({nullptr}));
 #endif
-WLED_GLOBAL uint32_t ledmapMaxSize _INIT(0); //WLEDMM TroyHack
+WLED_GLOBAL uint32_t ledmapMaxSize _INIT(0); //WLEDMM TroyHacks
 #if WLED_MAX_LEDMAPS>16
 WLED_GLOBAL uint32_t ledMaps _INIT(0); // bitfield representation of available ledmaps
 #else
