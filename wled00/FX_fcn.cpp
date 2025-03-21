@@ -2692,8 +2692,11 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     // WLEDMM reset mapping table before loading
     //memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint16_t)); // FFFF = no pixel
     
-    // for (unsigned i=0; i<customMappingTableSize; i++) customMappingTable[i]=i;     // "neutral" 1:1 mapping // TroyHacks disabled for reverse-map style
+    #ifndef WLEDMM_INVERSE_MAPS
+    for (unsigned i=0; i<customMappingTableSize; i++) customMappingTable[i]=i;     // "neutral" 1:1 mapping
+    #else
     memset(customMappingTable, UINT32_MAX, customMappingTableSize * sizeof(uint32_t)); // TroyHacks fill with equivelent to -1 (max uint32_t)
+    #endif
 
     //WLEDMM: find the map values
     f.find("\"map\":[");
@@ -2701,9 +2704,12 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     do { //for each element in the array
       int mapi = f.readStringUntil(',').toInt();
       // USER_PRINTF(", %d(%d)", mapi, i);
-      // if (i < customMappingSize) customMappingTable[i++] = (uint32_t) (mapi<0 ? UINT32_MAX : mapi);  // WLEDMM do not write past array bounds
 
+      #ifndef WLEDMM_INVERSE_MAPS
+      if (i < customMappingSize) customMappingTable[i++] = (uint32_t) (mapi<0 ? UINT32_MAX : mapi);  // WLEDMM do not write past array bounds
+      #else
       if (i < customMappingSize) customMappingTable[mapi] = (uint32_t) (i++);  // Reverse map logic - instead of every position, we only have the remapped ones
+      #endif
 
     } while (f.available());
 
