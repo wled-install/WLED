@@ -741,7 +741,7 @@ void serializeConfig() {
   wifi[F("sleep")] = !noWifiSleep;
   wifi[F("phy")] = force802_3g;
 
-  #ifdef WLED_USE_ETHERNET
+  #if defined(WLED_USE_ETHERNET) && !defined(ARDUINO_ARCH_ESP32P4)
   JsonObject ethernet = doc.createNestedObject("eth");
   ethernet["type"] = ethernetType;
   if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
