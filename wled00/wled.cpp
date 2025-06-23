@@ -502,7 +502,7 @@ void WLED::setup()
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
     #if !defined(WLED_USE_ETHERNET)
       #if defined(ARDUINO_ARCH_ESP32P4)
-        esp_hosted_init(NULL);
+        esp_hosted_init();
       #endif
       esp_netif_init();
       esp_event_loop_create_default();
