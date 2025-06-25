@@ -117,9 +117,10 @@
       #include <esp_eth.h>
     #else
       #ifdef CONFIG_IDF_TARGET_ESP32P4
-        #include <esp_hosted_api.h>
+        #include <esp_hosted_api.h> // this includes esp_wifi.h
+      #else
+        #include <esp_wifi.h>
       #endif
-      #include <esp_wifi.h>
     #endif
     #define I2S_SDPIN 11
     #define I2S_WSPIN 10

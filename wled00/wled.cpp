@@ -473,7 +473,7 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
   }
 }
 
-# ifdef WLED_USE_ETHERNET
+#ifdef WLED_USE_ETHERNET
 static const char *TAG = "eth_init";
 
 static void eth_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
@@ -519,7 +519,7 @@ void WLED::setup()
           }; 
       esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration);
       esp_wifi_start();
-      delay(500);
+      // delay(500);
     #endif
 
     #ifdef WLED_USE_ETHERNET
