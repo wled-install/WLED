@@ -115,13 +115,12 @@
   #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
     #ifdef WLED_USE_ETHERNET
       #include <esp_eth.h>
-    #else
+    #endif
       #ifdef CONFIG_IDF_TARGET_ESP32P4
         #include <esp_hosted_api.h> // this includes esp_wifi.h
       #else
         #include <esp_wifi.h>
       #endif
-    #endif
     #define I2S_SDPIN 11
     #define I2S_WSPIN 10
     #define I2S_CKPIN 12
