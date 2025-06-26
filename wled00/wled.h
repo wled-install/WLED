@@ -121,12 +121,14 @@
       #else
         #include <esp_wifi.h>
       #endif
-    #define I2S_SDPIN 11
-    #define I2S_WSPIN 10
-    #define I2S_CKPIN 12
-    #define MCLK_PIN  13
-    #define HW_PIN_SDA 7
-    #define HW_PIN_SCL 8
+    #ifdef CONFIG_IDF_TARGET_ESP32P4
+      #define I2S_SDPIN 11
+      #define I2S_WSPIN 10
+      #define I2S_CKPIN 12
+      #define MCLK_PIN  13
+      #define HW_PIN_SDA 7
+      #define HW_PIN_SCL 8
+    #endif
   #else
     #include "WiFi.h"
   #endif
@@ -152,7 +154,7 @@
 
 #include "src/dependencies/network/Network.h"
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-#define Network WL_Network
+  #define Network WL_Network
 #endif
 
 #ifdef WLED_USE_MY_CONFIG
