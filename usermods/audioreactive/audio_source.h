@@ -708,8 +708,8 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x1B, 0b00000101); // ADC soft-mute was 0b00000101
       _es8311I2cWrite(0x1C, 0b01100101); // ADC EQ and offset freeze at 0b01100101 (bad at 0b00101100)
       _es8311I2cWrite(0x17, 0b10111111); // ADC volume was 0b11111111 trying ADC volume 0b10111111 = 0db (maxgain)
-      _es8311I2cWrite(0x18, 0b10000001); // ADC ALC enabled and AutoMute disabled.
-      // _es8311I2cWrite(0x19, 0b11110100); // ADC ALC max and min - not sure how best to use this, default seems fine
+      _es8311I2cWrite(0x18, 0b10001000); // ADC ALC enabled and AutoMute disabled. was 1....1
+      _es8311I2cWrite(0x19, 0b11110000); // ADC ALC max and min - not sure how best to use this, default seems fine
     }
 
   public:
