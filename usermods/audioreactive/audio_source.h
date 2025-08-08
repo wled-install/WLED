@@ -679,6 +679,7 @@ class ES8311Source : public I2SSource {
       // 
       // Currently only tested with the ESP32-P4 boards with the onboard mic.
       // Datasheet with I2C commands: https://dl.xkwy2018.com/downloads/RK3588/01_Official%20Release/04_Product%20Line%20Branch_NVR/02_Key%20Device%20Specifications/ES8311%20DS.pdf
+      // If making changes, make sure to completely power off the board - sometimes settings are kept until the board is powered off!
       //
       _es8311I2cBegin(); 
       _es8311I2cWrite(0x00, 0b00011111); // RESET, default value
