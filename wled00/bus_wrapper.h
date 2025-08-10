@@ -17,10 +17,6 @@
 #define WLED_NO_I2S1_PIXELBUS
 #endif
 
-// #if !defined(WLED_NO_RMT_PIXELBUS) && (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32P4))  // NPB only supports BitBang on -C6 at the moment
-// #define WLED_NO_RMT_PIXELBUS
-// #endif
-
 // temporary end
 
 // WLEDMM TroyHacks support - SLOWPATH has priority over TWOPATH
