@@ -1,6 +1,4 @@
 #include "wled.h"
-#include "driver/parlio_tx.h"
-bool parlio_setup_done = false;
 
 /*
  * UDP sync notifier / Realtime / Hyperion / TPM2.NET
@@ -791,12 +789,6 @@ extern "C" {
 }
 #endif
 
-parlio_tx_unit_handle_t parlio_tx_unit = NULL;
-parlio_tx_unit_config_t parlio_config = parlio_tx_unit_config_t();
-parlio_transmit_config_t transmit_config = {
-    .idle_value = 0x00, // the idle value will force the OE line to low, thus enable the output
-};
-
 uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t *buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit)  {
 
   if (!(apActive || interfacesInited) || !client[0] || !length) return 1;  // network not initialised or dummy/unset IP address  031522 ajn added check for ap
@@ -891,54 +883,6 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
         }
       }
 
-    // parlio_clock_source_t clk_src;  /*!< Parallel IO internal clock source */
-    // gpio_num_t clk_in_gpio_num;     /*!< If the clock source is input from external, set the corresponding GPIO number.
-    //                                      Otherwise, set to `-1` and the driver will use the internal `clk_src` as clock source.
-    //                                      This option has higher priority than `clk_src` */
-    // uint32_t input_clk_src_freq_hz; /*!< Frequency of the input clock source, valid only if `clk_in_gpio_num` is not `-1` */
-    // uint32_t output_clk_freq_hz;    /*!< Frequency of the output clock. It's divided from either internal `clk_src` or external clock source */
-    // size_t data_width;              /*!< Parallel IO data width, can set to 1/2/4/8/..., but can't bigger than PARLIO_TX_UNIT_MAX_DATA_WIDTH */
-    // gpio_num_t data_gpio_nums[PARLIO_TX_UNIT_MAX_DATA_WIDTH]; /*!< Parallel IO data GPIO numbers, if any GPIO is not used, you can set it to `-1` */
-    // gpio_num_t clk_out_gpio_num; /*!< GPIO number of the output clock signal, the clock is synced with TX data */
-    // gpio_num_t valid_gpio_num;   /*!< GPIO number of the valid signal, which stays high when transferring data.
-    //                                   Note that, the valid signal will always occupy the MSB data bit */
-    // size_t trans_queue_depth; /*!< Depth of internal transaction queue */
-    // size_t max_transfer_size; /*!< Maximum transfer size in one transaction, in bytes. This decides the number of DMA nodes will be used for each transaction */
-    // size_t dma_burst_size;    /*!< DMA burst size, in bytes */
-    // parlio_sample_edge_t sample_edge;       /*!< Parallel IO sample edge */
-    // parlio_bit_pack_order_t bit_pack_order; /*!< Set the order of packing the bits into bytes (only works when `data_width` < 8) */
-    // struct {
-    //     uint32_t clk_gate_en: 1;  /*!< Enable TX clock gating,
-    //                                    the output clock will be controlled by the MSB bit of the data bus,
-    //                                    i.e. by data_gpio_nums[PARLIO_TX_UNIT_MAX_DATA_WIDTH-1]. High level to enable the clock output, low to disable */
-    //     uint32_t io_loop_back: 1; /*!< For debug/test, the signal output from the GPIO will be fed to the input path as well */
-    // } flags;                      /*!< Extra configuration flags */
-    // } parlio_tx_unit_config_t;
-
-      if (!parlio_setup_done) {
-        parlio_config.clk_src = PARLIO_CLK_SRC_DEFAULT;
-        parlio_config.data_width = 1;
-        parlio_config.clk_in_gpio_num = gpio_num_t(-1); // use internal clock source
-        parlio_config.valid_gpio_num = gpio_num_t(-1);  // don't generate valid signal
-        parlio_config.clk_out_gpio_num = gpio_num_t(-1);
-        parlio_config.data_gpio_nums[0] = gpio_num_t(21);
-        parlio_config.data_gpio_nums[1] = gpio_num_t(22);
-        parlio_config.data_gpio_nums[2] = gpio_num_t(20);
-        parlio_config.data_gpio_nums[3] = gpio_num_t(7);
-        parlio_config.data_gpio_nums[4] = gpio_num_t(8);
-        parlio_config.data_gpio_nums[5] = gpio_num_t(26);
-        parlio_config.data_gpio_nums[6] = gpio_num_t(24);
-        parlio_config.data_gpio_nums[7] = gpio_num_t(33);
-        parlio_config.output_clk_freq_hz = 800000*8;
-        parlio_config.trans_queue_depth = 256*3;
-        parlio_config.max_transfer_size = 256*3; // 256 pixels * 3 channels (RGB)
-        // parlio_config.sample_edge = parlio_sample_edge_t(1); // PARLIO_SAMPLE_EDGE_POS
-        parlio_config.bit_pack_order = parlio_bit_pack_order_t(0);
-        ESP_ERROR_CHECK(parlio_new_tx_unit(&parlio_config, &parlio_tx_unit));
-        ESP_ERROR_CHECK(parlio_tx_unit_enable(parlio_tx_unit));
-        parlio_setup_done = true;
-      }
-      
       /*
       WLED rendering Art-Net data considers itself to be 1 hardware output with many universes - but
       many Art-Net controllers like the H807SA can be manually set to "X universes per output" or in 
@@ -1053,10 +997,6 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
             return 1; // borked
           }
           hardware_output_universe++;
-          // if (parlio_setup_done) {
-          //   ESP_ERROR_CHECK(parlio_tx_unit_transmit(parlio_tx_unit, packet_buffer+18, packetSize, &transmit_config)); // send the packet to the parallel output unit
-          //   ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
-          // }
         }
       }
 
