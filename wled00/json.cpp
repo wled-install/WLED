@@ -724,6 +724,7 @@ void serializeState(JsonObject root, bool forPreset, bool includeBri, bool segme
       case ERR_FS_PLOAD:  USER_PRINTLN(warnPrefix + F("Tried loading a preset that does not exist.")); break;
       case ERR_FS_IRLOAD: USER_PRINTLN(warnPrefix + F("Tried loading an IR JSON cmd, but \"ir.json\" file does not exist.")); break;
       case ERR_FS_RMLOAD: USER_PRINTLN(warnPrefix + F("Tried loading a remote JSON cmd, but \"remote.json\" file does not exist.")); break;
+      case ERR_SYS_REBOOT: USER_PRINTLN(errPrefix + F("Reboot after error?")); break;
       case ERR_FS_GENERAL: USER_PRINTLN(errPrefix + F("general unspecified filesystem error.")); break;
       default: USER_PRINT(errPrefix + F("error code = ")); USER_PRINTLN(errorFlag); break;
     }
