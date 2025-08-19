@@ -699,6 +699,7 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x0C, 0b00100000); // SYSTEM power up things
       _es8311I2cWrite(0x10, 0b00010011); // SYSTEM internal things
       _es8311I2cWrite(0x11, 0b01111100); // *** SYSTEM undocumented bits, seems to be important
+      _es8311I2cWrite(0x00, 0b11000000); // *** RESET (again - seems important?)
       _es8311I2cWrite(0x01, 0b00111010); // *** CLOCK MANAGER
       _es8311I2cWrite(0x14, 0b00010000); // *** SYSTEM PGA gain
       _es8311I2cWrite(0x0A, 0b00001000); // *** SDP OUT = I2S 32-bit
@@ -711,6 +712,7 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x18, 0b11001000); // ADC ALC enabled and AutoMute enabled
       _es8311I2cWrite(0x19, 0b11110000); // ADC ALC max (-6dB) and min (-30dB)
       _es8311I2cWrite(0x00, 0b10000000); // *** RESET (This is very required! Thanks to ESPHome for the hint!)
+      delay(100);
     }
 
   public:
