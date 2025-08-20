@@ -474,7 +474,7 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
   }
   _UDPchannels = _rgbw ? 4 : 3;
   #ifdef ESP32
-  _data = (byte*) heap_caps_calloc_prefer((bc.count * _UDPchannels)+15, sizeof(byte), 3, MALLOC_CAP_DEFAULT, MALLOC_CAP_SPIRAM);
+  _data = (byte*) heap_caps_calloc_prefer((bc.count * _UDPchannels)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT, MALLOC_CAP_DMA|MALLOC_CAP_32BIT, MALLOC_CAP_INTERNAL);
   #else
   _data = (byte*) calloc((bc.count * _UDPchannels)+15, sizeof(byte));
   #endif
