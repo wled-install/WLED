@@ -682,7 +682,8 @@ class ES8311Source : public I2SSource {
       // If making changes, make sure to completely power off the board - sometimes settings are kept until the board is powered off!
       //
       _es8311I2cBegin(); 
-      _es8311I2cWrite(0x00, 0b00011111); // RESET, default value
+      _es8311I2cWrite(0x00, 0b00011111); // RESET, default value was 0b00011111 new from ESPHome example
+      _es8311I2cWrite(0x00, 0b00000000); // RESET, added this from ESPHome example
       _es8311I2cWrite(0x45, 0b00000000); // GP, default value
       _es8311I2cWrite(0x01, 0b00111010); // CLOCK MANAGER (MCLK enable?)
 
@@ -698,6 +699,7 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x0B, 0b00000000); // SYSTEM at default
       _es8311I2cWrite(0x0C, 0b00100000); // SYSTEM power up things
       _es8311I2cWrite(0x10, 0b00010011); // SYSTEM internal things
+      _es8311I2cWrite(0x0D, 0b00000001); // ESPHome: Power up analog circuitry
       _es8311I2cWrite(0x11, 0b01111100); // *** SYSTEM undocumented bits, seems to be important
       _es8311I2cWrite(0x00, 0b11000000); // *** RESET (again - seems important?)
       _es8311I2cWrite(0x01, 0b00111010); // *** CLOCK MANAGER
@@ -712,7 +714,6 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x18, 0b11001000); // ADC ALC enabled and AutoMute enabled
       _es8311I2cWrite(0x19, 0b11110000); // ADC ALC max (-6dB) and min (-30dB)
       _es8311I2cWrite(0x00, 0b10000000); // *** RESET (This is very required! Thanks to ESPHome for the hint!)
-      delay(100);
     }
 
   public:
@@ -741,6 +742,8 @@ class ES8311Source : public I2SSource {
       }
 
       // First route mclk, then configure ADC over I2C, then configure I2S
+      _es8311InitAdc();
+      delay(100); // wait a bit after init
       _es8311InitAdc();
       I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
     }
