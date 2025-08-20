@@ -7851,51 +7851,98 @@ static const char _data_FX_MODE_FREQMAP[] PROGMEM = "Freqmap@Fade rate,Starting 
 ///////////////////////
 //   ** Freqmatrix   //
 ///////////////////////
-uint16_t mode_freqmatrix(void) {                // Freqmatrix. By Andreas Pleschung.
-  // No need to prevent from executing on single led strips, we simply change pixel 0 each time and avoid the shift
-  um_data_t *um_data = getAudioData();
-  float FFT_MajorPeak = *(float*)um_data->u_data[4];
-  float volumeSmth    = *(float*)um_data->u_data[0];
+// uint16_t mode_freqmatrix(void) {                // Freqmatrix. By Andreas Pleschung.
+//   // No need to prevent from executing on single led strips, we simply change pixel 0 each time and avoid the shift
+//   um_data_t *um_data = getAudioData();
+//   float FFT_MajorPeak = *(float*)um_data->u_data[4];
+//   float volumeSmth    = *(float*)um_data->u_data[0];
 
-  if (SEGENV.call == 0) {
-    SEGMENT.setUpLeds();
-    SEGMENT.fill(BLACK);
-  }
+//   if (SEGENV.call == 0) {
+//     SEGMENT.setUpLeds();
+//     SEGMENT.fill(BLACK);
+//   }
 
-  uint8_t secondHand = (SEGMENT.speed < 255) ? (micros()/(256-SEGMENT.speed)/500 % 16) : 0;
-  if((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {   // WLEDMM allow run run at full speed
-    SEGENV.aux0 = secondHand;
+//   uint8_t secondHand = (SEGMENT.speed < 255) ? (micros()/(256-SEGMENT.speed)/500 % 16) : 0;
+//   if((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {   // WLEDMM allow run run at full speed
+//     SEGENV.aux0 = secondHand;
 
-    // Pixel brightness (value) based on volume * sensitivity * intensity
-    uint_fast8_t sensitivity10 = map(SEGMENT.custom3, 0, 31, 10, 100); // reduced resolution slider // WLEDMM sensitivity * 10, to avoid losing precision
-    int pixVal = volumeSmth * (float)SEGMENT.intensity * (float)sensitivity10 / 2560.0f; // WLEDMM 2560 due to sensitivity * 10
-    if (pixVal > 255) pixVal = 255;  // make a brightness from the last avg
+//     // Pixel brightness (value) based on volume * sensitivity * intensity
+//     uint_fast8_t sensitivity10 = map(SEGMENT.custom3, 0, 31, 10, 100); // reduced resolution slider // WLEDMM sensitivity * 10, to avoid losing precision
+//     int pixVal = volumeSmth * (float)SEGMENT.intensity * (float)sensitivity10 / 2560.0f; // WLEDMM 2560 due to sensitivity * 10
+//     if (pixVal > 255) pixVal = 255;  // make a brightness from the last avg
 
-    CRGB color = CRGB::Black;
+//     CRGB color = CRGB::Black;
 
-    if (FFT_MajorPeak > MAX_FREQUENCY) FFT_MajorPeak = 1;
-    // MajorPeak holds the freq. value which is most abundant in the last sample.
-    // With our sampling rate of 10240Hz we have a usable freq range from roughly 80Hz to 10240/2 Hz
-    // we will treat everything with less than 65Hz as 0
+//     if (FFT_MajorPeak > MAX_FREQUENCY) FFT_MajorPeak = 1;
+//     // MajorPeak holds the freq. value which is most abundant in the last sample.
+//     // With our sampling rate of 10240Hz we have a usable freq range from roughly 80Hz to 10240/2 Hz
+//     // we will treat everything with less than 65Hz as 0
 
-    if ((FFT_MajorPeak > 80.0f) && (volumeSmth > 0.25f)) { // WLEDMM
-      // Pixel color (hue) based on major frequency
-      int upperLimit = 80 + 42 * SEGMENT.custom2;
-      int lowerLimit = 80 + 3 * SEGMENT.custom1;
-      //uint8_t i =  lowerLimit!=upperLimit ? map(FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : FFT_MajorPeak;  // (original formula) may under/overflow - so we enforce uint8_t
-      int freqMapped =  lowerLimit!=upperLimit ? mapf(FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : FFT_MajorPeak;  // WLEDMM preserve overflows
-      uint8_t i = abs(freqMapped) & 0xFF;  // WLEDMM we embrace overflow ;-) by "modulo 256"
+//     if ((FFT_MajorPeak > 80.0f) && (volumeSmth > 0.25f)) { // WLEDMM
+//       // Pixel color (hue) based on major frequency
+//       int upperLimit = 80 + 42 * SEGMENT.custom2;
+//       int lowerLimit = 80 + 3 * SEGMENT.custom1;
+//       //uint8_t i =  lowerLimit!=upperLimit ? map(FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : FFT_MajorPeak;  // (original formula) may under/overflow - so we enforce uint8_t
+//       int freqMapped =  lowerLimit!=upperLimit ? mapf(FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : FFT_MajorPeak;  // WLEDMM preserve overflows
+//       uint8_t i = abs(freqMapped) & 0xFF;  // WLEDMM we embrace overflow ;-) by "modulo 256"
 
-      color = CHSV(i, 240, (uint8_t)pixVal); // implicit conversion to RGB supplied by FastLED
-    }
+//       color = CHSV(i, 240, (uint8_t)pixVal); // implicit conversion to RGB supplied by FastLED
+//     }
 
-    // shift the pixels one pixel up
-    // if SEGLEN equals 1 this loop won't execute
-    for (uint32_t i = SEGLEN - 1; i > 0; i--) SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i-1)); //move to the left
-    SEGMENT.setPixelColor((uint32_t)0, color);
-  }
+//     // shift the pixels one pixel up
+//     // if SEGLEN equals 1 this loop won't execute
+//     for (uint32_t i = SEGLEN - 1; i > 0; i--) SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i-1)); //move to the left
+//     SEGMENT.setPixelColor((uint32_t)0, color);
+//   }
 
-  return FRAMETIME;
+//   return FRAMETIME;
+// } // mode_freqmatrix()
+
+uint16_t mode_freqmatrix(void) {
+	// Freqmatrix. By Andreas Pleschung.
+	um_data_t *um_data = getAudioData();
+	float FFT_MajorPeak = *(float*)um_data->u_data[4];
+	float volumeSmth    = *(float*)um_data->u_data[0];
+
+	if (SEGENV.call == 0) {
+		SEGMENT.setUpLeds();
+		SEGMENT.fill(BLACK);
+	}
+
+	uint8_t secondHand = (SEGMENT.speed < 255) ? (micros() / (256 - SEGMENT.speed) / 500 % 16) : 0;
+	if ((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {
+		SEGENV.aux0 = secondHand;
+
+		// This version replaces the division instruction with a faster multiply-and-shift.
+		uint_fast8_t sensitivity10 = map(SEGMENT.custom3, 0, 31, 10, 100);
+		uint32_t volInt = (uint32_t)(volumeSmth * 256.0f);
+		uint32_t intermediateVal = volInt * SEGMENT.intensity * sensitivity10;
+		uint32_t pixVal = (intermediateVal * 26) >> 16;
+
+		if (pixVal > 255) pixVal = 255; // Clamp the final result
+
+		CRGB color = CRGB::Black;
+
+		if ((FFT_MajorPeak > 80.0f) && (volumeSmth > 0.25f)) {
+			int upperLimit = 80 + 42 * SEGMENT.custom2;
+			int lowerLimit = 80 + 3 * SEGMENT.custom1;
+			int freqRange = upperLimit - lowerLimit;
+			int freqMapped = FFT_MajorPeak; // Default value
+
+			if (freqRange != 0) {
+				freqMapped = (int)((FFT_MajorPeak - lowerLimit) * 255.0f / freqRange);
+			}
+
+			uint8_t i = abs(freqMapped) & 0xFF; // "modulo 256"
+			color = CHSV(i, 240, (uint8_t)pixVal);
+		}
+
+		for (uint32_t i = SEGLEN - 1; i > 0; i--) {
+			SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i - 1));
+		}
+		SEGMENT.setPixelColor((uint32_t)0, color);
+	}
+	return FRAMETIME;
 } // mode_freqmatrix()
 static const char _data_FX_MODE_FREQMATRIX[] PROGMEM = "Freqmatrix@Speed,Sound effect,Low bin,High bin,Sensitivity;;;01f;c1=18,c2=48,c3=6,m12=3,si=0"; // Corner, Beatsin; notes range C3 to C7
 
