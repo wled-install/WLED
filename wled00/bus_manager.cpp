@@ -474,7 +474,7 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
   }
   _UDPchannels = _rgbw ? 4 : 3;
   #ifdef ESP32
-  _data = (byte*) heap_caps_calloc_prefer((bc.count * _UDPchannels)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT, MALLOC_CAP_DMA|MALLOC_CAP_32BIT, MALLOC_CAP_INTERNAL);
+  _data = (byte*) heap_caps_calloc_prefer((bc.count * _UDPchannels)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   #else
   _data = (byte*) calloc((bc.count * _UDPchannels)+15, sizeof(byte));
   #endif
@@ -547,7 +547,7 @@ uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint32_t pix) const {
     }
 }
 
-void BusNetwork::show() {
+void IRAM_ATTR BusNetwork::show() {
   if (!_valid || !canShow()) return;
   _broadcastLock = true;
   realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _artnet_outputs, _artnet_leds_per_output, _artnet_fps_limit);
