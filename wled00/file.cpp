@@ -364,7 +364,21 @@ bool readObjectFromFile(const char* file, const char* key, JsonDocument* dest)
     return false;
   }
 
-  deserializeJson(*dest, f);
+  DeserializationError err = deserializeJson(*dest, f);
+  switch (err.code()) {
+    case DeserializationError::Ok:
+      DEBUGFS_PRINTLN(F("Deserialization succeeded"));
+      break;
+    case DeserializationError::InvalidInput:
+      DEBUGFS_PRINTLN(F("Invalid input!"));
+      break;
+    case DeserializationError::NoMemory:
+      DEBUGFS_PRINTLN(F("Not enough memory"));
+      break;
+    default:
+      DEBUGFS_PRINTLN(F("Deserialization failed"));
+      break;
+  }
 
   f.close();
   DEBUGFS_PRINTF("Read, took %d ms\n", millis() - s);
