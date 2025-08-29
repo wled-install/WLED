@@ -1041,7 +1041,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     }
     parlio_config.valid_start_delay = 0; // 16-bit max any number >0 seems to fail. 
     parlio_config.valid_stop_delay = 0; // 16-bit max but any number >0 seems to fail.
-    parlio_config.trans_queue_depth = 16;
+    parlio_config.trans_queue_depth = 4;
     parlio_config.max_transfer_size = 65535;
     parlio_config.flags.clk_gate_en = 0;
     parlio_config.flags.io_loop_back = 0;
@@ -1108,10 +1108,10 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   chunk_ptrs[3] = chunk_ptrs[2] + chunk_stride_bytes;
 
   static unsigned long last_frame_end_time = 0;
-  // ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
+  ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
 
-  if (micros() - last_frame_end_time < 60) { // skip this if we don't need it.
-      delayMicroseconds(60 - micros() - last_frame_end_time); 
+  if (micros() - last_frame_end_time < 50) { // skip this if we don't need it.
+      delayMicroseconds(50 - micros() - last_frame_end_time); 
   }
   last_frame_end_time = micros();
 
