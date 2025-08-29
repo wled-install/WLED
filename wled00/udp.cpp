@@ -1003,7 +1003,7 @@ parlio_tx_unit_config_t parlio_config = parlio_tx_unit_config_t();
 parlio_transmit_config_t transmit_config = {
     .idle_value = 0x00, // the idle value will force the OE line to low, thus enable the output
     .flags = {
-        .queue_nonblocking = 0,
+        .queue_nonblocking = 1,
         .loop_transmission = 0,
     }
 };
