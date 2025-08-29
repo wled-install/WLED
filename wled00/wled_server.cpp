@@ -575,7 +575,7 @@ String dmxProcessor(const String& var)
 
 void serveSettingsJS(AsyncWebServerRequest* request)
 {
-  static char *buf = (char *) heap_caps_calloc_prefer(SETTINGS_STACK_BUF_SIZE, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
+  static char *buf = (char *) heap_caps_calloc_prefer(SETTINGS_STACK_BUF_SIZE, 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   buf[0] = 0;
   byte subPage = request->arg(F("p")).toInt();
   if (subPage > 10) {
