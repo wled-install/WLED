@@ -432,7 +432,9 @@
 
 // string temp buffer (now stored in stack locally) // WLEDMM ...which is actually not the greatest design choice on ESP32
 #ifdef ESP8266
-#define SETTINGS_STACK_BUF_SIZE 2048
+  #define SETTINGS_STACK_BUF_SIZE 2048
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+  #define SETTINGS_STACK_BUF_SIZE 1024000
 #else
   #if !defined(USERMOD_AUDIOREACTIVE)
     #define SETTINGS_STACK_BUF_SIZE 3834   // WLEDMM added 696+32 bytes of margin (was 3096)
