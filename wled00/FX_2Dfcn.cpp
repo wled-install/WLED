@@ -89,8 +89,6 @@ void WS2812FX::setUpMatrix() {
         if (customMappingTable == nullptr) { 
           USER_PRINTLN("setUpMatrix: alloc failed");
           errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
-        } else {
-          USER_PRINTLN("setUpMatrix: alloc failed");
         }
       }
       if (customMappingTable != nullptr) customMappingTableSize = size;
