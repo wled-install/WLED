@@ -458,14 +458,16 @@ DEBUG_PRINTLN(F("Watchdog: disabled"));
 int retry_num=0;
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data){
   if(event_id == WIFI_EVENT_STA_START) {
-    USER_PRINTLN("WIFI CONNECTING....\n");
+    USER_PRINTLN("WIFI STARTED");
   } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
-    USER_PRINTLN("WiFi CONNECTED\n");
+    USER_PRINTLN("WiFi CONNECTED");
   } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    USER_PRINTLN("WiFi lost connection\n");
+    USER_PRINTLN("WiFi LOST CONNECTION");
     if(retry_num<5){esp_wifi_connect();retry_num++;USER_PRINTLN("Retrying to Connect...\n");}
   } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE){
-    USER_PRINTLN("WiFi home channel change，doesn't occur when scanning\n");
+    USER_PRINTLN("WiFi HOME CHANNEL CHAANGED");
+  } else if (event_id == WIFI_EVENT_STA_STOP){
+    USER_PRINTLN("WiFi STOPPED");
   } else if (event_id == IP_EVENT_STA_GOT_IP){
     interfacesInited = false;
   } else {
@@ -549,12 +551,12 @@ void WLED::setup()
       ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
       ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
 
-      // Start Ethernet driver
-      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
-
       // Register event handler for Ethernet events
       ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
       ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+
+      // Start Ethernet driver
+      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
     #endif
   #endif
 
@@ -568,7 +570,7 @@ void WLED::setup()
   #ifdef WLED_BOOTUPDELAY
   delay(WLED_BOOTUPDELAY); // delay to let voltage stabilize, helps with boot issues on some setups
   #endif
-  Serial.begin(115200);
+  Serial.begin(115200, SERIAL_8N1, SOC_RX0, SOC_TX0, false, 20000UL, 120U);
 
 #if !defined(WLEDMM_NO_SERIAL_WAIT) || defined(WLED_DEBUG)
   if (!Serial) delay(1000); // WLEDMM make sure that Serial has initalized
