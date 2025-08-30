@@ -1010,14 +1010,17 @@ parlio_transmit_config_t transmit_config = {
 
 uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t *buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit) {
 
-  unsigned long timer = micros();
+  // unsigned long timer = micros();
 
   static bool parlio_setup_done = false;
   static int last_outputs = -1;
   static int last_leds_per_output = -1;
 
   if (!parlio_setup_done || outputs != last_outputs || leds_per_output != last_leds_per_output) {
-    
+
+    int parallelPins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
+    pinManager.getPinsByOwnerFixed(PinOwner::Parallel_IO, parallelPins, SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH, true);
+
     parlio_config.clk_src = PARLIO_CLK_SRC_DEFAULT;
     if (outputs <= 1)       parlio_config.data_width =  1;
     else if (outputs <= 2)  parlio_config.data_width =  2;
@@ -1027,11 +1030,10 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     parlio_config.clk_in_gpio_num = gpio_num_t(-1);
     parlio_config.valid_gpio_num = gpio_num_t(-1);
     parlio_config.clk_out_gpio_num = gpio_num_t(-1);
-    parlio_config.data_gpio_nums[0] = gpio_num_t(21); // set your pins as required. 0..15. You can define any or even none.
-    parlio_config.data_gpio_nums[1] = gpio_num_t(22);
-    parlio_config.data_gpio_nums[14] = gpio_num_t(25);
-    parlio_config.data_gpio_nums[15] = gpio_num_t(24);
-    parlio_config.dma_burst_size = 64; // may not exceed 64 on PSRAM and must be power of 2 (1,2,4,8,16,32,64)
+    for (int i = 0; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
+      parlio_config.data_gpio_nums[i] = gpio_num_t(parallelPins[i]);
+    }
+    parlio_config.dma_burst_size = 64; // may not exceed 64 on PSRAM and must be power of 2 (1,2,4,8,16,32,64) and <=4 fails.
     if (leds_per_output <= 256) {
         parlio_config.output_clk_freq_hz = 1200000 * 4;
     } else if (leds_per_output <= 512) {
@@ -1060,7 +1062,21 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     last_outputs = outputs;
     last_leds_per_output = leds_per_output;
     parlio_setup_done = true;
-    USER_PRINTF("Parallel IO configured for %u bit width and clock speed %u KHz.\n",parlio_config.data_width, parlio_config.output_clk_freq_hz/1000/4);
+    USER_PRINTF("Parallel IO configured for %u bit width and clock speed %u KHz and %u outputs.\n",parlio_config.data_width, parlio_config.output_clk_freq_hz/1000/4, outputs);
+    for (uint8_t i = 0; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; i++) {
+        const char* status = "";
+
+        if (i >= parlio_config.data_width || (i >= outputs && i < parlio_config.data_width)) {
+            status = "[ignored]";
+        } else if (i <= outputs) {
+            if (parlio_config.data_gpio_nums[i] == -1) status = "[missing]";
+        }
+
+        USER_PRINTF("Parallel IO Output %u = GPIO %d %s\n",
+                    (unsigned int)(i + 1),
+                    parlio_config.data_gpio_nums[i],
+                    status);
+    }
     return 0; // let's give it a frame to set up.
   }
 
@@ -1110,10 +1126,10 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   static unsigned long last_frame_end_time = 0;
   ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
 
-  if (micros() - last_frame_end_time < 50) { // skip this if we don't need it.
-      delayMicroseconds(50 - micros() - last_frame_end_time); 
-  }
-  last_frame_end_time = micros();
+  // if (micros() - last_frame_end_time < 50) { // skip this if we don't need it.
+  //     delayMicroseconds(50 - micros() - last_frame_end_time); 
+  // }
+  // last_frame_end_time = micros();
 
   #ifdef NDEBUG
   for (int i = 0; i < num_chunks && i < 4; ++i) {
@@ -1125,9 +1141,9 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   }
   #endif
 
-  if (micros() % 100 < 3) {
-    USER_PRINTF("Parallel IO for %u pixels took %lu micros at %u FPS.\n",length, micros()-timer, strip.getFps());
-  }
+  // if (micros() % 100 < 3) {
+  //   USER_PRINTF("Parallel IO for %u pixels took %lu micros at %u FPS.\n",length, micros()-timer, strip.getFps());
+  // }
 
   return 0;
 }

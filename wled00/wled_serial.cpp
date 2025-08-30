@@ -161,6 +161,8 @@ void handleSerial()
             delay(200);
           }
           Serial.println(" now!");
+          Serial.flush();
+          Serial.end();
           ESP.restart();  // WLEDMM - force reboot via Serial
         } else if (next == 0xB0) {updateBaudRate( 115200);
         } else if (next == 0xB1) {updateBaudRate( 230400);

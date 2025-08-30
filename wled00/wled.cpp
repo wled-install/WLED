@@ -3,6 +3,9 @@
 #include "wled_ethernet.h"
 #include <Arduino.h>
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
+esp_ldo_channel_handle_t ldo2 = NULL;
+esp_ldo_channel_handle_t ldo3 = NULL;
 esp_eth_handle_t eth_handle = NULL;
 #endif
 #ifdef ARDUINO_ARCH_ESP32
@@ -551,12 +554,12 @@ void WLED::setup()
       ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
       ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
 
+      // Start Ethernet driver
+      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+
       // Register event handler for Ethernet events
       ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
       ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-
-      // Start Ethernet driver
-      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
     #endif
   #endif
 
@@ -742,10 +745,73 @@ void WLED::setup()
   // C3: reserve GPIO 12-17 for PSRAM (may fail due to isPinOk() but that will also prevent other allocation)
   //managed_pin_type pins[] = { {12, true}, {13, true}, {14, true}, {15, true}, {16, true}, {17, true} };
   //pinManager.allocateMultiplePins(pins, sizeof(pins)/sizeof(managed_pin_type), PinOwner::SPI_RAM);
+  #elif defined(CONFIG_IDF_TARGET_ESP32P4)
+  // ESP32-P4 peripherals are hidden from GPIO map, including PSRAM - so we don't need to further hide them.
+
+  // GPIO > 36 are not powered/configured for Arduino-ESP32 by default.
+  // fix from https://esp32.com/viewtopic.php?t=45334
+
+  esp_ldo_channel_config_t config2 = {
+    .chan_id = 3,  // discovered by trial and error
+    .voltage_mv = 3300,
+    .flags = {
+      .adjustable = 1,
+      .owned_by_hw = 0,
+      .bypass = 0
+    }
+  };
+
+  // Create configuration for LDO index 3
+  esp_ldo_channel_config_t config3 = {
+    .chan_id = 4,  // discovered by trial and error
+    .voltage_mv = 3300,
+    .flags = {
+      .adjustable = 1,
+      .owned_by_hw = 0,
+      .bypass = 0
+    }
+  };
+
+  // Try to acquire both channels
+  if (esp_ldo_acquire_channel(&config2, &ldo2) == ESP_OK) {
+    USER_PRINTLN("LDO index 2 acquired");
+  } else {
+    USER_PRINTLN("Failed to acquire LDO index 2");
+  }
+
+  if (esp_ldo_acquire_channel(&config3, &ldo3) == ESP_OK) {
+    USER_PRINTLN("LDO index 3 acquired");
+  } else {
+    USER_PRINTLN("Failed to acquire LDO index 3");
+  }
   #else
   // GPIO16/GPIO17 reserved for SPI RAM
   managed_pin_type pins[] = { {16, true}, {17, true} };
   pinManager.allocateMultiplePins(pins, sizeof(pins)/sizeof(managed_pin_type), PinOwner::SPI_RAM);
+  #endif
+  #if defined(SOC_PARLIO_SUPPORTED) && defined(PARALLELTEST) 
+    #ifndef PARLIO_PINS
+      #define PARLIO_PINS -1
+    #endif
+    constexpr int8_t tempPins[] = { PARLIO_PINS };  // You can define more than 16 here
+    constexpr int totalDefined = sizeof(tempPins) / sizeof(tempPins[0]);
+
+    managed_pin_type parlio_pins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
+    int allocatedCount = 0;
+
+    for (int i = 0; i < totalDefined && allocatedCount < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
+        byte gpio = tempPins[i];
+
+        // Try to allocate the pin
+        if (pinManager.allocatePin(gpio, true /* isOutput */, PinOwner::Parallel_IO)) {
+            parlio_pins[allocatedCount++] = { static_cast<int8_t>(gpio), true };
+        }
+    }
+
+    // Fill remaining slots with -1 to mark unused
+    for (int i = allocatedCount; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
+        parlio_pins[i] = { -1, false };
+    }
   #endif
   #if defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON))       // WLEDMM
   if (psramFound()) {
@@ -871,7 +937,7 @@ void WLED::setup()
     pinMode(STATUSLED, OUTPUT);
   }
 #endif
-
+  esp_ldo_dump(stdout);
   DEBUG_PRINTLN(F("Initializing strip"));
   beginStrip();
   DEBUG_PRINT(F("heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
