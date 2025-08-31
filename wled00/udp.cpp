@@ -1018,6 +1018,8 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   static int last_outputs = -1;
   static int last_leds_per_output = -1;
 
+  if (outputs > SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH) outputs = SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH;
+
   if (!parlio_setup_done || outputs != last_outputs || leds_per_output != last_leds_per_output) {
 
     int parallelPins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
