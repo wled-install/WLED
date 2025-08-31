@@ -1127,13 +1127,11 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   chunk_bits[3] = leds_remaining * bits_per_pixel;
   chunk_ptrs[3] = chunk_ptrs[2] + chunk_stride_bytes;
 
-  static unsigned long last_frame_end_time = 0;
+  unsigned long before = micros();
   ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
+  unsigned long after = micros();
 
-  if (micros() - last_frame_end_time < 50) { // skip this if we don't need it.
-      delayMicroseconds(50 - micros() - last_frame_end_time); 
-  }
-  last_frame_end_time = micros();
+  if (after-before > 50) delayMicroseconds(20);
 
   for (int i = 0; i < num_chunks && i < 4; ++i) {
     ESP_ERROR_CHECK(parlio_tx_unit_transmit(parlio_tx_unit, chunk_ptrs[i], chunk_bits[i], &transmit_config));
