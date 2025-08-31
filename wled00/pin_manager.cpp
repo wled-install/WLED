@@ -459,7 +459,7 @@ bool PinManagerClass::allocateMultiplePins(const managed_pin_type * mptArray, by
 }
 
 bool PinManagerClass::isHWPin(byte gpio) {
-  #ifdef I2S_SDPIN SOC_I2S
+  #ifdef I2S_SDPIN
     if (gpio == I2S_SDPIN) return true;
   #endif
   #ifdef I2S_WSPIN
