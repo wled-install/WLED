@@ -8463,58 +8463,83 @@ uint16_t mode_2DAkemi(void) {
   const uint16_t cols = SEGMENT.virtualWidth();
   const uint16_t rows = SEGMENT.virtualHeight();
 
-  if (SEGENV.call == 0) {SEGMENT.fill(BLACK);}
+  if (SEGENV.call == 0) { SEGMENT.fill(BLACK); }
 
-  uint16_t counter = (strip.now * ((SEGMENT.speed >> 2) +2)) & 0xFFFF;
-  counter = counter >> 8;
+  // --- Pre-calculate values before the loops ---
+  uint16_t counter = (strip.now * ((SEGMENT.speed >> 2) + 2)) >> 8;
 
-  const float lightFactor  = 0.15f;
-  const float normalFactor = 0.4f;
+  // Pre-calculate all color variations ONCE
+  const CRGB baseFaceColor = SEGMENT.color_wheel(counter);
+  const CRGB baseArmsColor = SEGCOLOR(1) > 0 ? SEGCOLOR(1) : 0xFFE0A0;
+  const CRGB eyesMouthColor = SEGCOLOR(2) > 0 ? SEGCOLOR(2) : 0xFFFFFF;
 
+  // Use faster integer scaling instead of floats
+  const uint8_t lightFactorInt = 40;  // 0.15 * 255
+  const uint8_t normalFactorInt = 102; // 0.4 * 255
+
+  CRGB lightFaceColor = baseFaceColor; lightFaceColor.nscale8_video(lightFactorInt);
+  CRGB normalFaceColor = baseFaceColor; normalFaceColor.nscale8_video(normalFactorInt);
+
+  CRGB lightArmsColor = baseArmsColor; lightArmsColor.nscale8_video(lightFactorInt);
+  CRGB normalArmsColor = baseArmsColor; normalArmsColor.nscale8_video(normalFactorInt);
+
+  // Cache audio data
   um_data_t *um_data = getAudioData();
   uint8_t fftResult[NUM_GEQ_CHANNELS] = {0};
-  if (um_data->u_data != nullptr) memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));  // WLEDMM buffer curent values
-  float base = fftResult[0]/255.0f;
+  if (um_data && um_data->u_data) {
+    memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));
+  }
+  const uint8_t fftBase = fftResult[0];
+  const bool isDancing = (SEGMENT.intensity > 128 && fftBase > 128);
 
-  //draw and color Akemi
-  for (int y=0; y < rows; y++) for (int x=0; x < cols; x++) {
-    CRGB color;
-    CRGB soundColor = ORANGE;
-    CRGB faceColor  = SEGMENT.color_wheel(counter);
-    CRGB armsAndLegsColor = SEGCOLOR(1) > 0 ? SEGCOLOR(1) : 0xFFE0A0; //default warmish white 0xABA8FF; //0xFF52e5;//
-    uint8_t ak = pgm_read_byte_near(akemi + ((y * 32)/rows) * 32 + (x * 32)/cols); // akemi[(y * 32)/rows][(x * 32)/cols]
-    switch (ak) {
-      case 3: armsAndLegsColor.r *= lightFactor;  armsAndLegsColor.g *= lightFactor;  armsAndLegsColor.b *= lightFactor;  color = armsAndLegsColor; break; //light arms and legs 0x9B9B9B
-      case 2: armsAndLegsColor.r *= normalFactor; armsAndLegsColor.g *= normalFactor; armsAndLegsColor.b *= normalFactor; color = armsAndLegsColor; break; //normal arms and legs 0x888888
-      case 1: color = armsAndLegsColor; break; //dark arms and legs 0x686868
-      case 6: faceColor.r *= lightFactor;  faceColor.g *= lightFactor;  faceColor.b *= lightFactor;  color=faceColor; break; //light face 0x31AAFF
-      case 5: faceColor.r *= normalFactor; faceColor.g *= normalFactor; faceColor.b *= normalFactor; color=faceColor; break; //normal face 0x0094FF
-      case 4: color = faceColor; break; //dark face 0x007DC6
-      case 7: color = SEGCOLOR(2) > 0 ? SEGCOLOR(2) : 0xFFFFFF; break; //eyes and mouth default white
-      case 8: if (base > 0.4) {soundColor.r *= base; soundColor.g *= base; soundColor.b *= base; color=soundColor;} else color = armsAndLegsColor; break;
-      default: color = BLACK; break;
+  // --- Main drawing loop ---
+  for (int y = 0; y < rows; y++) {
+    // Pre-calculate the row offset for the akemi bitmap to avoid division in the x-loop
+    uint16_t y_offset = ((y * 32) / rows) * 32;
+
+    for (int x = 0; x < cols; x++) {
+      CRGB color = BLACK; // Default to BLACK
+      uint8_t ak = pgm_read_byte_near(akemi + y_offset + (x * 32) / cols);
+
+      switch (ak) {
+        case 1: color = baseArmsColor; break;
+        case 2: color = normalArmsColor; break;
+        case 3: color = lightArmsColor; break;
+        case 4: color = baseFaceColor; break;
+        case 5: color = normalFaceColor; break;
+        case 6: color = lightFaceColor; break;
+        case 7: color = eyesMouthColor; break;
+        case 8:
+          if (fftBase > 102) { // 0.4 * 255
+            color = CRGB(ORANGE).nscale8_video(fftBase);
+          } else {
+            color = baseArmsColor;
+          }
+          break;
+      }
+
+      if (isDancing) {
+        SEGMENT.setPixelColorXY(x, y + 1, color);
+        if (y==0) SEGMENT.setPixelColorXY(x, 0, BLACK); // Clear top row only once
+      } else {
+        SEGMENT.setPixelColorXY(x, y, color);
+      }
     }
-
-    if (SEGMENT.intensity > 128 && um_data && fftResult[0] > 128) { //dance if base is high
-      SEGMENT.setPixelColorXY(x, 0, BLACK);
-      SEGMENT.setPixelColorXY(x, y+1, color);
-    } else
-      SEGMENT.setPixelColorXY(x, y, color);
   }
 
-  //add geq left and right
+  // --- GEQ drawing loop (largely unchanged, but with cached um_data) ---
   if (um_data) {
-    int xMax = cols/8;
-    for (int x=0; x < xMax; x++) {
-      size_t band = map2(x, 0, max(xMax,4), 0, 15);  // map 0..cols/8 to 16 GEQ bands
+    int xMax = cols / 8;
+    for (int x = 0; x < xMax; x++) {
+      size_t band = map2(x, 0, max(xMax, 4), 0, 15);
       uint32_t color = SEGMENT.color_from_palette((band * 35), false, PALETTE_SOLID_WRAP, 0);
       band = constrain(band, 0, 15);
-      uint16_t barHeight = map(fftResult[band], 0, 255, 0, 17*rows/32);
+      uint16_t barHeight = map(fftResult[band], 0, 255, 0, 17 * rows / 32);
+      barHeight = constrain(barHeight, 0, (rows / 2) + 1);
 
-      barHeight = constrain(barHeight, 0, (rows/2)+1); // map() may overshoot
-      for (int y=0; y < barHeight; y++) {
-        SEGMENT.setPixelColorXY(x, rows/2-y, color);
-        SEGMENT.setPixelColorXY(cols-1-x, rows/2-y, color);
+      for (int y = 0; y < barHeight; y++) {
+        SEGMENT.setPixelColorXY(x, rows / 2 - y, color);
+        SEGMENT.setPixelColorXY(cols - 1 - x, rows / 2 - y, color);
       }
     }
   }
