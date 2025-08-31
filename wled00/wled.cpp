@@ -789,7 +789,7 @@ void WLED::setup()
   managed_pin_type pins[] = { {16, true}, {17, true} };
   pinManager.allocateMultiplePins(pins, sizeof(pins)/sizeof(managed_pin_type), PinOwner::SPI_RAM);
   #endif
-  #if defined(SOC_PARLIO_SUPPORTED) && defined(PARALLELTEST) 
+  #if defined(SOC_PARLIO_SUPPORTED) && defined(PARLIO) 
     #ifndef PARLIO_PINS
       #define PARLIO_PINS -1
     #endif
