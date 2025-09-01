@@ -1089,7 +1089,7 @@ void serializeInfo(JsonObject root)
     root[F("minfreeheap")] = ESP.getMinFreeHeap();
   #endif
   #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM)
-  if (psramFound()) {
+  if (psramFound()) {  // OK use
     root[F("tpram")] = ESP.getPsramSize(); //WLEDMM
     root[F("psram")] = ESP.getFreePsram();
     root[F("psusedram")] = ESP.getMinFreePsram();

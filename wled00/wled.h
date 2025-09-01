@@ -211,7 +211,7 @@
 // The following is a construct to enable code to compile without it.
 // There is a code that will still not use PSRAM though:
 //    AsyncJsonResponse is a derived class that implements DynamicJsonDocument (AsyncJson-v6.h)
-#if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON)) && 0 // TroyHacks: P4 FIXME: JSON in PSRAM is borked for some reason.
+#if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON)) && 0 // TroyHacks: P4 FIXME: JSON in PSRAM is borked for some reason on v5.5
 // WLEDMM the JSON_TO_PSRAM feature works, so use it by default
 #undef  WLED_USE_PSRAM_JSON
 #define WLED_USE_PSRAM_JSON

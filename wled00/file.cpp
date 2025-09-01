@@ -431,7 +431,7 @@ static const uint8_t *getPresetCache(size_t &size) {
   static size_t presetsCachedSize = 0;
   static byte presetsCachedValidate = 0;
 
-  if (!psramFound()) {
+  if (!psramFound()) { // OK use
     size = 0;
     return nullptr;
   }

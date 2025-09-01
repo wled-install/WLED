@@ -356,7 +356,7 @@ void WLED::loop()
     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
 	#endif
     #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM)
-    if (psramFound()) {
+    if (psramFound()) {  // OK use
       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram()/1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Avail PSRAM: "));     DEBUG_PRINT(ESP.getMaxAllocPsram()/1024); DEBUG_PRINTLN("kB");
@@ -814,7 +814,7 @@ void WLED::setup()
     }
   #endif
   #if defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON))       // WLEDMM
-  if (psramFound()) {
+  if (psramFound()) {  // OK use
     DEBUG_PRINT(F("Total PSRAM: ")); DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
     DEBUG_PRINT(F("Free PSRAM : ")); DEBUG_PRINT(ESP.getFreePsram()/1024); DEBUG_PRINTLN("kB");
   }
@@ -841,11 +841,11 @@ void WLED::setup()
   pinManager.allocatePin(2, true, PinOwner::DMX);
 #endif
 
-#if defined(ALL_JSON_TO_PSRAM) && defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM_JSON) || defined(WLED_USE_PSRAM))
-  if (psramFound()) {
+#if defined(BOARD_HAS_PSRAM)
+  if (psramFound()) {  // OK use
     DEBUG_PRINT(F("\nfree heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
     USER_PRINTLN(F("JSON gabage collection (initial)."));
-    doc.garbageCollect();   // WLEDMM experimental - this seems to move the complete doc[] into PSRAM
+    // doc.garbageCollect();   // WLEDMM experimental - this seems to move the complete doc[] into PSRAM TroyHacks FIXME this is just to make IDF 5.5 work
 	  USER_PRINT(F("PSRAM in use:")); USER_PRINT(int(ESP.getPsramSize() - ESP.getFreePsram())); USER_PRINTLN(F(" Bytes."));
     DEBUG_PRINT(F("free heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
   }
