@@ -76,15 +76,6 @@ void WS2812FX::setUpMatrix() {
       }
       if ((size > 0) && (customMappingTable == nullptr)) { // second try
         DEBUG_PRINTLN("setUpMatrix: trying to get fresh memory block.");
-        // #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && defined(WLED_USE_PSRAM)
-        // if (psramFound()){
-        //   customMappingTable = (uint16_t*) ps_calloc(size, sizeof(uint16_t));
-        // } else {
-        //   customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
-        // }
-        // #else
-        // customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
-        // #endif
         customMappingTable = (uint32_t*) heap_caps_calloc_prefer(size, sizeof(uint32_t),2,MALLOC_CAP_SPIRAM,MALLOC_CAP_INTERNAL);
         if (customMappingTable == nullptr) { 
           USER_PRINTLN("setUpMatrix: alloc failed");
@@ -99,9 +90,10 @@ void WS2812FX::setUpMatrix() {
       if (!needLedMap) customMappingSize = 0;                                                        // softhack007
 
       // fill with empty in case we don't fill the entire matrix
-      for (uint32_t i = 0; i< customMappingTableSize; i++) { //WLEDMM use customMappingTableSize
-        customMappingTable[i] = (uint32_t)-1;
-      }
+      // for (uint32_t i = 0; i< customMappingTableSize; i++) { //WLEDMM use customMappingTableSize
+      //   customMappingTable[i] = (uint32_t)-1;
+      // }
+      memset(customMappingTable,(uint32_t)-1,customMappingTableSize); // WLED-MM optimization TroyHacks
 
       // we will try to load a "gap" array (a JSON file)
       // the array has to have the same amount of values as mapping array (or larger)
@@ -138,22 +130,22 @@ void WS2812FX::setUpMatrix() {
       }
 
       if (needLedMap && customMappingTable != nullptr) {  // softhack007
-      uint_fast16_t x, y, pix=0; //pixel
-      for (uint32_t pan = 0; pan < panel.size(); pan++) {
-        Panel &p = panel[pan];
-        uint_fast16_t h = p.vertical ? p.height : p.width;
-        uint_fast16_t v = p.vertical ? p.width  : p.height;
-        for (size_t j = 0; j < v; j++){
-          for(size_t i = 0; i < h; i++) {
-            y = (p.vertical?p.rightStart:p.bottomStart) ? v-j-1 : j;
-            x = (p.vertical?p.bottomStart:p.rightStart) ? h-i-1 : i;
-            x = p.serpentine && j%2 ? h-x-1 : x;
-            size_t index = (p.yOffset + (p.vertical?x:y)) * Segment::maxWidth + p.xOffset + (p.vertical?y:x);
-            if (!gapTable || (gapTable && gapTable[index] >  0)) customMappingTable[index] = pix; // a useful pixel (otherwise -1 is retained)
-            if (!gapTable || (gapTable && gapTable[index] >= 0)) pix++; // not a missing pixel
+        uint_fast16_t x, y, pix=0; //pixel
+        for (uint32_t pan = 0; pan < panel.size(); pan++) {
+          Panel &p = panel[pan];
+          uint_fast16_t h = p.vertical ? p.height : p.width;
+          uint_fast16_t v = p.vertical ? p.width  : p.height;
+          for (size_t j = 0; j < v; j++){
+            for(size_t i = 0; i < h; i++) {
+              y = (p.vertical?p.rightStart:p.bottomStart) ? v-j-1 : j;
+              x = (p.vertical?p.bottomStart:p.rightStart) ? h-i-1 : i;
+              x = p.serpentine && j%2 ? h-x-1 : x;
+              size_t index = (p.yOffset + (p.vertical?x:y)) * Segment::maxWidth + p.xOffset + (p.vertical?y:x);
+              if (!gapTable || (gapTable && gapTable[index] >  0)) customMappingTable[index] = pix; // a useful pixel (otherwise -1 is retained)
+              if (!gapTable || (gapTable && gapTable[index] >= 0)) pix++; // not a missing pixel
+            }
           }
         }
-      }
       }
 
       // delete gap array as we no longer need it
