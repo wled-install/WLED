@@ -1366,7 +1366,9 @@ void Segment::refreshLightCapabilities() {
     // we are withing 2D matrix (includes 1D segments)
     for (int y = startY; y < stopY; y++) for (int x = start; x < stop; x++) {
       uint16_t index = x + Segment::maxWidth * y;
+      #ifndef WLEDMM_REMAP_AT_OUTPUT
       if (index < strip.customMappingSize) index = strip.customMappingTable[index]; // convert logical address to physical
+      #endif
       if (index < 0xFFFFU) {
         if (segStartIdx > index) segStartIdx = index;
         if (segStopIdx  < index) segStopIdx  = index;
@@ -1973,21 +1975,27 @@ void WS2812FX::service() {
 
 void IRAM_ATTR WS2812FX::setPixelColor(int i, uint32_t col)
 {
+  #ifndef WLEDMM_REMAP_AT_OUTPUT
   if (i < customMappingSize) i = customMappingTable[i];
+  #endif
   if (i >= _length) return;
   busses.setPixelColor(i, col);
 }
 
 uint32_t WS2812FX::getPixelColor(uint_fast16_t i) const // WLEDMM fast int types
 {
+  #ifndef WLEDMM_REMAP_AT_OUTPUT
   if (i < customMappingSize) i = customMappingTable[i];
+  #endif
   if (i >= _length) return 0;
   return busses.getPixelColor(i);
 }
 
 uint32_t WS2812FX::getPixelColorRestored(uint_fast16_t i)  const  // WLEDMM gets the original color from the driver (without downscaling by _bri)
 {
+  #ifndef WLEDMM_REMAP_AT_OUTPUT
   if (i < customMappingSize) i = customMappingTable[i];
+  #endif
   if (i >= _length) return 0;
   return busses.getPixelColorRestored(i);
 }

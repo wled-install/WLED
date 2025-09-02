@@ -158,6 +158,7 @@ class Bus {
     inline  bool     isOffRefreshRequired() const { return _needsRefresh; }
     //inline  bool     containsPixel(uint32_t pix) const { return pix >= _start && pix < _start+_len; } // WLEDMM not used, plus wrong - it does not consider skipped pixels
     virtual uint32_t getMaxPixels() const { return MAX_LEDS_PER_BUS; }
+    virtual byte*    getPixelData() { return nullptr; } // TroyHacks
 
     virtual bool hasRGB() const {
       if ((_type >= TYPE_WS2812_1CH && _type <= TYPE_WS2812_WWA) || _type == TYPE_ANALOG_1CH || _type == TYPE_ANALOG_2CH || _type == TYPE_ONOFF) return false;
@@ -337,7 +338,7 @@ class BusNetwork : public Bus {
   public:
     BusNetwork(BusConfig &bc, const ColorOrderMap &com);
 
-    uint32_t getMaxPixels() const override { return 4096; };
+    uint32_t getMaxPixels() const override { return 65536; };
     bool hasRGB()  const { return true; }
     bool hasWhite()  const { return _rgbw; }
 
@@ -346,6 +347,8 @@ class BusNetwork : public Bus {
     uint32_t __attribute__((pure)) getPixelColor(uint32_t pix) const;  // WLEDMM attribute added
     uint32_t __attribute__((pure)) getPixelColorRestored(uint32_t pix) const override { return getPixelColor(pix);}  // WLEDMM BusNetwork ignores brightness
 
+    byte* getPixelData() override { return _data; }
+    
     void show();
 
     bool canShow() override {
@@ -467,7 +470,9 @@ class BusManager {
 
     void setStatusPixel(uint32_t c);
 
-    void setPixelColor(uint32_t pix, uint32_t c, int16_t cct=-1);
+    void        setPixelColor(uint32_t pix, uint32_t c, int16_t cct=-1);
+    inline void setPixelColor(uint32_t pix, CRGB c, int16_t cct=-1)         { setPixelColor(pix, RGBW32(c.r,c.g,c.b,0)); }
+    inline void setPixelColorXY(int x, int y, int cols, CRGB c)             { setPixelColor((x + y*cols), RGBW32(c.r,c.g,c.b,0)); } // TroyHacks we don't have a sense of a physical input having "dimensions" yet.
 
     void setBrightness(uint8_t b, bool immediate=false);          // immediate=true is for use in ABL, it applies brightness immediately (warning: inefficient)
 

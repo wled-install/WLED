@@ -1086,14 +1086,45 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     return 0; // let's give it a frame to set up.
   }
 
-  static uint16_t *parallel_buffer_repacked = NULL; 
+
+  static byte     *parallel_buffer_remapped  = NULL;
+  #ifdef WLEDMM_REMAP_AT_OUTPUT
+  static byte     *parallel_buffer_remapped1 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  static byte     *parallel_buffer_remapped2 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  #endif 
+  static uint16_t *parallel_buffer_repacked  = NULL; 
   static uint16_t *parallel_buffer_repacked1 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   static uint16_t *parallel_buffer_repacked2 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   
-  parallel_buffer_repacked = (parallel_buffer_repacked == parallel_buffer_repacked1) ? parallel_buffer_repacked2 : parallel_buffer_repacked1;
-  
-  create_transposed_led_output_optimized(buffer_in, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri);
-  
+  if (parallel_buffer_repacked == NULL) parallel_buffer_repacked = parallel_buffer_repacked1;
+  #ifdef WLEDMM_REMAP_AT_OUTPUT
+  if (parallel_buffer_remapped == NULL) parallel_buffer_remapped = parallel_buffer_remapped1;
+
+  uint32_t* mappingTable = strip.getCustomMappingTable();
+  uint32_t mappingTableSize = strip.getCustomMappingTableSize();
+  int my_bytes_per_pixel = isRGBW ? 4 : 3;
+
+  uint32_t buf_pos = 0;
+
+  for (uint32_t i = 0; i < length; i++) {
+    uint32_t dest_pixel_index = i;
+    if (mappingTable && i < mappingTableSize) {
+      dest_pixel_index = mappingTable[i];
+    }
+    uint32_t dest_byte_pos = dest_pixel_index * my_bytes_per_pixel;
+    parallel_buffer_remapped[dest_byte_pos + 0] = buffer_in[buf_pos++];
+    parallel_buffer_remapped[dest_byte_pos + 1] = buffer_in[buf_pos++];
+    parallel_buffer_remapped[dest_byte_pos + 2] = buffer_in[buf_pos++];
+    if (isRGBW) {
+      parallel_buffer_remapped[dest_byte_pos + 3] = buffer_in[buf_pos++];
+    }
+  }
+  #else
+  parallel_buffer_remapped = buffer_in;
+  #endif
+
+  create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri);
+
   // Calculate the exact size of ONE PIXEL's data in bits and bytes.
   const uint32_t symbols_per_pixel = isRGBW ? 128 : 96;
   const uint32_t bits_per_pixel = symbols_per_pixel * parlio_config.data_width;;
@@ -1132,6 +1163,11 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   unsigned long before = micros();
   ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
   unsigned long after = micros();
+
+  #ifdef WLEDMM_REMAP_AT_OUTPUT
+  parallel_buffer_remapped = (parallel_buffer_remapped == parallel_buffer_remapped1) ? parallel_buffer_remapped2 : parallel_buffer_remapped1;
+  #endif
+  parallel_buffer_repacked = (parallel_buffer_repacked == parallel_buffer_repacked1) ? parallel_buffer_repacked2 : parallel_buffer_repacked1;
 
   if (after-before > 50) delayMicroseconds(20);
 
