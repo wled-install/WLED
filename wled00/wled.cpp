@@ -355,7 +355,7 @@ void WLED::loop()
     DEBUG_PRINT(F("Avail heap: "));     DEBUG_PRINTLN(ESP.getMaxAllocHeap());
     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
 	#endif
-    #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM)
+    #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(ARDUINO_ARCH_ESP32P4)
     if (psramFound()) {  // OK use
       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram()/1024); DEBUG_PRINTLN("kB");
@@ -749,7 +749,7 @@ void WLED::setup()
   // ESP32-P4 peripherals are hidden from GPIO map, including PSRAM - so we don't need to further hide them.
 
   // GPIO > 36 are not powered/configured for Arduino-ESP32 by default.
-  // fix from https://esp32.com/viewtopic.php?t=45334
+  // fix from https://esp32.com/viewtopic.php?t=45334 thanks to microfoundry
 
   esp_ldo_channel_config_t config2 = {
     .chan_id = 3,  // discovered by trial and error
