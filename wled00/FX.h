@@ -338,7 +338,8 @@ bool strip_uses_global_leds(void) __attribute__((pure));  // WLEDMM implemented 
 #define FX_MODE_2DPAINTBRUSH           196 // WLED-MM Paintbrush
 #define FX_MODE_2DSNOWFALL             197 // WLED-MM Snowfall
 #define FX_MODE_GEQPPA                 198
-#define MODE_COUNT                     199
+#define FX_MODE_PPA_TESTBED            199
+#define MODE_COUNT                     200
 
 typedef enum mapping1D2D {
   M12_Pixels = 0,

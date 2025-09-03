@@ -9,7 +9,9 @@
 #include "wled.h"
 #include "FX.h"
 #include "fcn_declare.h"
-
+#ifdef CONFIG_SOC_PPA_SUPPORTED
+  #include "driver/ppa.h"
+#endif
 #ifdef WLEDMM_FASTPATH
 #undef SEGMENT
 #undef SEGENV
@@ -9009,12 +9011,8 @@ uint16_t mode_2DPaintbrush() {
 } // mode_2DPaintbrush()
 static const char _data_FX_MODE_2DPAINTBRUSH[] PROGMEM = "Paintbrush ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
-  /////////////////
- //   GEQ PPA   //
-/////////////////
-#include "driver/ppa.h"
 uint16_t IRAM_ATTR mode_GEQPPA() {
-
+  #ifdef SOC_PPA_SUPPORTED
   // Author: @TroyHacks
   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 
@@ -9027,15 +9025,22 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
 
+  byte* busPixelData = nullptr;
+  uint32_t busPixelSize = 0;
+  Bus* bus = busses.getBus(0);
+  if (bus) {
+    busPixelData = bus->getPixelData();
+    busPixelSize = SEGMENT.length() * 3;
+    if (busPixelData == NULL || busPixelSize == 0) return 1;
+  } else {
+    return 1;
+  }
+
   if (SEGENV.call == 0) {
     // SEGMENT.setUpLeds();
     // SEGMENT.fill(BLACK);
     SEGENV.aux0 = 0;
   }
-
-  size_t out_buf_size = SEGMENT.length() * 3;
-  // static uint8_t* out_buf = (uint8_t *) heap_caps_calloc(out_buf_size+15, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
-  // static uint8_t* out_buf_srm = (uint8_t *) heap_caps_calloc(out_buf_size+15, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
 
   ppa_client_handle_t ppa_fill_handle = NULL;
   ppa_client_config_t ppa_fill_config = {
@@ -9044,46 +9049,21 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   };
   ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
 
-  // ppa_client_handle_t ppa_srm_handle = NULL;
-  // ppa_client_config_t ppa_srm_config = {
-  //     .oper_type = PPA_OPERATION_SRM,
-  //     .max_pending_trans_num = 1,
-  // };
-  // ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
-
-  // ppa_client_handle_t ppa_blend_handle = NULL;
-  // ppa_client_config_t ppa_blend_config = {
-  //     .oper_type = PPA_OPERATION_BLEND,
-  //     .max_pending_trans_num = 1,
-  // };
-  // ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
-
-  byte* busPixelData = nullptr;
-  Bus* bus = busses.getBus(0);
-  if (bus) {
-    busPixelData = bus->getPixelData();
-  }
-
-  ppa_fill_oper_config_t fill_config;
+  ppa_fill_oper_config_t fill_config = {};
   fill_config.out.buffer = busPixelData;
-  fill_config.out.buffer_size = out_buf_size;
+  fill_config.out.buffer_size = busPixelSize;
   fill_config.out.pic_w = width;
   fill_config.out.pic_h = height;
   fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
   fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
+  fill_config.fill_block_w = width;
+  fill_config.fill_block_h = height;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
 
   um_data_t *um_data;
   usermods.getUMData(&um_data, USERMOD_ID_AUDIOREACTIVE);
   uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
-
-  fill_config.out.block_offset_x = 0;
-  fill_config.out.block_offset_y = 0;
-  fill_config.fill_block_w = width;
-  fill_config.fill_block_h = height;
-  fill_config.fill_argb_color.r = 0;
-  fill_config.fill_argb_color.g = 0;
-  fill_config.fill_argb_color.b = 0;
-  ESP_ERROR_CHECK(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
 
   for (int i = 0; i<16; i++) {
     fill_config.out.block_offset_x = i*(width/16);
@@ -9095,84 +9075,233 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
     fill_config.fill_argb_color.r = beatsin8(60,0,255,i*32,0); // B
     fill_config.fill_argb_color.g = beatsin8(60,0,255,i*32,85); // R
     fill_config.fill_argb_color.b = beatsin8(60,0,255,i*32,170); // G
-    // if (i == 12) fill_config.mode = PPA_TRANS_MODE_BLOCKING;
-    ESP_ERROR_CHECK(ppa_do_fill(ppa_fill_handle, &fill_config));  
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
   }
 
-  // ppa_blend_oper_config_t blend_config;
-  // blend_config.in_bg.buffer = moon_map;
-  // blend_config.in_bg.pic_w = 192;
-  // blend_config.in_bg.pic_h = 96;
-  // blend_config.in_bg.block_w = 192;
-  // blend_config.in_bg.block_h = 96;
+  ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
+  #endif
+  return FRAMETIME;
+} // mode_GEQPPA()
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
+
+uint16_t IRAM_ATTR mode_PPA_TESTBED() {
+  #ifdef SOC_PPA_SUPPORTED // always for PPA effects
+
+  // Author: @TroyHacks
+  // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+
+  // *** PLACEHOLDER FOR PPA TESTING ***
+
+  if (!strip.isMatrix) return mode_static(); // not a 2D set-up
+
+  uint16_t width = 16;
+  uint16_t height = 16;
+
+  const uint16_t out_width = SEGMENT.virtualWidth();
+  const uint16_t out_height = SEGMENT.virtualHeight();
+
+  if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
+
+  size_t out_buf_size = 16*16*4;
+  static uint8_t* out_buf = (uint8_t *) heap_caps_calloc(16*16*4, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+
+  if (SEGENV.call == 0) {
+    // SEGMENT.setUpLeds();
+    // SEGMENT.fill(BLACK);
+    SEGENV.aux0 = 0;
+    memset(out_buf, 0, out_buf_size);
+  }
+
+  byte* busPixelData = nullptr;
+  uint32_t busPixelSize = 0;
+  Bus* bus = busses.getBus(0);
+  if (bus) {
+    busPixelData = bus->getPixelData();
+    busPixelSize = SEGMENT.length() * 3;
+    if (busPixelData == NULL || busPixelSize == 0) return 1;
+  } else {
+    return 1;
+  }
+  
+  ppa_client_handle_t ppa_fill_handle = NULL;
+  ppa_client_config_t ppa_fill_config = {
+    .oper_type = PPA_OPERATION_FILL,
+    .max_pending_trans_num = 1,
+  };
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
+
+  ppa_client_handle_t ppa_srm_handle = NULL;
+  ppa_client_config_t ppa_srm_config = {
+      .oper_type = PPA_OPERATION_SRM,
+      .max_pending_trans_num = 1,
+  };
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
+
+  ppa_client_handle_t ppa_blend_handle = NULL;
+  ppa_client_config_t ppa_blend_config = {
+      .oper_type = PPA_OPERATION_BLEND,
+      .max_pending_trans_num = 1,
+  };
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
+
+  ppa_fill_oper_config_t fill_config = {};
+  fill_config.out.buffer = out_buf;
+  fill_config.out.buffer_size =  out_buf_size;
+  fill_config.out.block_offset_x = 0;
+  fill_config.out.block_offset_y = 0;
+  fill_config.out.pic_w = width;
+  fill_config.out.pic_h = height;
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888; // PPA_FILL_COLOR_MODE_ARGB8888;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
+
+  fill_config.fill_block_w = width;
+  fill_config.fill_block_h = height;
+  
+  // We could do this:
+  //
+  // memset(out_buf, 0, out_buf_size);
+
+  // We don't need to do this if we memset with all-zeros on PPA_FILL_COLOR_MODE_ARGB8888
+  // I don't know which one is faster yet - both are equivelent. PPA uses DMA tho.
+  //
+  fill_config.fill_argb_color.r = 0; // ..so this must be blue.
+  fill_config.fill_argb_color.g = 0; // red
+  fill_config.fill_argb_color.b = 0; // green
+  fill_config.fill_argb_color.a = 0; // Alpha ignored if in PPA_BLEND_COLOR_MODE_RGB888
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill background with transparent black
+
+  um_data_t *um_data;
+  usermods.getUMData(&um_data, USERMOD_ID_AUDIOREACTIVE);
+  uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
+
+  height = 8;
+  for (int i = 0; i<16; i++) {
+    fill_config.out.block_offset_x = i*(width/16);
+    int bar_height = map8(fftResult[i],0,height);
+    if (bar_height == 0) continue;
+    fill_config.out.block_offset_y = height-bar_height;
+    fill_config.fill_block_w =  width/16;
+    fill_config.fill_block_h = bar_height;
+    fill_config.fill_argb_color.r = beatsin8(60,0,255,i*32,0); // B
+    fill_config.fill_argb_color.g = beatsin8(60,0,255,i*32,85); // R
+    fill_config.fill_argb_color.b = beatsin8(60,0,255,i*32,170); // G
+    fill_config.fill_argb_color.a = SEGMENT.speed; // 0 is completely transparent
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
+  }
+  height = 16;
+
+  // memset(busPixelData, 0, SEGMENT.length() * 3); // clear out the framebuffer
+  fill_config.out.buffer = busPixelData;
+  fill_config.out.buffer_size =  busPixelSize;
+  fill_config.out.block_offset_x = 0;
+  fill_config.out.block_offset_y = 0;
+  fill_config.out.pic_w = out_width;
+  fill_config.out.pic_h = out_height;
+  fill_config.fill_argb_color.r = 0; // ..so this must be blue.
+  fill_config.fill_argb_color.g = 0; // red
+  fill_config.fill_argb_color.b = 0; // green
+  fill_config.fill_argb_color.a = 255; // 255 = full blackAlpha ignored if in PPA_BLEND_COLOR_MODE_RGB888
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
+
+  // ppa_blend_oper_config_t blend_config = {};
+  // blend_config.in_bg.buffer = busPixelData;
+  // blend_config.in_bg.pic_w = out_width;
+  // blend_config.in_bg.pic_h = out_height;
+  // blend_config.in_bg.block_w = width;
+  // blend_config.in_bg.block_h = height;
   // blend_config.in_bg.block_offset_x = 0;
   // blend_config.in_bg.block_offset_y = 0;
   // blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-  // blend_config.in_fg.buffer = out_buf_srm;
-  // blend_config.in_fg.pic_w = 192;
-  // blend_config.in_fg.pic_h = 96;
-  // blend_config.in_fg.block_w = 192;
-  // blend_config.in_fg.block_h = 96;
+  // blend_config.in_fg.buffer = out_buf;
+  // blend_config.in_fg.pic_w = width;
+  // blend_config.in_fg.pic_h = height;
+  // blend_config.in_fg.block_w = width;
+  // blend_config.in_fg.block_h = height;
   // blend_config.in_fg.block_offset_x = 0;
   // blend_config.in_fg.block_offset_y = 0;
   // blend_config.bg_rgb_swap = 0;
   // blend_config.bg_byte_swap = 0;
   // blend_config.fg_rgb_swap = 0;
   // blend_config.fg_byte_swap = 0;
-  // blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-  // blend_config.out.buffer = out_buf;
-  // blend_config.out.buffer_size = out_buf_size;
-  // blend_config.out.pic_w = 192;
-  // blend_config.out.pic_h = 96;
+  // blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+  // blend_config.out.buffer = busPixelData;
+  // blend_config.out.buffer_size = out_width*out_height*3;
+  // blend_config.out.pic_w = out_width;
+  // blend_config.out.pic_h = out_height;
   // blend_config.out.block_offset_x = 0;
   // blend_config.out.block_offset_y = 0;
   // blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-  // blend_config.bg_alpha_update_mode = PPA_ALPHA_SCALE;
-  // blend_config.bg_alpha_scale_ratio = 0.99; // (float)beatsin8(15,1,99)/100; // 0.1;
-  // blend_config.fg_alpha_update_mode = PPA_ALPHA_SCALE;
-  // blend_config.fg_alpha_scale_ratio = 0.5; // (float)beatsin8(20,1,99)/100; // 0.1;
-  // blend_config.fg_fix_rgb_val.b = 0xd3;
-  // blend_config.fg_fix_rgb_val.g = 0x03;
-  // blend_config.fg_fix_rgb_val.r = 0xff;
+  // blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  // blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
   // blend_config.bg_ck_en = false;
   // blend_config.fg_ck_en = false;
   // blend_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-  // ESP_ERROR_CHECK(ppa_do_blend(ppa_blend_handle, &blend_config));
+  // for (int i = 0; i < width+1; i++) {
+  //   blend_config.out.block_offset_x = i;
+  //   blend_config.in_bg.block_offset_x = i;
+  //   ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
+  // }
 
-  // ppa_srm_oper_config_t srm_config;
-  // srm_config.in.buffer = out_buf;
-  // srm_config.in.pic_w = 192;
-  // srm_config.in.pic_h = 96;
-  // srm_config.in.block_w = 192;
-  // srm_config.in.block_h = 96;
-  // srm_config.in.block_offset_x = 0;
-  // srm_config.in.block_offset_y = 0;
-  // srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-  // srm_config.out.buffer = out_buf_srm;
-  // srm_config.out.buffer_size = out_buf_size;
-  // srm_config.out.pic_w = 192;
-  // srm_config.out.pic_h = 96;
-  // srm_config.out.block_offset_x = 0;
-  // srm_config.out.block_offset_y = 0;
-  // srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-  // srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-  // srm_config.scale_x = 0.1;
-  // srm_config.scale_y = 0.1;
-  // srm_config.rgb_swap = 0;
-  // srm_config.byte_swap = 0;
-  // srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+  ppa_srm_oper_config_t srm_config = {};
+  srm_config.in.buffer = out_buf;
+  srm_config.in.pic_w = 16;
+  srm_config.in.pic_h = 16;
+  srm_config.in.block_w = 16;
+  srm_config.in.block_h = 8;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.out.buffer = busPixelData;
+  srm_config.out.buffer_size = busPixelSize;
+  srm_config.out.pic_w = out_width;
+  srm_config.out.pic_h = out_height;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_ARGB8888;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  srm_config.scale_x = 1;
+  srm_config.scale_y = 1;
+  srm_config.mirror_x = false;
+  srm_config.mirror_y = false;
+  srm_config.rgb_swap = 0;
+  srm_config.byte_swap = 0;
+  srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-  // ESP_ERROR_CHECK(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));  
+  if (SEGMENT.intensity < 128) {
+    srm_config.out.block_offset_x = 0;
+    srm_config.mirror_x = true;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+    srm_config.mirror_x = false;
+    srm_config.out.block_offset_x = 16;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
+    srm_config.mirror_y = true;
+    srm_config.out.block_offset_y = 8;
+    
+    srm_config.out.block_offset_x = 0;
+    srm_config.mirror_x = true;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+    srm_config.mirror_x = false;
+    srm_config.out.block_offset_x = 16;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+  } else {
+    srm_config.scale_y = 2;
+    srm_config.scale_x = 2;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+  }
   
-  ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
-  // ESP_ERROR_CHECK(ppa_unregister_client(ppa_srm_handle));
-  // ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_fill_handle));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_srm_handle));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_blend_handle));
 
-  // memcpy(busPixelData, out_buf, out_buf_size);
+  #endif // PPA Required
   return FRAMETIME;
-} // mode_GEQPPA()
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
+
+} // mode_PPA_TESTBED)
+static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "PPA Tester ☾@???,???,,???,???,???,???;!,,Peaks;!;2f;sx=10,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
 #endif // WLED_DISABLE_2D
 
@@ -9424,7 +9553,11 @@ void WS2812FX::setupEffectData() {
   addEffect(FX_MODE_GEQLASER, &mode_GEQLASER, _data_FX_MODE_GEQLASER); // audio
 
   addEffect(FX_MODE_2DPAINTBRUSH, &mode_2DPaintbrush, _data_FX_MODE_2DPAINTBRUSH); // audio
+
+  #ifdef CONFIG_SOC_PPA_SUPPORTED
   addEffect(FX_MODE_GEQPPA, &mode_GEQPPA, _data_FX_MODE_GEQPPA); // audio
+  addEffect(FX_MODE_PPA_TESTBED, &mode_PPA_TESTBED, _data_FX_MODE_PPA_TESTBED); // audio
+  #endif
 
 #endif // WLED_DISABLE_2D
 
