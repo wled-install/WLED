@@ -1010,6 +1010,12 @@ parlio_transmit_config_t transmit_config = {
 
 uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t *buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit) {
 
+  if (length != outputs * leds_per_output) {
+    delay(100);
+    USER_PRINTLN("Parallel IO isn't set correctly. Check length, outputs, and LEDs per output.");
+    return 1;
+  }
+
   #ifdef WLED_DEBUG
   unsigned long timer = micros();
   #endif
@@ -1017,8 +1023,8 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   static bool parlio_setup_done = false;
   static int last_outputs = -1;
   static int last_leds_per_output = -1;
-
-  if (outputs > SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH) outputs = SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH;
+  
+  outputs = outputs > SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH ? SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH : outputs;
 
   if (!parlio_setup_done || outputs != last_outputs || leds_per_output != last_leds_per_output) {
 
