@@ -9094,16 +9094,16 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
 
-  uint16_t width = 16;
-  uint16_t height = 16;
-
   const uint16_t out_width = SEGMENT.virtualWidth();
   const uint16_t out_height = SEGMENT.virtualHeight();
 
+  uint16_t width = out_width/2;
+  uint16_t height = out_height/2;
+
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
 
-  size_t out_buf_size = 16*16*4;
-  static uint8_t* out_buf = (uint8_t *) heap_caps_calloc(16*16*4, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+  size_t out_buf_size = width*height*3;
+  static uint8_t* out_buf = (uint8_t *) heap_caps_calloc(out_buf_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
 
   if (SEGENV.call == 0) {
     // SEGMENT.setUpLeds();
@@ -9126,14 +9126,14 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   ppa_client_handle_t ppa_fill_handle = NULL;
   ppa_client_config_t ppa_fill_config = {
     .oper_type = PPA_OPERATION_FILL,
-    .max_pending_trans_num = 1,
+    .max_pending_trans_num = 18,
   };
   ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
 
   ppa_client_handle_t ppa_srm_handle = NULL;
   ppa_client_config_t ppa_srm_config = {
       .oper_type = PPA_OPERATION_SRM,
-      .max_pending_trans_num = 1,
+      .max_pending_trans_num = 5,
   };
   ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
 
@@ -9151,8 +9151,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   fill_config.out.block_offset_y = 0;
   fill_config.out.pic_w = width;
   fill_config.out.pic_h = height;
-  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888; // PPA_FILL_COLOR_MODE_ARGB8888;
-  fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888; // PPA_FILL_COLOR_MODE_ARGB8888;
+  fill_config.mode = PPA_TRANS_MODE_NON_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
 
   fill_config.fill_block_w = width;
   fill_config.fill_block_h = height;
@@ -9167,14 +9167,13 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   fill_config.fill_argb_color.r = 0; // ..so this must be blue.
   fill_config.fill_argb_color.g = 0; // red
   fill_config.fill_argb_color.b = 0; // green
-  fill_config.fill_argb_color.a = 0; // Alpha ignored if in PPA_BLEND_COLOR_MODE_RGB888
+  fill_config.fill_argb_color.a = 0; // Alpha ignored if in PPA_xxx_COLOR_MODE_RGB888
   ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill background with transparent black
 
   um_data_t *um_data;
   usermods.getUMData(&um_data, USERMOD_ID_AUDIOREACTIVE);
   uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
 
-  height = 8;
   for (int i = 0; i<16; i++) {
     fill_config.out.block_offset_x = i*(width/16);
     int bar_height = map8(fftResult[i],0,height);
@@ -9188,9 +9187,9 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     fill_config.fill_argb_color.a = SEGMENT.speed; // 0 is completely transparent
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
   }
-  height = 16;
 
   // memset(busPixelData, 0, SEGMENT.length() * 3); // clear out the framebuffer
+
   fill_config.out.buffer = busPixelData;
   fill_config.out.buffer_size =  busPixelSize;
   fill_config.out.block_offset_x = 0;
@@ -9202,6 +9201,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   fill_config.fill_argb_color.b = 0; // green
   fill_config.fill_argb_color.a = 255; // 255 = full blackAlpha ignored if in PPA_BLEND_COLOR_MODE_RGB888
   fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
   ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
 
   // ppa_blend_oper_config_t blend_config = {};
@@ -9246,10 +9246,10 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   ppa_srm_oper_config_t srm_config = {};
   srm_config.in.buffer = out_buf;
-  srm_config.in.pic_w = 16;
-  srm_config.in.pic_h = 16;
-  srm_config.in.block_w = 16;
-  srm_config.in.block_h = 8;
+  srm_config.in.pic_w = width;
+  srm_config.in.pic_h = height;
+  srm_config.in.block_w = width;
+  srm_config.in.block_h = height;
   srm_config.in.block_offset_x = 0;
   srm_config.in.block_offset_y = 0;
   srm_config.out.buffer = busPixelData;
@@ -9258,7 +9258,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   srm_config.out.pic_h = out_height;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
-  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_ARGB8888;
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
   srm_config.scale_x = 1;
@@ -9268,28 +9268,30 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   srm_config.rgb_swap = 0;
   srm_config.byte_swap = 0;
   srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+  srm_config.mode = PPA_TRANS_MODE_NON_BLOCKING;
 
   if (SEGMENT.intensity < 128) {
     srm_config.out.block_offset_x = 0;
     srm_config.mirror_x = true;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
     srm_config.mirror_x = false;
-    srm_config.out.block_offset_x = 16;
+    srm_config.out.block_offset_x = width;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
 
     srm_config.mirror_y = true;
-    srm_config.out.block_offset_y = 8;
+    srm_config.out.block_offset_y = height;
     
     srm_config.out.block_offset_x = 0;
     srm_config.mirror_x = true;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
     srm_config.mirror_x = false;
-    srm_config.out.block_offset_x = 16;
+    srm_config.out.block_offset_x = width;
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
   } else {
     srm_config.scale_y = 2;
     srm_config.scale_x = 2;
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
   }
   
