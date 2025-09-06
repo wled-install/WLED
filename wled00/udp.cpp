@@ -1016,7 +1016,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     return 1;
   }
 
-  #ifdef WLED_DEBUG
+  #ifdef PARLIO_TIMER
   unsigned long timer = micros();
   #endif
 
@@ -1091,7 +1091,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     }
     return 0; // let's give it a frame to set up.
   }
-
 
   static byte     *parallel_buffer_remapped  = NULL;
   #ifdef WLEDMM_REMAP_AT_OUTPUT
@@ -1181,7 +1180,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     ESP_ERROR_CHECK(parlio_tx_unit_transmit(parlio_tx_unit, chunk_ptrs[i], chunk_bits[i], &transmit_config));
   }
 
-  #ifdef WLED_DEBUG
+  #ifdef PARLIO_TIMER
   if (micros() % 100 < 3) {
     USER_PRINTF("Parallel IO for %u pixels took %lu micros at %u FPS.\n",length, micros()-timer, strip.getFps());
   }
