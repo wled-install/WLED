@@ -1,15 +1,292 @@
 #define WLED_DEFINE_GLOBAL_VARS //only in one source file, wled.cpp!
+static const char *TAG = "WLED";
 #include "wled.h"
 #include "wled_ethernet.h"
 #include <Arduino.h>
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
-#include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
-esp_ldo_channel_handle_t ldo2 = NULL;
-esp_ldo_channel_handle_t ldo3 = NULL;
-esp_eth_handle_t eth_handle = NULL;
+  #include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
+  esp_ldo_channel_handle_t ldo2 = NULL;
+  esp_ldo_channel_handle_t ldo3 = NULL;
+  esp_eth_handle_t eth_handle = NULL;
+  // ESP32-P4 Board Log
+  // ESP-ROM:esp32p4-eco2-20240710 // WaveShare Nano
+  // ESP-ROM:esp32p4-eco2-20240710 // WaveShare P4 Module Dev Kit (4 USB-A ports, custom module)
+  // ESP-ROM:esp32p4-eco2-20240710 // WaveShare Big Round Display Thingy
+  // ESP-ROM:esp32p4-eco2-20240710 // WaveShare ESP32-P4-86-Panel-ETH-PRO
+  // ESP-ROM:esp32p4-eco1-20240205 // Espressif EV
+  // ESP-ROM:esp32p4-eco2-20240710 // Wireless Tag Fancy C5 board that's weird.
+  // 
 #endif
+#ifdef SOC_USB_OTG_SUPPORTED
+  #ifndef CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED
+    #error "USB Hardware Buffer Bias must be set to 'Balanced' via USB-OTG or CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED=y."
+    // This is likely to be fixed later. 
+    // You could also comment out the #error and try (untested):
+    #undef CONFIG_USB_HOST_HW_BUFFER_BIAS_IN
+    #undef CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT
+    #define CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED 1
+  #endif
+  #include <dirent.h>
+  #include "usb/usb_host.h"
+  #include "usb/msc_host_vfs.h"
+  
+  #define MNT_PATH "/usb"     // Base mount path prefix, devices will be mounted as /usb0, /usb1, /usb2...
+  #define MAX_MSC_DEVICES  CONFIG_FATFS_VOLUME_COUNT 
+
+  typedef struct {
+    uint8_t usb_addr;                     /*!< USB device address */
+    msc_host_device_handle_t msc_device;  /*!< Handle of the MSC device */
+    msc_host_vfs_handle_t vfs_handle;     /*!< VFS handle assigned to the MSC device */
+  } msc_dev_entry_t;
+
+  static msc_dev_entry_t *msc_devices[MAX_MSC_DEVICES] = {0};
+
+  static QueueHandle_t app_queue;
+
+  typedef struct {
+    enum {
+      APP_QUIT,                // Signals request to exit the application
+      APP_DEVICE_CONNECTED,    // USB device connect event
+      APP_DEVICE_DISCONNECTED, // USB device disconnect event
+    } id;
+    union {
+      uint8_t new_dev_address; // Address of new USB device for APP_DEVICE_CONNECTED event
+      msc_host_device_handle_t device_handle; // Handle of removed USB device for APP_DEVICE_DISCONNECTED event
+    } data;
+  } app_message_t;
+
+  static inline int find_free_slot(void)
+  {
+    for (int i = 0; i < MAX_MSC_DEVICES; i++) {
+      if (msc_devices[i] == NULL) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  static esp_err_t allocate_new_msc_device(const app_message_t *msg, int *out_slot)
+  {
+      int slot = find_free_slot();
+      if (slot < 0) {
+          ESP_LOGE(TAG, "No free slots for new MSC device (max %d)", MAX_MSC_DEVICES);
+          return ESP_ERR_NOT_FOUND;
+      }
+
+      msc_devices[slot] = (msc_dev_entry_t *)calloc(1, sizeof(msc_dev_entry_t));
+
+      if (!msc_devices[slot]) {
+          ESP_LOGE(TAG, "Failed to allocate memory for new MSC device entry");
+          return ESP_ERR_NO_MEM;
+      }
+      esp_err_t err = msc_host_install_device(msg->data.new_dev_address, &msc_devices[slot]->msc_device);
+      if (err != ESP_OK) {
+          ESP_LOGE(TAG, "msc_host_install_device failed: %s", esp_err_to_name(err));
+          free(msc_devices[slot]);
+          msc_devices[slot] = NULL;
+          return err;
+      }
+
+      msc_devices[slot]->usb_addr = msg->data.new_dev_address;
+
+      const esp_vfs_fat_mount_config_t mount_config = {
+          .format_if_mount_failed = false,
+          .max_files = 3,
+          .allocation_unit_size = 8192,
+      };
+
+      char mount_path[16];
+      snprintf(mount_path, sizeof(mount_path), MNT_PATH "%d", slot);
+
+      err = msc_host_vfs_register(msc_devices[slot]->msc_device, mount_path, &mount_config, &msc_devices[slot]->vfs_handle);
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "msc_host_vfs_register failed: %s", esp_err_to_name(err));
+        // Just call the uninstall function. Don't check the error in a way that aborts.
+        // You can log its return value if you want, but the program must continue.
+        esp_err_t uninstall_err = msc_host_uninstall_device(msc_devices[slot]->msc_device);
+        if (uninstall_err != ESP_OK) {
+          ESP_LOGW(TAG, "msc_host_uninstall_device failed during cleanup: %s", esp_err_to_name(uninstall_err));
+        }
+        free(msc_devices[slot]);
+        msc_devices[slot] = NULL;
+        // Return the original error that started this cleanup process
+        return err;
+      }
+
+      *out_slot = slot;
+      return ESP_OK;
+  }
+
+  static int find_slot_by_handle(msc_host_device_handle_t handle)
+  {
+      for (int i = 0; i < MAX_MSC_DEVICES; i++) {
+          if (msc_devices[i] && msc_devices[i]->msc_device == handle) {
+              return i;
+          }
+      }
+      return -1;
+  }
+
+  static void free_msc_device(int slot)
+  {
+      if (slot < 0 || slot >= MAX_MSC_DEVICES || !msc_devices[slot]) {
+          ESP_LOGE(TAG, "Invalid slot index for MSC device deallocation");
+          return;
+      }
+
+      if (msc_devices[slot]->vfs_handle) {
+          ESP_ERROR_CHECK(msc_host_vfs_unregister(msc_devices[slot]->vfs_handle));
+      }
+      if (msc_devices[slot]->msc_device) {
+          ESP_ERROR_CHECK(msc_host_uninstall_device(msc_devices[slot]->msc_device));
+      }
+
+      free(msc_devices[slot]);
+      msc_devices[slot] = NULL;
+  }
+
+  static void free_all_msc_devices(void)
+  {
+      for (int i = 0; i < MAX_MSC_DEVICES; i++) {
+          if (msc_devices[i]) {
+              free_msc_device(i);
+          }
+      }
+  }
+
+  static void gpio_cb(void *arg)
+  {
+      BaseType_t xTaskWoken = pdFALSE;
+      app_message_t message = {
+          .id = app_message_t::APP_QUIT,
+      };
+
+      if (app_queue) {
+          xQueueSendFromISR(app_queue, &message, &xTaskWoken);
+      }
+
+      if (xTaskWoken == pdTRUE) {
+          portYIELD_FROM_ISR();
+      }
+  }
+
+  static inline int8_t find_usb_addr_by_handle(msc_host_device_handle_t handle)
+  {
+      for (int8_t i = 0; i < MAX_MSC_DEVICES; i++) {
+          if (msc_devices[i] && msc_devices[i]->msc_device == handle) {
+              return msc_devices[i]->usb_addr;
+          }
+      }
+      return -1;
+  }
+
+  static void msc_event_cb(const msc_host_event_t *event, void *arg)
+  {
+      if (event->event == event->MSC_DEVICE_CONNECTED) {
+          DEBUG_PRINTF("MSC device connected (usb_addr=%d)\n", event->device.address);
+          app_message_t message = {};
+          message.id = app_message_t::APP_DEVICE_CONNECTED;
+          message.data.new_dev_address = event->device.address;
+
+          xQueueSend(app_queue, &message, portMAX_DELAY);
+      } else if (event->event == event->MSC_DEVICE_DISCONNECTED) {
+          int usb_addr = find_usb_addr_by_handle(event->device.handle);
+          if (usb_addr >= 0) {
+              DEBUG_PRINTF("MSC device disconnected (usb_addr=%d)\n", usb_addr);
+          } else {
+              DEBUG_PRINTLN("MSC device disconnected, but failed to retrieve USB address");
+          }
+          app_message_t message = {};
+          message.id = app_message_t::APP_DEVICE_DISCONNECTED;
+          message.data.device_handle = event->device.handle;
+          xQueueSend(app_queue, &message, portMAX_DELAY);
+      }
+  }
+
+  static void print_device_info(msc_host_device_info_t *info)
+  {
+      const size_t megabyte = 1024 * 1024;
+      uint64_t capacity = ((uint64_t)info->sector_size * info->sector_count) / megabyte;
+      USER_PRINTF("USB Disk Capacity: %llu MB\n", capacity);
+      // ESP_LOGE(TAG, "\t Sector size: %" PRIu32, info->sector_size);
+      // ESP_LOGE(TAG, "\t Sector count: %" PRIu32, info->sector_count);
+      // ESP_LOGE(TAG, "\t PID: 0x%04X", info->idProduct);
+      // ESP_LOGE(TAG, "\t VID: 0x%04X", info->idVendor);
+  }
+
+  static void usb_task(void *args)
+  {
+      usb_host_config_t host_config = {};
+      host_config.intr_flags = ESP_INTR_FLAG_LEVEL1;
+      host_config.peripheral_map = BIT(0);
+
+      ESP_ERROR_CHECK(usb_host_install(&host_config));
+
+      const msc_host_driver_config_t msc_config = {
+          .create_backround_task = true,
+          .task_priority = 5,
+          .stack_size = 4096,
+          .callback = msc_event_cb,
+      };
+      ESP_ERROR_CHECK(msc_host_install(&msc_config));
+
+      bool has_clients = true;
+      while (true) {
+          uint32_t event_flags;
+          usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+
+          // Release devices once all clients has deregistered
+          if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
+              has_clients = false;
+              if (usb_host_device_free_all() == ESP_OK) {
+                  break;
+              };
+          }
+          if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE && !has_clients) {
+              break;
+          }
+      }
+
+      vTaskDelay(10); // Give clients some time to uninstall
+      USER_PRINTLN("Deinitializing USB (This shouldn't happen)");
+      ESP_ERROR_CHECK(usb_host_uninstall());
+      vTaskDelete(NULL);
+  }
+
+  static inline void show_list_files_all_devices(void)
+  {
+      // USER_PRINTF("ls command output for all connected devices:\n");
+      for (int i = 0; i < MAX_MSC_DEVICES; i++) {
+          if (msc_devices[i]) {
+              char mount_path[16];
+              snprintf(mount_path, sizeof(mount_path), MNT_PATH "%d", i);
+
+              USER_PRINTF("Listing contents of %s:\n", mount_path);
+              struct dirent *d;
+              DIR *dh = opendir(mount_path);
+              if (!dh) {
+                  USER_PRINTF("Failed to open directory: %s", mount_path);
+                  continue;
+              }
+
+              while ((d = readdir(dh)) != NULL) {
+                  USER_PRINTF("%s/%s\n", mount_path, d->d_name);
+              }
+              closedir(dh);
+          }
+      }
+  }
+
+  #define APP_QUEUE_SIZE 5
+
+  #if defined(ARDUINO_ARCH_ESP32P4) || (defined(ARDUINO_ARCH_ESP32S3) && defined(CONFIG_SPIRAM_MODE_OCT) && defined(BOARD_HAS_PSRAM))
+  #include "esp_h264_dec_sw.h"
+  #endif
+
+#endif // SOC_USB_OTG_SUPPORTED
+
 #ifdef ARDUINO_ARCH_ESP32
-#include "esp_ota_ops.h"
+  #include "esp_ota_ops.h"
 #endif
 #warning WLED-MM is licensed under the EUPL-1.2. By installing WLED MM you implicitly accept the terms!
 
@@ -123,6 +400,7 @@ void WLED::reset()
 void WLED::loop()
 {
   #ifdef WLED_DEBUG
+  // esp_log_level_set("*",ESP_LOG_VERBOSE);
   static unsigned long maxUsermodMillis = 0;
   static uint16_t avgUsermodMillis = 0;
   static unsigned long maxStripMillis = 0;
@@ -403,7 +681,49 @@ void WLED::loop()
     debugTime = millis();
   }
 #endif        // WLED_DEBUG_HEAP
-  toki.resetTick();
+
+  app_message_t msg;
+
+  #ifdef SOC_USB_OTG_SUPPORTED
+  // Poll for messages without blocking
+  if (xQueueReceive(app_queue, &msg, 0)) {
+    switch (msg.id) {
+      case 1: {
+        Serial.println("USB Device Connected");
+        int slot;
+        if (allocate_new_msc_device(&msg, &slot) == ESP_OK) {
+          msc_host_device_info_t info;
+          ESP_ERROR_CHECK_WITHOUT_ABORT(msc_host_get_device_info(msc_devices[slot]->msc_device, &info));
+          // ESP_ERROR_CHECK_WITHOUT_ABORT(msc_host_print_descriptors(msc_devices[slot]->msc_device));
+          print_device_info(&info);
+          show_list_files_all_devices();
+          // file_operations(slot);
+          // speed_test(slot);
+          // ESP_LOGE(USBTAG, "USB operation complete. Ready for next device.");
+        } else {
+          USER_PRINTLN("USB operation failed. Try replugging?");
+        }
+        break;
+      }
+
+      case 2: {
+        USER_PRINTLN("USB Device Disconnected");
+
+        int slot = find_slot_by_handle(msg.data.device_handle);
+        if (slot >= 0) {
+          free_msc_device(slot);
+        }
+        break;
+      }
+
+      default:
+        USER_PRINTF("USB Subsystem", "Unknown USB Error message ID: %d\n", msg.id);
+        break;
+    }
+  }
+  #endif // SOC_USB_OTG_SUPPORTED
+
+toki.resetTick();
 
 #if WLED_WATCHDOG_TIMEOUT > 0
   // we finished our mainloop, reset the watchdog timer
@@ -479,7 +799,6 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
 }
 
 # ifdef WLED_USE_ETHERNET
-static const char *TAG = "eth_init";
 
 static void eth_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     if (event_id == ETHERNET_EVENT_CONNECTED) {
@@ -502,7 +821,9 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t
 
 void WLED::setup()
 {
+  #ifdef WLED_DEBUG
   // esp_log_level_set("*",ESP_LOG_VERBOSE);
+  #endif 
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
     #if !defined(WLED_USE_ETHERNET)
@@ -581,7 +902,7 @@ void WLED::setup()
   if (!Serial) delay(300);  // just a tiny wait to avoid problems later when acessing serial
 #endif
 
-  #ifdef ARDUINO_ARCH_ESP32
+#ifdef ARDUINO_ARCH_ESP32
   #if defined(WLED_DEBUG) && (defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || ARDUINO_USB_CDC_ON_BOOT)
   if (!Serial) delay(2500);  // WLEDMM allow CDC USB serial to initialise (WLED_DEBUG only)
   #endif
@@ -822,6 +1143,18 @@ void WLED::setup()
     DEBUG_PRINTLN(F("PSRAM not used."));
   #endif
 #endif
+
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)
+  DEBUG_PRINTLN("Initializing USB Host...");
+  app_queue = xQueueCreate(APP_QUEUE_SIZE, sizeof(app_message_t));
+  if (!app_queue) {
+    DEBUG_PRINTLN( "Failed to create USB Host app_queue");
+    return;
+  }
+  xTaskCreate(usb_task, "usb_task", 4096, NULL, 2, NULL);
+  DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
+#endif
+
 #if defined(ARDUINO_ARCH_ESP32)
   if ((strncmp("ESP32-PICO", ESP.getChipModel(), 10) == 0) || (strncmp("ESP32-U4WDH", ESP.getChipModel(), 11) == 0))
   { // WLEDMM detect pico board and esp32-mini1 board at runtime
