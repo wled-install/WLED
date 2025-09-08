@@ -279,10 +279,6 @@ static const char *TAG = "WLED";
 
   #define APP_QUEUE_SIZE 5
 
-  #if defined(ARDUINO_ARCH_ESP32P4) || (defined(ARDUINO_ARCH_ESP32S3) && defined(CONFIG_SPIRAM_MODE_OCT) && defined(BOARD_HAS_PSRAM))
-  #include "esp_h264_dec_sw.h"
-  #endif
-
 #endif // SOC_USB_OTG_SUPPORTED
 
 #ifdef ARDUINO_ARCH_ESP32
