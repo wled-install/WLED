@@ -97,7 +97,6 @@ void handleSerial()
   if (!Serial) return;              // arduino docs: `if (Serial)` indicates whether or not the USB CDC serial connection is open. For all non-USB CDC ports, this will always return true
   if (((pinManager.isPinAllocated(hardwareTX)) && (pinManager.getPinOwner(hardwareTX) != PinOwner::DebugOut))) return; // WLEDMM serial TX is necessary for adalight / TPM2
 
-  #ifdef WLED_ENABLE_ADALIGHT
   static auto state = AdaState::Header_A;
   static uint16_t count = 0;
   static uint16_t pixel = 0;
@@ -326,9 +325,6 @@ void handleSerial()
   //#ifdef WLED_DEBUG
     if ((millis() - startTime) > SERIAL_MAXTIME_MILLIS) { USER_PRINTLN(F("handleSerial(): need a break after >100ms of activity.")); }
   //#endif
-  #else
-    #pragma message "Serial protocols (AdaLight, Serial JSON, Serial LED driver, improv) disabled"
-  #endif
 
   // If Continuous Serial Streaming is enabled, send new LED data as bytes
   if (continuousSendLED && (lastUpdate != strip.getLastShow())){
