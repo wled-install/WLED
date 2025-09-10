@@ -100,6 +100,11 @@ static um_data_t* getAudioData() {
   return um_data;
 }
 
+static float mapf(float x, float in_min, float in_max, float out_min, float out_max){
+  if (in_max == in_min) return (out_min);  // WLEDMM avoid div/0
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
 void handleSerial()
 {
   if (pinManager.isPinAllocated(hardwareRX)) return;
@@ -229,13 +234,16 @@ void handleSerial()
                     min = fftBinAverage[i];
                 }
             }
-            // 5.53, 8.10 = 1.70, 1.83, 1.82, 1.85, 1.78, 1.82, 1.76, 1.79, 1.79, 1.79, 1.79, 1.79, 1.79, 1.79, 1.89, 2.17
+            //  5.53, 8.10 = 1.70, 1.83, 1.82, 1.85, 1.78, 1.82, 1.76, 1.79, 1.79, 1.79, 1.79, 1.79, 1.79, 1.79, 1.89, 2.17
+            // 10.05,95.22 = 7.78, 6.95, 5.15, 3.73, 1.70, 2.20, 4.86, 3.95, 5.92, 7.45, 7.64, 7.52, 6.84, 7.14, 6.90, 6.06,
+            // 2.11, 16.77 = 9.67, 8.97, 6.87, 4.89, 3.36, 1.70, 4.69, 2.71, 6.73, 8.85, 9.01, 8.53, 7.10, 7.86, 5.23, 4.26,
+            //  2.62,19.27 = 7.34, 6.64, 4.99, 3.76, 1.39, 1.00, 3.20, 1.23, 5.07, 6.63, 6.75, 6.37, 5.26, 5.72, 2.73, 2.74, 
             USER_PRINT(min);
             USER_PRINT(",");
             USER_PRINT(max);
             USER_PRINT(" = ");
             for (int i=0; i < 16; i++) {
-              fftBinAverage[i] = (max/fftBinAverage[i]) + 0.7f;
+              fftBinAverage[i] = mapf(fftBinAverage[i],min,max,(max/min),1.00f);
               USER_PRINTF("%1.2f, ", fftBinAverage[i]);
             }
             USER_PRINTLN();

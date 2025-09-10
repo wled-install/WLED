@@ -1145,13 +1145,15 @@ static void postProcessFFTResults(bool noiseGateOpen, int numberOfChannels, bool
         
         // Some attempt to auto-calibrate mics
         if (TROYHACKS_PINKY) {
-          fftBinAverage[i] = fftBinAverage[i] * 0.99 + (0.01 * fftCalc[i] * FFT_DOWNSCALE * (soundAgc ? multAgc : ((float)sampleGain/40.0f * (float)inputLevel/128.0f + 1.0f/16.0f)));
+          float calced = fftCalc[i] * FFT_DOWNSCALE * (soundAgc ? multAgc : ((float)sampleGain/40.0f * (float)inputLevel/128.0f + 1.0f/16.0f));
+          fftBinAverage[i] = fftBinAverage[i] * 0.99 + (0.01 * calced);
+          // if (calced > fftBinAverage[i]) fftBinAverage[i] = calced;
         }
         // Adjustment for frequency curves.
         if (fftBinAverage[0] != 0 && !TROYHACKS_PINKY) {
           fftCalc[i] *= fftBinAverage[i];
         } else {
-          fftCalc[i] *= fftResultPink[pinkIndex][i];
+          fftCalc[i] *= fftResultPink[pinkIndex][i]; // if we aren't calibrat[ing/ed], use the menu choice.
         }
         // End auto calibration
 
