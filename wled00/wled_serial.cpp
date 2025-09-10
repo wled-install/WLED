@@ -167,7 +167,7 @@ void handleSerial()
           #endif
         } else if (next == 'X') { // WLEDMM - force reconnect via Serial
           forceReconnect = true;
-        } else if (next == 'R') {
+        } else if (next == 'R') { // WLEDMM - force reboot via Serial
           Serial.print("Rebooting ");
           for (int i=0;i<5;i++) {
             Serial.print(".");
@@ -176,7 +176,7 @@ void handleSerial()
           Serial.println(" now!");
           Serial.flush();
           Serial.end();
-          ESP.restart();  // WLEDMM - force reboot via Serial
+          ESP.restart();  
         } else if (next == 'G') { // WLEDMM - "G"EQ via Serial
           um_data_t *um_data = getAudioData();
           uint8_t fftResult[16] = {0};
