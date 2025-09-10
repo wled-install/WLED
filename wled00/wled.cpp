@@ -220,6 +220,30 @@ static const char *TAG = "WLED";
       host_config.intr_flags = ESP_INTR_FLAG_LEVEL1;
       host_config.peripheral_map = BIT(0);
 
+      // Bias Mode	  nptx_fifo_lines	  ptx_fifo_lines	rx_fifo_lines
+      // Balanced	  256	              128	            512 (896 - 256 - 128)
+      // IN-Biased	  64	              128	            704 (896 - 64 - 128) <--- does not work, but 896 seenms to be the correct total, confirmed by reading out the register.
+
+      // Balanced values work: (works! and seem to match the IDF built with balanced defaults)
+      // host_config.fifo_settings_custom.nptx_fifo_lines = 256;
+      // host_config.fifo_settings_custom.ptx_fifo_lines = 128;
+      // host_config.fifo_settings_custom.rx_fifo_lines = 512;
+
+      // Testing a mid point: (marginal winner!)
+      // (tried a bunch off other ones too, this was the best - they were worse than balanced)
+      //
+      host_config.fifo_settings_custom.nptx_fifo_lines = 128;
+      host_config.fifo_settings_custom.ptx_fifo_lines = 128;
+      host_config.fifo_settings_custom.rx_fifo_lines = 640;
+
+      // If you need to know your on-SOC FIFO numbers this is the code - just for checking the register on the P4.
+      // (The answer is 896, at least on all the current P4 devices I have.)
+      //
+      // periph_module_enable(PERIPH_UHCI_MODULE);
+      // uint16_t fifo_depth_value = USB_DWC_HS.ghwcfg3_reg.dfifodepth;
+      // USER_PRINTF("*** Extracted dfifodepth (fifo_size_lines): %u\n", fifo_depth_value);
+      // periph_module_disable(PERIPH_UHCI_MODULE);
+
       ESP_ERROR_CHECK(usb_host_install(&host_config));
 
       const msc_host_driver_config_t msc_config = {
