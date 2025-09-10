@@ -9209,9 +9209,9 @@ bool preload_images(const std::string& folder_path) {
     }
 
     cached_folder = folder_path;
-    USER_PRINTF("Caching took %lu micros.\n", micros()-timer);
+    USER_PRINTF("Caching took %0.2f seconds.\n", float((micros()-timer)/1000000));
     return !image_cache.empty();
-}
+} 
 
 #include <sstream>
 #include <iomanip>
