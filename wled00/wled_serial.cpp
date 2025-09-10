@@ -91,6 +91,15 @@ bool canUseSerial(void) {   // WLEDMM returns true if Serial can be used for deb
   return true;
 } // WLEDMM end
 
+static um_data_t* getAudioData() {
+  um_data_t *um_data;
+  if (!usermods.getUMData(&um_data, USERMOD_ID_AUDIOREACTIVE)) {
+    // add support for no audio
+    um_data = simulateSound(SEGMENT.soundSim);
+  }
+  return um_data;
+}
+
 void handleSerial()
 {
   if (pinManager.isPinAllocated(hardwareRX)) return;
@@ -151,18 +160,34 @@ void handleSerial()
           #else
           USER_PRINTLN("Boot partition switching is only available for ESP32 and newer boards.");
           #endif
-        } else if (next == 'X') {
-          forceReconnect = true; // WLEDMM - force reconnect via Serial
-        } else if (next == 'R') {
-          Serial.print("Rebooting ");
-          for (int i=0;i<5;i++) {
-            Serial.print(".");
-            delay(200);
+        } else if (next == 'X') { // WLEDMM - force reconnect via Serial
+          forceReconnect = true;
+        } else if (next == 'G') { // WLEDMM - "G"EQ via Serial
+          um_data_t *um_data = getAudioData();
+          uint8_t fftResult[16] = {0};
+          if (um_data && um_data->u_data) {
+            memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));
           }
-          Serial.println(" now!");
-          Serial.flush();
-          Serial.end();
-          ESP.restart();  // WLEDMM - force reboot via Serial
+          const uint8_t scale = 16;
+          uint8_t heights[16];
+          for (int i = 0; i < 16; i++) {
+            heights[i] = map8(fftResult[i], 0, scale);
+          }
+          USER_PRINTLN();
+          for (int row = scale; row > 0; row--) {
+            for (int col = 0; col < 16; col++) {
+              if (heights[col] >= row) {
+                USER_PRINT("████");
+              } else {
+                USER_PRINT("    ");
+              }
+            }
+            USER_PRINTLN();
+          }
+          for (int i = 0; i < 16; i++) {
+            USER_PRINTF("%4d",fftResult[i]);
+          }
+          USER_PRINTLN();
         } else if (next == 'l') {
           TROYHACKS_LPF = !TROYHACKS_LPF;
           USER_PRINTF("LP (highs) filter is now %s\n",TROYHACKS_LPF?"On":"Off");
@@ -195,7 +220,7 @@ void handleSerial()
           } 
           if (!TROYHACKS_PINKY) {
             float max = 0;
-            float min = 1000000;
+            float min = 100000000;
             for (int i=0; i < 16; i++) {
                 if (fftBinAverage[i] > max) {
                     max = fftBinAverage[i];
