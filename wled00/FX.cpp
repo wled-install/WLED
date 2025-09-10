@@ -8933,7 +8933,7 @@ uint16_t mode_GEQLASER(void) {
   }
   return FRAMETIME;
 }
-static const char _data_FX_MODE_GEQLASER[] PROGMEM = "GEQ 3D ☾@Speed,Front Fill,Horizon,Depth,Num Bands,Borders,Soft,;!,,Peaks;!;2f;sx=255,ix=228,c1=255,c2=255,c3=15,pal=11";
+static const char _data_FX_MODE_GEQLASER[] PROGMEM = "GEQ 3D ☾🐺@Speed,Front Fill,Horizon,Depth,Num Bands,Borders,Soft,;!,,Peaks;!;2f;sx=255,ix=228,c1=255,c2=255,c3=15,pal=11";
 
 /* 
    @title     MoonModules WLED - Painbrush Effect
@@ -9084,41 +9084,49 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   #endif
   return FRAMETIME;
 } // mode_GEQPPA()
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
 #include <dirent.h>
 
-int get_sequence_folder(const char *base_path, char *selected_path, uint8_t slider_value) {
-  DIR *dir;
-  struct dirent *entry;
-  struct stat st;
-  char *matches[256];
-  int count = 0;
+int get_sequence_folder(const std::string& base_path, std::string& selected_path, uint8_t slider_value, bool force_rescan = false) {
+    static std::vector<std::string> cached_matches;
+    static bool cache_initialized = false;
 
-  dir = opendir(base_path);
-  if (!dir) return -1;
-
-  while ((entry = readdir(dir)) != NULL && count < 256) {
-    char fullpath[256];
-    snprintf(fullpath, sizeof(fullpath), "%s/%s", base_path, entry->d_name);
-
-    if (stat(fullpath, &st) == 0 && S_ISDIR(st.st_mode) &&
-      strstr(entry->d_name, "sequence") != NULL) {
-      matches[count] = strdup(entry->d_name);
-      count++;
+    if (force_rescan && cache_initialized) {
+        cached_matches.clear();
+        cache_initialized = false;
     }
-  }
-  closedir(dir);
 
-  if (count == 0) return -2;
+    if (!cache_initialized) {
+        DIR* dir;
+        struct dirent* entry;
+        struct stat st;
 
-  int index = (slider_value * count) / 256;
-  snprintf(selected_path, 256, "%s/%s", base_path, matches[index]);
+        dir = opendir(base_path.c_str());
+        if (!dir) return -1;
 
-  // Free memory
-  for (int i = 0; i < count; i++) free(matches[i]);
+        while ((entry = readdir(dir)) != nullptr && cached_matches.size() < 256) {
+            std::string folder_name = entry->d_name;
+            std::string full_folder_path = base_path + "/" + folder_name;
 
-  return 0;
+            if (stat(full_folder_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
+                folder_name.find("sequence") != std::string::npos) {
+
+                std::string image_path = full_folder_path + "/image-0001.jpg";
+                if (stat(image_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                    cached_matches.push_back(folder_name);
+                }
+            }
+        }
+        closedir(dir);
+
+        if (cached_matches.empty()) return -2;
+        cache_initialized = true;
+    }
+
+    int index = (slider_value * cached_matches.size()) / 256;
+    selected_path = base_path + "/" + cached_matches[index];
+    return 0;
 }
 
 #if defined(ARDUINO_ARCH_ESP32P4)
@@ -9131,24 +9139,114 @@ float quantize16(float value) {
     return roundf(value * 16.0f) / 16.0f;
 }
 
+#include <string>
+#include <vector>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+// Structure to hold image data
+struct ImageData {
+    uint8_t* buffer;
+    size_t size;
+};
+
+// Static cache and folder tracking
+static std::vector<ImageData> image_cache;
+static std::string cached_folder;
+
+// Preload all JPEG files from a folder into PSRAM
+bool preload_images(const std::string& folder_path) {
+
+    if (folder_path == cached_folder) return true; // Already loaded
+
+    long unsigned timer = micros();
+
+    // Clear previous cache
+    for (auto& img : image_cache) {
+        free(img.buffer);
+    }
+    image_cache.clear();
+
+    DIR* dir = opendir(folder_path.c_str());
+    if (!dir) return false;
+
+    struct dirent* entry;
+    struct stat st;
+    std::vector<std::string> jpeg_files;
+
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string name = entry->d_name;
+        std::string full_path = folder_path + "/" + name;
+
+        if ((name.find(".jpg") != std::string::npos || name.find(".jpeg") != std::string::npos) &&
+            stat(full_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            jpeg_files.push_back(full_path);
+        }
+    }
+    closedir(dir);
+
+    for (const auto& path : jpeg_files) {
+        FILE* file = fopen(path.c_str(), "rb");
+        if (!file) continue;
+
+        fseek(file, 0, SEEK_END);
+        size_t size = ftell(file);
+        rewind(file);
+
+        uint8_t* buffer = (uint8_t*)ps_malloc(size); // PSRAM allocation
+        if (!buffer) {
+            fclose(file);
+            continue;
+        }
+
+        fread(buffer, 1, size, file);
+        fclose(file);
+
+        image_cache.push_back({ buffer, size });
+    }
+
+    cached_folder = folder_path;
+    USER_PRINTF("Caching took %lu micros.\n", micros()-timer);
+    return !image_cache.empty();
+}
+
+#include <sstream>
+#include <iomanip>
+
 uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   #ifdef SOC_PPA_SUPPORTED // always for PPA effects
+
+  static unsigned long imagelimiter = micros()+(1000000/max(uint8_t(1),SEGMENT.custom1));
+
+  if (SEGMENT.custom1 < 255 && SEGMENT.custom1 > 0) {
+    while (imagelimiter > micros()) {
+      delayMicroseconds(100); // Make WLED obey fps_limit and just delay here until we're ready to send a frame.
+    }
+  }
 
   // Author: @TroyHacks
   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 
   // *** PLACEHOLDER FOR PPA TESTING ***
 
+  unsigned long timer = micros();
+  
   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
 
   const uint32_t width = SEGMENT.virtualWidth();
   const uint32_t height = SEGMENT.virtualHeight();
+
+  bool rescan_source = false;
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
 
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
     SEGENV.aux0 = 0;
+    rescan_source = true;
   }
 
   byte* busPixelData = nullptr;
@@ -9161,6 +9259,48 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   } else {
     return 1;
   }
+
+  static uint16_t frame = 1;
+  std::string folder_path;
+  static std::string last_folder_path;
+
+  if (get_sequence_folder("/usb0", folder_path, SEGMENT.speed, rescan_source) != 0) {
+    USER_PRINTLN("No sequence folders found — skipping");
+    delay(500);
+    return 1;
+  }
+
+  // Only preload if folder has changed
+  if (folder_path != last_folder_path) {
+    if (!preload_images(folder_path)) {
+      USER_PRINTLN("Failed to preload images");
+      delay(500);
+      return 1;
+    }
+    last_folder_path = folder_path;
+  }
+
+  if (frame - 1 >= image_cache.size()) {
+    frame = 1;
+  }
+
+  uint8_t* file_jpeg = image_cache[frame - 1].buffer;
+  size_t file_jpeg_size = image_cache[frame - 1].size;
+
+  if (!file_jpeg || file_jpeg_size == 0) {
+    USER_PRINTF("Cached image data missing for frame %d\n", frame);
+    frame = 1;
+    delay(500);
+    return 1;
+  }
+
+  if (file_jpeg == NULL) {
+    DEBUG_PRINTLN("NULL at JPEG pointer!");
+    delay(500);
+    return 1;
+  }
+
+  frame++;
 
   jpeg_decoder_handle_t jpgd_handle;
 
@@ -9175,81 +9315,24 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB,
   };
 
-  jpeg_decode_cfg_t decode_cfg_gray = {
-    .output_format = JPEG_DECODE_OUT_FORMAT_GRAY,
-  };
-
   jpeg_decode_memory_alloc_cfg_t rx_mem_cfg = {
     .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
   };
 
-  jpeg_decode_memory_alloc_cfg_t tx_mem_cfg = {
-    .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER,
-  };
-
-  static uint16_t frame = 1;
-  char filename[40];
-  char folder_path[256];
-
-  if (get_sequence_folder("/usb0", folder_path, SEGMENT.speed) != 0) {
-    USER_PRINTLN("No sequence folders found — skipping");
-    return 1;
-  }
-
-  sprintf(filename, "%s/image-%04d.jpg", folder_path, frame);
-
-  struct stat st;
-  if (stat(filename, &st) != 0) {
-    // File not found — wrap to frame 1
-    frame = 1;
-    sprintf(filename, "%s/image-%04d.jpg", folder_path, frame);
-
-    // Try again with frame 1
-    if (stat(filename, &st) != 0) {
-      USER_PRINTLN("No valid image file found — skipping");
-      return 1;
-    }
-  }
-
-  FILE *file_jpg_1080p = fopen(filename, "rb");
-  if (!file_jpg_1080p) {
-    USER_PRINTLN("fopen failed for image file");
-    frame++;
-    if (frame >= 900) frame = 1;
-    return 1;
-  }
-
-  int jpeg_size_1080p = st.st_size;
-
-  frame++;
-  if (frame >= 900) frame = 1;
-
-  size_t tx_buffer_size_1080p = 0;
-
-  uint8_t *tx_buf_1080p = (uint8_t*)jpeg_alloc_decoder_mem(jpeg_size_1080p, &tx_mem_cfg, &tx_buffer_size_1080p);
-
-  if (tx_buf_1080p == NULL) {
-    ESP_LOGE(TAG, "alloc 1080p tx buffer error");
-    return 1;
-  }
-
-  fread(tx_buf_1080p, 1, jpeg_size_1080p, file_jpg_1080p);
-  fclose(file_jpg_1080p);
-
   jpeg_decode_picture_info_t header_info;
-  ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_get_info(tx_buf_1080p, jpeg_size_1080p, &header_info));
-  // USER_PRINTF("header parsed, width is %" PRId32 ", height is %" PRId32 "\n", header_info.width, header_info.height);
+  ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_get_info(file_jpeg, file_jpeg_size, &header_info));
 
-  size_t rx_buffer_size_1080p = 0;
-  uint8_t *rx_buf_1080p = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height* 3, &rx_mem_cfg, &rx_buffer_size_1080p);
+  size_t rx_bitmap_size = 0;
+  uint8_t *rx_bitmap = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height * 3, &rx_mem_cfg, &rx_bitmap_size);
   
-  if (rx_buf_1080p == NULL) {
-    USER_PRINTF("alloc 1080p rx buffer error");
+  if (rx_bitmap == NULL) {
+    USER_PRINTLN("Can't allocate received bitmap buffer!");
     return 1;
   }
-  uint32_t out_size_1080p = 0;
 
-  ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, tx_buf_1080p, jpeg_size_1080p, rx_buf_1080p, rx_buffer_size_1080p, &out_size_1080p));
+  uint32_t out_size = 0; // we don't use this anywhere but need to catch it. PPA may need this depending on the operation.
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, file_jpeg, file_jpeg_size, rx_bitmap, rx_bitmap_size, &out_size));
   ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_del_decoder_engine(jpgd_handle));
   
   um_data_t *um_data = getAudioData();
@@ -9276,241 +9359,308 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   
   static uint8_t bass_average = 128;
   bass_average = (bass_average*0.99) + (fftResult[0] * 0.01);
+
   if (bass_average == 0 && bass_peak > 10) bass_average = bass_peak/2;
 
-  if (0 && width == header_info.width && height == header_info.height) {
+  if (1 || width != header_info.width || height != header_info.height) { // force this always until PPA scaling is mathed out so we always fill the frame.
 
-    memcpy(busPixelData, rx_buf_1080p, rx_buffer_size_1080p);
-
-    // uint8_t fakebri = 255; // 255 makes p4_mul16x16() work as fast memcpy
-    // p4_mul16x16(busPixelData, &fakebri, (rx_buffer_size_1080p >> 4), rx_buf_1080p);
-
-    if (micros() % 100 < 3) USER_PRINTF("No scaling. Images match panel!\n");
-
-  } else {
-
-    if (1 || width != header_info.width || height != header_info.height) {
-
-      ppa_client_handle_t ppa_fill_handle = NULL;
-      ppa_client_config_t ppa_fill_config = {
-        .oper_type = PPA_OPERATION_FILL,
-        .max_pending_trans_num = 18,
-      };
-      ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
-      
-      ppa_fill_oper_config_t fill_config = {};
-      fill_config.out.buffer = busPixelData;
-      fill_config.out.buffer_size = busPixelSize;
-      fill_config.out.pic_w = width;
-      fill_config.out.pic_h = height;
-      fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
-      fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
-      fill_config.fill_block_w = width;
-      fill_config.fill_block_h = height;
-      // fill_config.fill_argb_color.r = 255;
-
-      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
-      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_fill_handle));
-
-    }
-
-    ppa_client_handle_t ppa_srm_handle = NULL;
-    ppa_client_config_t ppa_srm_config = {
-        .oper_type = PPA_OPERATION_SRM,
-        .max_pending_trans_num = 5,
+    ppa_client_handle_t ppa_fill_handle = NULL;
+    ppa_client_config_t ppa_fill_config = {
+      .oper_type = PPA_OPERATION_FILL,
+      .max_pending_trans_num = 18,
     };
-    ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
+    ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
+    
+    ppa_fill_oper_config_t fill_config = {};
+    fill_config.out.buffer = busPixelData;
+    fill_config.out.buffer_size = busPixelSize;
+    fill_config.out.pic_w = width;
+    fill_config.out.pic_h = height;
+    fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+    fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
+    fill_config.fill_block_w = width;
+    fill_config.fill_block_h = height;
 
-    ppa_srm_oper_config_t srm_config = {};
-    srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-    srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    srm_config.in.block_offset_x = 0;
-    srm_config.in.block_offset_y = 0;
-    srm_config.out.buffer = busPixelData;
-    srm_config.out.buffer_size = busPixelSize;
-    srm_config.out.pic_w = width;
-    srm_config.out.pic_h = height;
-    srm_config.out.block_offset_x = 0;
-    srm_config.out.block_offset_y = 0;
-    srm_config.scale_x = 1;
-    srm_config.scale_y = 1;
-    srm_config.mirror_x = xmirror;
-    srm_config.mirror_y = false;
-    srm_config.rgb_swap = 0;
-    srm_config.byte_swap = 0;
-    srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-    srm_config.in.buffer = rx_buf_1080p;
-    srm_config.in.pic_w = header_info.width;
-    srm_config.in.pic_h = header_info.height;
-    srm_config.in.block_w = header_info.width;
-    srm_config.in.block_h = header_info.height;
-
-    srm_config.scale_x = float(float(width)/float(header_info.width));
-    srm_config.scale_y = float(float(height)/float(header_info.height));
-
-    if (SEGMENT.check1) {
-      
-      // fftResult[0] = beatsin8(10,0,255); // fake music
-      float bass_map = mapf(fftResult[0], bass_peak, 0, 0.5f, 1.0f);
-
-      // Initial block size based on bass_map
-      float raw_block_w = srm_config.in.pic_w * bass_map;
-      float raw_block_h = srm_config.in.pic_h * bass_map;
-
-      // Raw scale factors
-      float raw_scale_x = (float)srm_config.out.pic_w / raw_block_w;
-      float raw_scale_y = (float)srm_config.out.pic_h / raw_block_h;
-
-      // Quantize scale factors to match hardware precision
-      float quant_scale_x = quantize16(raw_scale_x);
-      float quant_scale_y = quantize16(raw_scale_y);
-
-      // Clamp scale to avoid overscaling
-      quant_scale_x = fminf(quant_scale_x, (float)srm_config.out.pic_w); // max scale = full input
-      quant_scale_y = fminf(quant_scale_y, (float)srm_config.out.pic_h);
-
-      // Reverse-calculate block size from quantized scale
-      srm_config.in.block_w = (int)((float)srm_config.out.pic_w / quant_scale_x + 0.5f);
-      srm_config.in.block_h = (int)((float)srm_config.out.pic_h / quant_scale_y + 0.5f);
-
-      // Clamp block size to input image dimensions
-      srm_config.in.block_w = min(srm_config.in.block_w, srm_config.in.pic_w);
-      srm_config.in.block_h = min(srm_config.in.block_h, srm_config.in.pic_h);
-
-      // Center the block within the input image
-      srm_config.in.block_offset_x = (srm_config.in.pic_w - srm_config.in.block_w) / 2;
-      srm_config.in.block_offset_y = (srm_config.in.pic_h - srm_config.in.block_h) / 2;
-
-      // Final scale values (already quantized)
-      srm_config.scale_x = quant_scale_x;
-      srm_config.scale_y = quant_scale_y;
-
-      // Final safety fallback if block doesn't fit
-      if (srm_config.in.block_w > srm_config.in.pic_w || srm_config.in.block_h > srm_config.in.pic_h) {
-          srm_config.in.block_w = srm_config.in.pic_w;
-          srm_config.in.block_h = srm_config.in.pic_h;
-          srm_config.in.block_offset_x = 0;
-          srm_config.in.block_offset_y = 0;
-          srm_config.scale_x = 1.0f;
-          srm_config.scale_y = 1.0f;
-      }
-
-      while (srm_config.scale_x * srm_config.in.block_w > srm_config.out.pic_w) {
-        srm_config.in.block_w--;
-      }
-
-      while (srm_config.scale_y * srm_config.in.block_h > srm_config.out.pic_h) {
-        srm_config.in.block_h--;
-      }
-
-    }
-
-    if (SEGMENT.check2 && fftResult[0] > bass_peak*0.9) {
-      xmirror = !xmirror;
-      srm_config.mirror_x = xmirror;
-    }
-
-    if (!SEGMENT.check2) xmirror = false;
-
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_srm_handle));
-
-    if (SEGMENT.check3) {
-
-      ppa_client_handle_t ppa_fill_handle = NULL;
-      ppa_client_config_t ppa_fill_config = {
-        .oper_type = PPA_OPERATION_FILL,
-        .max_pending_trans_num = 18,
-      };
-      ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
-      
-      uint32_t blackbuffer_size = width * height * 4;
-      static uint8_t* blackbuffer = (uint8_t *) heap_caps_calloc(blackbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
-
-      ppa_fill_oper_config_t fill_config = {};
-      fill_config.out.buffer = blackbuffer;
-      fill_config.out.buffer_size = blackbuffer_size;
-      fill_config.out.pic_w = width;
-      fill_config.out.pic_h = height;
-      fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
-      fill_config.mode = PPA_TRANS_MODE_BLOCKING;
-      fill_config.fill_block_w = width;
-      fill_config.fill_block_h = height;
-      fill_config.fill_argb_color.r = 0;
-      fill_config.fill_argb_color.g = 0;
-      fill_config.fill_argb_color.b = 0;
-       
-      if (SEGMENT.intensity == 0) {
-        fill_config.fill_argb_color.a = map(map(fftResult[0],0,bass_peak,0,255),0,255,255,0);
-      } else {
-        fill_config.fill_argb_color.a = SEGMENT.intensity;
-      }
-
-      if (micros() % 100 < 3) USER_PRINTF("Bass Brightness: Bass = %u Bass Avg = %u Bass Peak = %u, Bass Alpha = %u\n",fftResult[0], bass_average, bass_peak, fill_config.fill_argb_color.a);
-      
-      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
-      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_fill_handle));
-
-      ppa_blend_oper_config_t blend_config = {};
-      blend_config.in_bg.buffer = busPixelData;
-      blend_config.in_bg.pic_w =width;
-      blend_config.in_bg.pic_h = height;
-      blend_config.in_bg.block_w = width;
-      blend_config.in_bg.block_h = height;
-      blend_config.in_bg.block_offset_x = 0;
-      blend_config.in_bg.block_offset_y = 0;
-      blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-      blend_config.in_fg.buffer = blackbuffer;
-      blend_config.in_fg.pic_w = width;
-      blend_config.in_fg.pic_h = height;
-      blend_config.in_fg.block_w = width;
-      blend_config.in_fg.block_h = height;
-      blend_config.in_fg.block_offset_x = 0;
-      blend_config.in_fg.block_offset_y = 0;
-      blend_config.bg_rgb_swap = 0;
-      blend_config.bg_byte_swap = 0;
-      blend_config.fg_rgb_swap = 0;
-      blend_config.fg_byte_swap = 0;
-      blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
-      blend_config.out.buffer = busPixelData;
-      blend_config.out.buffer_size = busPixelSize;
-      blend_config.out.pic_w = width;
-      blend_config.out.pic_h = height;
-      blend_config.out.block_offset_x = 0;
-      blend_config.out.block_offset_y = 0;
-      blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-      blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-      blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-      blend_config.bg_ck_en = false;
-      blend_config.fg_ck_en = false;
-      blend_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-      ppa_client_handle_t ppa_blend_handle = NULL;
-      ppa_client_config_t ppa_blend_config = {
-        .oper_type = PPA_OPERATION_BLEND,
-        .max_pending_trans_num = 1,
-      };
-
-      ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
-      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-      ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
-    }
-
-    // if (micros() % 100 < 3) USER_PRINTF("Scale was %0.3f and %0.3f\n",srm_config.scale_x, srm_config.scale_y);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
+    ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
 
   }
 
-  free(tx_buf_1080p);
-  free(rx_buf_1080p);
+  ppa_client_handle_t ppa_srm_handle = NULL;
+  ppa_client_config_t ppa_srm_config = {
+      .oper_type = PPA_OPERATION_SRM,
+      .max_pending_trans_num = 5,
+  };
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
 
+  ppa_srm_oper_config_t srm_config = {};
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.out.buffer = busPixelData;
+  srm_config.out.buffer_size = busPixelSize;
+  srm_config.out.pic_w = width;
+  srm_config.out.pic_h = height;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.scale_x = 1;
+  srm_config.scale_y = 1;
+  srm_config.mirror_x = xmirror;
+  srm_config.mirror_y = false;
+  srm_config.rgb_swap = 0;
+  srm_config.byte_swap = 0;
+  srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  srm_config.in.buffer = rx_bitmap;
+  srm_config.in.pic_w = header_info.width;
+  srm_config.in.pic_h = header_info.height;
+  srm_config.in.block_w = header_info.width;
+  srm_config.in.block_h = header_info.height;
+
+  srm_config.scale_x = float(float(width)/float(header_info.width));
+  srm_config.scale_y = float(float(height)/float(header_info.height));
+
+  if (SEGMENT.check1) {
+    
+    // fftResult[0] = beatsin8(10,0,255); // fake music
+    float bass_map = mapf(fftResult[0], bass_peak, 0, 0.5f, 1.0f);
+
+    float raw_block_w = srm_config.in.pic_w * bass_map;
+    float raw_block_h = srm_config.in.pic_h * bass_map;
+
+    float raw_scale_x = (float)srm_config.out.pic_w / raw_block_w;
+    float raw_scale_y = (float)srm_config.out.pic_h / raw_block_h;
+
+    // Quantize scale factors to match hardware precision
+    float quant_scale_x = quantize16(raw_scale_x);
+    float quant_scale_y = quantize16(raw_scale_y);
+
+    // Clamp scale to avoid overscaling
+    quant_scale_x = fminf(quant_scale_x, (float)srm_config.out.pic_w); // max scale = full input
+    quant_scale_y = fminf(quant_scale_y, (float)srm_config.out.pic_h);
+
+    // Reverse-calculate block size from quantized scale
+    srm_config.in.block_w = (int)((float)srm_config.out.pic_w / quant_scale_x + 0.5f);
+    srm_config.in.block_h = (int)((float)srm_config.out.pic_h / quant_scale_y + 0.5f);
+
+    // Clamp block size to input image dimensions
+    srm_config.in.block_w = min(srm_config.in.block_w, srm_config.in.pic_w);
+    srm_config.in.block_h = min(srm_config.in.block_h, srm_config.in.pic_h);
+
+    // Center the block within the input image
+    srm_config.in.block_offset_x = (srm_config.in.pic_w - srm_config.in.block_w) / 2;
+    srm_config.in.block_offset_y = (srm_config.in.pic_h - srm_config.in.block_h) / 2;
+
+    // Final scale values (already quantized)
+    srm_config.scale_x = quant_scale_x;
+    srm_config.scale_y = quant_scale_y;
+
+    // Final safety fallback if block doesn't fit
+    if (srm_config.in.block_w > srm_config.in.pic_w || srm_config.in.block_h > srm_config.in.pic_h) {
+        srm_config.in.block_w = srm_config.in.pic_w;
+        srm_config.in.block_h = srm_config.in.pic_h;
+        srm_config.in.block_offset_x = 0;
+        srm_config.in.block_offset_y = 0;
+        srm_config.scale_x = 1.0f;
+        srm_config.scale_y = 1.0f;
+    }
+
+    while (srm_config.scale_x * srm_config.in.block_w > srm_config.out.pic_w) {
+      srm_config.in.block_w--; // just in case
+    }
+
+    while (srm_config.scale_y * srm_config.in.block_h > srm_config.out.pic_h) {
+      srm_config.in.block_h--; // just in case
+    }
+
+  }
+
+  if (SEGMENT.check2 && fftResult[0] > bass_peak*0.9) {
+    xmirror = !xmirror;
+    srm_config.mirror_x = xmirror;
+  }
+
+  if (SEGMENT.custom3 > 0) {
+
+    uint8_t transformer = SEGMENT.custom3;
+    
+    // PPA Transforms
+
+    srm_config.mode = PPA_TRANS_MODE_NON_BLOCKING; // parallel the next ops
+
+    if (transformer < 4) {            // mirror everything on X 
+      srm_config.mirror_x = true;
+    } else if (transformer < 8) {     // mirror everything on Y
+      srm_config.mirror_y = true;
+    } else if (transformer < 12) {    // rotate everything 180 degrees
+      srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
+    } else if (transformer < 16) {    // mirror flip on X
+      srm_config.scale_x /= 2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_x = (srm_config.out.pic_w/2);
+      srm_config.mirror_x = true;
+    } else if (transformer < 20) {    // mirror flip on Y
+      srm_config.scale_y /= 2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = (srm_config.out.pic_h/2);
+      srm_config.mirror_y = true;
+    } else if (transformer < 24) {    // mirror flip on X and Y
+      srm_config.scale_x /= 2;
+      srm_config.scale_y /= 2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      srm_config.mirror_y = true;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.mirror_x = true;
+      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = 0;
+      srm_config.mirror_x = true;
+      srm_config.mirror_y = false;
+    } else if (transformer < 28) {    // 4-up tiling.
+      srm_config.scale_x /= 2;
+      srm_config.scale_y /= 2;
+      srm_config.mirror_y = false;
+      srm_config.mirror_y = false;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = 0;
+    } else if (transformer <= 32) {    // 4-up tiling with rotations
+      srm_config.scale_x /= 2;
+      srm_config.scale_y /= 2;
+      srm_config.mirror_y = false;
+      srm_config.mirror_y = false;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+      srm_config.out.block_offset_y = 0;
+      srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+    } 
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING; // last call blocks.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+  } else {
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING; // last call blocks, just in case.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+  }
+
+  if (!SEGMENT.check2) xmirror = false;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_srm_handle));
+
+  if (SEGMENT.check3) {
+
+    ppa_client_handle_t ppa_fill_handle = NULL;
+    ppa_client_config_t ppa_fill_config = {
+      .oper_type = PPA_OPERATION_FILL,
+      .max_pending_trans_num = 18,
+    };
+    ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
+    
+    uint32_t blackbuffer_size = width * height * 4;
+    uint8_t* blackbuffer = (uint8_t *) heap_caps_calloc(blackbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+
+    ppa_fill_oper_config_t fill_config = {};
+    fill_config.out.buffer = blackbuffer;
+    fill_config.out.buffer_size = blackbuffer_size;
+    fill_config.out.pic_w = width;
+    fill_config.out.pic_h = height;
+    fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
+    fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+    fill_config.fill_block_w = width;
+    fill_config.fill_block_h = height;
+    
+    if (SEGMENT.custom2 > 0) {
+      CHSV hsvColor(SEGMENT.custom2, 255, 128); // Full saturation and half brightness
+      CRGB rgbColor;
+      rgbColor = hsvColor; // FastLED auto-converts HSV to RGB
+      fill_config.fill_argb_color.r = rgbColor.r;
+      fill_config.fill_argb_color.g = rgbColor.g;
+      fill_config.fill_argb_color.b = rgbColor.b;
+    } else {
+      fill_config.fill_argb_color.r = 0;
+      fill_config.fill_argb_color.g = 0;
+      fill_config.fill_argb_color.b = 0;
+    }
+      
+    if (SEGMENT.intensity == 0) {
+      fill_config.fill_argb_color.a = map(map(fftResult[0],0,bass_peak,0,255),0,255,255,0);
+    } else {
+      fill_config.fill_argb_color.a = SEGMENT.intensity;
+    }
+
+    // if (micros() % 100 < 3) USER_PRINTF("Bass Brightness: Bass = %u Bass Avg = %u Bass Peak = %u, Bass Alpha = %u\n",fftResult[0], bass_average, bass_peak, fill_config.fill_argb_color.a);
+    
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black/colour
+    ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
+
+    ppa_blend_oper_config_t blend_config = {};
+    blend_config.in_bg.buffer = busPixelData;
+    blend_config.in_bg.pic_w =width;
+    blend_config.in_bg.pic_h = height;
+    blend_config.in_bg.block_w = width;
+    blend_config.in_bg.block_h = height;
+    blend_config.in_bg.block_offset_x = 0;
+    blend_config.in_bg.block_offset_y = 0;
+    blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.in_fg.buffer = blackbuffer;
+    blend_config.in_fg.pic_w = width;
+    blend_config.in_fg.pic_h = height;
+    blend_config.in_fg.block_w = width;
+    blend_config.in_fg.block_h = height;
+    blend_config.in_fg.block_offset_x = 0;
+    blend_config.in_fg.block_offset_y = 0;
+    blend_config.bg_rgb_swap = 0;
+    blend_config.bg_byte_swap = 0;
+    blend_config.fg_rgb_swap = 0;
+    blend_config.fg_byte_swap = 0;
+    blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+    blend_config.out.buffer = busPixelData;
+    blend_config.out.buffer_size = busPixelSize;
+    blend_config.out.pic_w = width;
+    blend_config.out.pic_h = height;
+    blend_config.out.block_offset_x = 0;
+    blend_config.out.block_offset_y = 0;
+    blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.bg_ck_en = false;
+    blend_config.fg_ck_en = false;
+    blend_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    ppa_client_handle_t ppa_blend_handle = NULL;
+    ppa_client_config_t ppa_blend_config = {
+      .oper_type = PPA_OPERATION_BLEND,
+      .max_pending_trans_num = 1,
+    };
+
+    ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
+    ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
+
+    free(blackbuffer);
+
+  }
+
+  // if (micros() % 100 < 3) USER_PRINTF("Scale was %0.3f and %0.3f\n",srm_config.scale_x, srm_config.scale_y);
+
+  // free(tx_buf_1080p);
+  free(rx_bitmap);
+
+  imagelimiter = timer + (1000000/max(uint8_t(1),SEGMENT.custom1));
   #endif // PPA Required
   return FRAMETIME;
 
 } // mode_PPA_TESTBED)
-static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "Image Player ☾@Folder Picker,???,???,???,???,Bass Scaler,Bass Flip,Bass Brightness;!,,Peaks;!;2f;sx=1,ix=1,c1=1,c2=1,c3=0,o1=0,o2=1,o3=0,pal=72";
+static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "Image Player ☾🐺@Folder Picker,Fill (0==Bass),FPS Limit,Fade Colour,Transforms,Bass Scaler,Bass Flip,Bass Fill;!,,Peaks;!;2f;sx=1,ix=1,c1=30,c2=1,c3=1,o1=0,o2=1,o3=0";
 
 #endif // WLED_DISABLE_2D
 
