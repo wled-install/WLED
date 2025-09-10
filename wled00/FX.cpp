@@ -14,6 +14,7 @@
   #include "driver/ppa.h"
   #include "driver/jpeg_decode.h"
   #include "esp_h264_dec_sw.h"
+  #include "ImageCacheManager.h"
 #endif
 #ifdef WLEDMM_FASTPATH
 #undef SEGMENT
@@ -9129,92 +9130,9 @@ int get_sequence_folder(const std::string& base_path, std::string& selected_path
     return 0;
 }
 
-#if defined(ARDUINO_ARCH_ESP32P4)
-extern "C" {
-  int p4_mul16x16(uint8_t* outpacket, uint8_t* brightness, uint16_t num_loops, uint8_t* pixelbuffer);
-}
-#endif
-
 float quantize16(float value) {
     return roundf(value * 16.0f) / 16.0f;
 }
-
-#include <string>
-#include <vector>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
-// Structure to hold image data
-struct ImageData {
-    uint8_t* buffer;
-    size_t size;
-};
-
-// Static cache and folder tracking
-static std::vector<ImageData> image_cache;
-static std::string cached_folder;
-
-// Preload all JPEG files from a folder into PSRAM
-bool preload_images(const std::string& folder_path) {
-
-    if (folder_path == cached_folder) return true; // Already loaded
-
-    long unsigned timer = micros();
-
-    // Clear previous cache
-    for (auto& img : image_cache) {
-        free(img.buffer);
-    }
-    image_cache.clear();
-
-    DIR* dir = opendir(folder_path.c_str());
-    if (!dir) return false;
-
-    struct dirent* entry;
-    struct stat st;
-    std::vector<std::string> jpeg_files;
-
-    while ((entry = readdir(dir)) != nullptr) {
-        std::string name = entry->d_name;
-        std::string full_path = folder_path + "/" + name;
-
-        if ((name.find(".jpg") != std::string::npos || name.find(".jpeg") != std::string::npos) &&
-            stat(full_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
-            jpeg_files.push_back(full_path);
-        }
-    }
-    closedir(dir);
-
-    for (const auto& path : jpeg_files) {
-        FILE* file = fopen(path.c_str(), "rb");
-        if (!file) continue;
-
-        fseek(file, 0, SEEK_END);
-        size_t size = ftell(file);
-        rewind(file);
-
-        uint8_t* buffer = (uint8_t*)ps_malloc(size); // PSRAM allocation
-        if (!buffer) {
-            fclose(file);
-            continue;
-        }
-
-        fread(buffer, 1, size, file);
-        fclose(file);
-
-        image_cache.push_back({ buffer, size });
-    }
-
-    cached_folder = folder_path;
-    USER_PRINTF("Caching took %0.2f seconds.\n", float((micros()-timer)/1000000));
-    return !image_cache.empty();
-} 
-
-#include <sstream>
-#include <iomanip>
 
 uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   #ifdef SOC_PPA_SUPPORTED // always for PPA effects
@@ -9260,7 +9178,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     return 1;
   }
 
-  static uint16_t frame = 1;
+  static uint16_t frame = 0;
   std::string folder_path;
   static std::string last_folder_path;
 
@@ -9270,26 +9188,36 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     return 1;
   }
 
-  // Only preload if folder has changed
-  if (folder_path != last_folder_path) {
-    if (!preload_images(folder_path)) {
-      USER_PRINTLN("Failed to preload images");
-      delay(500);
-      return 1;
+  if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
+      frame = 0;
+  }
+
+  ImageData* img = ImageCacheManager::getInstance().getImage(folder_path, frame);
+
+  uint8_t* file_jpeg = NULL;
+  size_t file_jpeg_size = 0;
+
+  if (img) {
+    // Got the image, display it...
+    // display_jpeg(img->buffer, img->size);
+    // ESP_LOGI("APP", "Displaying %s, image %d", current_folder.c_str(), folder_path);
+    
+    file_jpeg = img->buffer;
+    file_jpeg_size = img->size;
+
+    // Move to the next image, wrapping around if necessary
+    frame++;
+    if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
+        frame = 0;
     }
-    last_folder_path = folder_path;
+  } else {
+    // Could not get image (it doesn't exist or loading stopped due to PSRAM limit)
+    USER_PRINTF("Could not get image %d from %s. Waiting...", frame, folder_path.c_str());
   }
-
-  if (frame - 1 >= image_cache.size()) {
-    frame = 1;
-  }
-
-  uint8_t* file_jpeg = image_cache[frame - 1].buffer;
-  size_t file_jpeg_size = image_cache[frame - 1].size;
-
+  
   if (!file_jpeg || file_jpeg_size == 0) {
     USER_PRINTF("Cached image data missing for frame %d\n", frame);
-    frame = 1;
+    frame = 0;
     delay(500);
     return 1;
   }
@@ -9297,7 +9225,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   if (file_jpeg == NULL) {
     DEBUG_PRINTLN("NULL at JPEG pointer!");
     delay(500);
-    return 1;
+    return 0;
   }
 
   frame++;

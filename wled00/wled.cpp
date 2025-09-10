@@ -29,6 +29,7 @@ static const char *TAG = "WLED";
   #include <dirent.h>
   #include "usb/usb_host.h"
   #include "usb/msc_host_vfs.h"
+  #include "ImageCacheManager.h"
   
   #define MNT_PATH "/usb"     // Base mount path prefix, devices will be mounted as /usb0, /usb1, /usb2...
   #define MAX_MSC_DEVICES  CONFIG_FATFS_VOLUME_COUNT 
@@ -218,7 +219,7 @@ static const char *TAG = "WLED";
   {
       usb_host_config_t host_config = {};
       host_config.intr_flags = ESP_INTR_FLAG_LEVEL1;
-      host_config.peripheral_map = BIT(0);
+      host_config.peripheral_map = BIT(0); // <--- this may be a bug of the current IDFv5.5 with USB High-Speed devices.
 
       // Bias Mode	  nptx_fifo_lines	  ptx_fifo_lines	rx_fifo_lines
       // Balanced	  256	              128	            512 (896 - 256 - 128)
@@ -229,12 +230,12 @@ static const char *TAG = "WLED";
       // host_config.fifo_settings_custom.ptx_fifo_lines = 128;
       // host_config.fifo_settings_custom.rx_fifo_lines = 512;
 
-      // Testing a mid point: (marginal winner!)
+      // Testing a mid point: (marginal winner!) - THIS MAY BE FLAKEY? 
       // (tried a bunch off other ones too, this was the best - they were worse than balanced)
       //
-      host_config.fifo_settings_custom.nptx_fifo_lines = 128;
-      host_config.fifo_settings_custom.ptx_fifo_lines = 128;
-      host_config.fifo_settings_custom.rx_fifo_lines = 640;
+      // host_config.fifo_settings_custom.nptx_fifo_lines = 128;
+      // host_config.fifo_settings_custom.ptx_fifo_lines = 128;
+      // host_config.fifo_settings_custom.rx_fifo_lines = 640;
 
       // If you need to know your on-SOC FIFO numbers this is the code - just for checking the register on the P4.
       // (The answer is 896, at least on all the current P4 devices I have.)
@@ -694,6 +695,8 @@ void WLED::loop()
           ESP_ERROR_CHECK_WITHOUT_ABORT(msc_host_get_device_info(msc_devices[slot]->msc_device, &info));
           print_device_info(&info);
           show_list_files_all_devices();
+          USER_PRINTLN("Background imaging caching started...");
+          ImageCacheManager::getInstance().startPreload("/usb0");
         } else {
           USER_PRINTLN("USB operation failed. Try replugging?");
         }
@@ -1742,8 +1745,8 @@ void WLED::handleConnection()
   static unsigned retryCount = 0;  // WLEDMM
   // reconnect WiFi to clear stale allocations if heap gets too low
   if ((!strip.isUpdating()) && (now - heapTime > 5000)) { // WLEDMM: updated with better logic for small heap available by block, not total. // WLEDMM trying to use a moment when the strip is idle
-#if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX)
-    uint32_t heap = ESP.getFreeHeap(); // WLEDMM works better on -S2
+#if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX) || defined(ARDUINO_ARCH_ESP32P4)
+    uint32_t heap = ESP.getFreeHeap(); // TroyHacks P4 - FIXME this was tripping but notihng was broken. // WLEDMM works better on -S2
 #else
     uint32_t heap = heap_caps_get_largest_free_block(0x1800); // WLEDMM: This is a better metric for free heap.
 #endif
