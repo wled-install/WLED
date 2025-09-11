@@ -52,7 +52,7 @@
 #if defined(WLEDMM_FASTPATH) && !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && defined(ARDUINO_ARCH_ESP32)
 // FASTPATH: use higher priority, to avoid that webserver (ws, json, etc) delays sample processing
 //#define FFTTASK_PRIORITY 3 // competing with async_tcp
-#define FFTTASK_PRIORITY 4   // above async_tcp
+#define FFTTASK_PRIORITY 6   // above async_tcp and USB Mass Storage
 #else
 #define FFTTASK_PRIORITY 1 // standard: looptask prio
 //#define FFTTASK_PRIORITY 2 // above looptask, below async_tcp
