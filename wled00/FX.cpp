@@ -9091,7 +9091,7 @@ static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@Oscillator O
 #include <dirent.h>
 #include <sys/stat.h>
 
-int get_sequence_folder(const std::string& base_path, std::string& selected_path, uint8_t slider_value, bool force_rescan = false) {
+int get_sequence_folder(const std::string& base_path, std::string& selected_path, uint8_t slider_value, bool force_rescan = false, bool print_map = true) {
   static std::vector<std::string> cached_matches;
   static bool cache_initialized = false;
 
@@ -9115,7 +9115,6 @@ int get_sequence_folder(const std::string& base_path, std::string& selected_path
 
       if (stat(full_folder_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
         folder_name.rfind("sequence", 0) == 0) {
-
         std::string image_path = full_folder_path + "/image-0001.jpg";
         if (stat(image_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
           if (folder_name.length() > 4 && folder_name.substr(folder_name.length() - 4) == "_hot") {
@@ -9136,8 +9135,21 @@ int get_sequence_folder(const std::string& base_path, std::string& selected_path
     cached_matches.insert(cached_matches.end(), hot_folders.begin(), hot_folders.end());
     cached_matches.insert(cached_matches.end(), cold_folders.begin(), cold_folders.end());
 
-    if (cached_matches.empty()) return -2; // No matching folders found
+    if (cached_matches.empty()) return -2;
     cache_initialized = true;
+
+    if (print_map) {
+      USER_PRINTLN("Sequence Folder Map:");
+      const int num_folders = cached_matches.size();
+      for (int i = 0; i < num_folders; ++i) {
+        int lower_bound = (i * 256) / num_folders;
+        int upper_bound = ((i + 1) * 256) / num_folders - 1;
+        if (i == num_folders - 1) {
+          upper_bound = 255;
+        }
+        USER_PRINTF("[%3d-%3d] -> %s\n", lower_bound, upper_bound, cached_matches[i].c_str());
+      }
+    }
   }
 
   int index = (slider_value * cached_matches.size()) / 256;
@@ -9201,6 +9213,11 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     USER_PRINTLN("No sequence folders found — skipping");
     delay(500);
     return 1;
+  }
+
+  if (folder_path != last_folder_path) {
+    last_folder_path = folder_path;
+    USER_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
   }
 
   if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
