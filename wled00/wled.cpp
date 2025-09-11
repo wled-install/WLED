@@ -222,7 +222,7 @@ static const char *TAG = "WLED";
       host_config.peripheral_map = BIT(0); // <--- this may be a bug of the current IDFv5.5 with USB High-Speed devices.
 
       // Bias Mode	  nptx_fifo_lines	  ptx_fifo_lines	rx_fifo_lines
-      // Balanced	  256	              128	            512 (896 - 256 - 128)
+      // Balanced	    256	              128	            512 (896 - 256 - 128)
       // IN-Biased	  64	              128	            704 (896 - 64 - 128) <--- does not work, but 896 seenms to be the correct total, confirmed by reading out the register.
 
       // Balanced values work: (works! and seem to match the IDF built with balanced defaults)

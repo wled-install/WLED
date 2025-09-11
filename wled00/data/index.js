@@ -666,10 +666,10 @@ function parseInfo(i) {
 function populateInfo(i)
 {
 	var cn="";
-	var heap = i.freeheap/1000;
+	var heap = i.freeheap/1024;
 	var heap = Math.round(i.freeheap/100)/10;        // WLEDMM bugfix
-	var theap = (i.totalheap>0)?i.totalheap/1000:-1; //WLEDMM - total heap is not available on 8266
-	var flashsize = i.getflash/1000; //WLEDMM and Athom
+	var theap = (i.totalheap>0)?i.totalheap/1024:-1; //WLEDMM - total heap is not available on 8266
+	var flashsize = i.getflash/1024; //WLEDMM and Athom
 	flashsize = flashsize.toFixed(1); //WLEDMM and Athom
 	var pwr = i.leds.pwr;
 	var pwru = "Not calculated";
@@ -712,12 +712,31 @@ ${inforow("MAC address",i.mac)}
 ${inforow("Uptime",getRuntimeStr(i.uptime))}
 <!-- WLEDMM begin--> 
 <tr><td colspan=2><hr style="height:2px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
-${inforow("Filesystem",i.fs.u + "/" + i.fs.t + " kB, " +Math.round(i.fs.u*100/i.fs.t) + "%")}
-${theap>0?inforow("Heap ☾",((i.totalheap-i.freeheap)/1000).toFixed(0)+"/"+theap.toFixed(0)+" kB",", "+Math.round((i.totalheap-i.freeheap)/(10*theap))+"%"):inforow("Free heap",heap," kB")}  <!--WLEDMM different for 8266-->
-${i.minfreeheap?inforow("Max used heap ☾",((i.totalheap-i.minfreeheap)/1000).toFixed(0)+" kB",", "+Math.round((i.totalheap-i.minfreeheap)/(10*theap))+"%"):""} 
-${i.psram?inforow("PSRAM ☾",((i.tpram-i.psram)/1024).toFixed(0)+"/"+(i.tpram/1024).toFixed(0)+" kB",", "+((i.tpram-i.psram)*100.0/i.tpram).toFixed(1)+"%"):""} 
-${i.psusedram?inforow("Max used PSRAM ☾",((i.tpram-i.psusedram)/1024).toFixed(0)+" kB",", "+((i.tpram-i.psusedram)*100.0/i.tpram).toFixed(1)+"%"):""} 
-${i.freestack?inforow("Free stack ☾",(i.freestack/1000).toFixed(3)," kB"):""} <!--WLEDMM-->
+${inforow("Filesystem", i.fs.u + "/" + i.fs.t + " KB, " + Math.round(i.fs.u * 100 / i.fs.t) + "%")}
+${(() => {
+  if (!i.usb) return ""; // Return empty string if no USB
+
+  const formatBytes = (bytes) => {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+    }
+    if (bytes >= 1024 * 1024) {
+      return (bytes / 1024 / 1024).toFixed(1) + " MB";
+    }
+    return Math.round(bytes / 1024) + " KB";
+  };
+  const usageStr = `${formatBytes(i.usb.u)} / ${formatBytes(i.usb.t)}`;
+  const percent = i.usb.t > 0 ? Math.round(i.usb.u * 100 / i.usb.t) : 0;
+  return inforow("USB Storage", `${usageStr}, ${percent}%`);
+})()}
+${i.cache ? inforow("ImageCache", i.cache.s) : ""}
+${i.cache && i.cache.f ? inforow("ImageCache Dir", i.cache.f.substring(0, i.cache.f.lastIndexOf('/'))) : ""}
+${i.cache && i.cache.p > 0 ? inforow("ImageCache Size", i.cache.p + " KB") : ""}
+${theap>0?inforow("Heap ☾",((i.totalheap-i.freeheap)/1024).toFixed(0)+"/"+theap.toFixed(0)+" KB",", "+Math.round((i.totalheap-i.freeheap)/(10*theap))+"%"):inforow("Free heap",heap," KB")}  <!--WLEDMM different for 8266-->
+${i.minfreeheap?inforow("Max used heap ☾",((i.totalheap-i.minfreeheap)/1024).toFixed(0)+" KB",", "+Math.round((i.totalheap-i.minfreeheap)/(10*theap))+"%"):""} 
+${i.psram?inforow("PSRAM ☾",((i.tpram-i.psram)/1024).toFixed(0)+"/"+(i.tpram/1024).toFixed(0)+" KB",", "+((i.tpram-i.psram)*100.0/i.tpram).toFixed(1)+"%"):""} 
+${i.psusedram?inforow("Max used PSRAM ☾",((i.tpram-i.psusedram)/1024).toFixed(0)+" KB",", "+((i.tpram-i.psusedram)*100.0/i.tpram).toFixed(1)+"%"):""} 
+${i.freestack?inforow("Free stack ☾",(i.freestack/1024).toFixed(3)," KB"):""} <!--WLEDMM-->
 <tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
 ${i.tpram?inforow("PSRAM " + (i.psrmode?"("+i.psrmode+" mode) ":"") + " ☾",(i.tpram/1024/1024).toFixed(0)," MB"):inforow("NO PSRAM found.", "")}
 ${i.e32flash?inforow("Flash mode "+i.e32flashmode+i.e32flashtext + " ☾",i.e32flash+" MB, "+i.e32flashspeed," Mhz"):""}

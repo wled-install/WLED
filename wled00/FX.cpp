@@ -9087,47 +9087,62 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
 } // mode_GEQPPA()
 static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
+#include <algorithm>
 #include <dirent.h>
+#include <sys/stat.h>
 
 int get_sequence_folder(const std::string& base_path, std::string& selected_path, uint8_t slider_value, bool force_rescan = false) {
-    static std::vector<std::string> cached_matches;
-    static bool cache_initialized = false;
+  static std::vector<std::string> cached_matches;
+  static bool cache_initialized = false;
 
-    if (force_rescan && cache_initialized) {
-        cached_matches.clear();
-        cache_initialized = false;
-    }
+  if (force_rescan && cache_initialized) {
+    cached_matches.clear();
+    cache_initialized = false;
+  }
 
-    if (!cache_initialized) {
-        DIR* dir;
-        struct dirent* entry;
-        struct stat st;
+  if (!cache_initialized) {
+    DIR* dir = opendir(base_path.c_str());
+    if (!dir) return -1;
 
-        dir = opendir(base_path.c_str());
-        if (!dir) return -1;
+    std::vector<std::string> hot_folders;
+    std::vector<std::string> cold_folders;
 
-        while ((entry = readdir(dir)) != nullptr && cached_matches.size() < 256) {
-            std::string folder_name = entry->d_name;
-            std::string full_folder_path = base_path + "/" + folder_name;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+      std::string folder_name = entry->d_name;
+      std::string full_folder_path = base_path + "/" + folder_name;
+      struct stat st;
 
-            if (stat(full_folder_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
-                folder_name.find("sequence") != std::string::npos) {
+      if (stat(full_folder_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
+        folder_name.rfind("sequence", 0) == 0) {
 
-                std::string image_path = full_folder_path + "/image-0001.jpg";
-                if (stat(image_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
-                    cached_matches.push_back(folder_name);
-                }
-            }
+        std::string image_path = full_folder_path + "/image-0001.jpg";
+        if (stat(image_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+          if (folder_name.length() > 4 && folder_name.substr(folder_name.length() - 4) == "_hot") {
+            hot_folders.push_back(folder_name);
+          }
+          else {
+            cold_folders.push_back(folder_name);
+          }
         }
-        closedir(dir);
-
-        if (cached_matches.empty()) return -2;
-        cache_initialized = true;
+      }
     }
+    closedir(dir);
 
-    int index = (slider_value * cached_matches.size()) / 256;
-    selected_path = base_path + "/" + cached_matches[index];
-    return 0;
+    std::sort(hot_folders.begin(), hot_folders.end());
+    std::sort(cold_folders.begin(), cold_folders.end());
+
+    cached_matches.reserve(hot_folders.size() + cold_folders.size());
+    cached_matches.insert(cached_matches.end(), hot_folders.begin(), hot_folders.end());
+    cached_matches.insert(cached_matches.end(), cold_folders.begin(), cold_folders.end());
+
+    if (cached_matches.empty()) return -2; // No matching folders found
+    cache_initialized = true;
+  }
+
+  int index = (slider_value * cached_matches.size()) / 256;
+  selected_path = base_path + "/" + cached_matches[index];
+  return 0;
 }
 
 float quantize16(float value) {
@@ -9198,21 +9213,16 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   size_t file_jpeg_size = 0;
 
   if (img) {
-    // Got the image, display it...
-    // display_jpeg(img->buffer, img->size);
-    // ESP_LOGI("APP", "Displaying %s, image %d", current_folder.c_str(), folder_path);
-    
+
     file_jpeg = img->buffer;
     file_jpeg_size = img->size;
 
-    // Move to the next image, wrapping around if necessary
     frame++;
     if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
         frame = 0;
     }
   } else {
-    // Could not get image (it doesn't exist or loading stopped due to PSRAM limit)
-    USER_PRINTF("Could not get image %d from %s. Waiting...", frame, folder_path.c_str());
+    USER_PRINTF("Could not get image %d from %s.", frame, folder_path.c_str());
   }
   
   if (!file_jpeg || file_jpeg_size == 0) {

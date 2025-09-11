@@ -1,5 +1,6 @@
 #include "wled.h"
-
+#include "ImageCacheManager.h"
+#include "esp_vfs_fat.h"
 #include "palettes.h"
 
 #define JSON_PATH_STATE      1
@@ -1036,6 +1037,41 @@ void serializeInfo(JsonObject root)
   fs_info["u"] = fsBytesUsed / 1000;
   fs_info["t"] = fsBytesTotal / 1000;
   fs_info[F("pmt")] = presetsModifiedTime;
+
+  JsonObject cache_info = root.createNestedObject("cache");
+
+  CacheStatus status = ImageCacheManager::getInstance().getStatus();
+
+  switch (status) {
+  case CacheStatus::IDLE:
+    cache_info["s"] = "Idle";
+    break;
+  case CacheStatus::PRELOADING_BG:
+    cache_info["s"] = "Preloading";
+    break;
+  case CacheStatus::LOADING_DEMAND:
+    cache_info["s"] = "On-Demand Load";
+    break;
+  }
+
+  cache_info["f"] = ImageCacheManager::getInstance().getCurrentFile();
+  cache_info["p"] = (ImageCacheManager::getInstance().getCacheUsedBytes())/1024;
+
+  uint64_t usb_bytes_total = 0;
+  uint64_t usb_bytes_free = 0;
+  const char* mount_path = "/usb0";
+
+  // This single call checks for the drive and gets its info.
+  // It will return ESP_OK only if a drive is mounted at /usb0.
+  esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);
+
+  // Only add the "usb" object to your JSON if the call was successful.
+  if (result == ESP_OK) {
+    uint64_t usb_bytes_used = usb_bytes_total - usb_bytes_free;
+    JsonObject usb_info = root.createNestedObject("usb");
+    usb_info["u"] = usb_bytes_used;
+    usb_info["t"] = usb_bytes_total;
+  }
 
   root[F("ndc")] = nodeListEnabled ? (int)Nodes.size() : -1;
 
