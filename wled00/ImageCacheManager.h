@@ -7,7 +7,7 @@
 #include "freertos/semphr.h"
 #include "PSRAM_Allocator.h"
 #ifndef IMAGECACHE_BG_PRIORITY
-    #define IMAGECACHE_BG_PRIORITY = 5
+  #define IMAGECACHE_BG_PRIORITY = 5
 #endif
 
 // The state of the caching process
@@ -50,7 +50,7 @@ class ImageCacheManager {
     void operator=(const ImageCacheManager&) = delete;
 
     static void _preloadTask(void* params);
-    void _synchronizeFolder(const psram_string& folder_path);
+    void _synchronizeFolder(const psram_string& folder_path, bool is_on_demand);
 
     // Main cache is a PSRAM-based map of maps
     psram_image_map image_cache;

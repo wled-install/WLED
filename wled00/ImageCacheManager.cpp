@@ -38,7 +38,7 @@ void ImageCacheManager::startPreload(const std::string& root_path) {
   }
   // Don't clear cache here to allow for intelligent sync
   preload_root_path = root_path.c_str();
-  xTaskCreate(_preloadTask, "preload_task", 4096, this, IMAGECACHE_BG_PRIORITY, &preload_task_handle);
+  xTaskCreatePinnedToCore(_preloadTask, "preload_task", 4096, this, IMAGECACHE_BG_PRIORITY, &preload_task_handle, 0); // core 0, where FFT lives
 }
 
 ImageData* ImageCacheManager::getImage(const std::string& folder_path, size_t index) {
@@ -53,7 +53,7 @@ ImageData* ImageCacheManager::getImage(const std::string& folder_path, size_t in
   }
 
   ESP_LOGI(TAG, "On-demand loading folder: %s", folder_path.c_str());
-  _synchronizeFolder(ps_folder_path);
+  _synchronizeFolder(ps_folder_path, true);
 
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
   data = _getImageByIndex(ps_folder_path, index);
@@ -130,13 +130,13 @@ void ImageCacheManager::_preloadTask(void* params) {
   ESP_LOGI(TAG, "--- Processing %d high-priority (_hot) folders ---", hot_folders.size());
   for (const auto& folder_name : hot_folders) {
     psram_string full_path = manager->preload_root_path + "/" + folder_name;
-    manager->_synchronizeFolder(full_path);
+    manager->_synchronizeFolder(full_path, false);
   }
 
   ESP_LOGI(TAG, "--- Processing %d standard-priority folders ---", cold_folders.size());
   for (const auto& folder_name : cold_folders) {
     psram_string full_path = manager->preload_root_path + "/" + folder_name;
-    manager->_synchronizeFolder(full_path);
+    manager->_synchronizeFolder(full_path, false);
   }
 
   manager->current_status = CacheStatus::IDLE;
@@ -149,11 +149,20 @@ void ImageCacheManager::_preloadTask(void* params) {
   vTaskDelete(NULL);
 }
 
-void ImageCacheManager::_synchronizeFolder(const psram_string& folder_path) {
+void ImageCacheManager::_synchronizeFolder(const psram_string& folder_path, bool is_on_demand) {
 
   xSemaphoreTake(loader_mutex, portMAX_DELAY);
 
+  CacheStatus old_status = current_status; // Save the current state
+  if (is_on_demand) {
+    current_status = CacheStatus::LOADING_DEMAND;
+  }
+
   if (xTaskGetCurrentTaskHandle() != preload_task_handle) {
+    current_status = CacheStatus::LOADING_DEMAND;
+  }
+
+  if (is_on_demand) {
     current_status = CacheStatus::LOADING_DEMAND;
   }
 
@@ -248,8 +257,8 @@ void ImageCacheManager::_synchronizeFolder(const psram_string& folder_path) {
 
   xSemaphoreGive(cache_mutex);
 
-  if (current_status == CacheStatus::LOADING_DEMAND) {
-    current_status = CacheStatus::IDLE;
+  if (is_on_demand) {
+    current_status = old_status;
     xSemaphoreTake(cache_mutex, portMAX_DELAY);
     current_loading_file = "";
     xSemaphoreGive(cache_mutex);
