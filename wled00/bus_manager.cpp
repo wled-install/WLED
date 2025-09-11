@@ -497,7 +497,7 @@ void IRAM_ATTR_YN BusNetwork::setPixelColor(uint32_t pix, uint32_t c) {
 
     uint32_t offset = pix * _UDPchannels;
     uint8_t co = _colorOrderMap.getPixelColorOrder(pix + _start, _colorOrder);
-
+    #ifndef WLEDMM_REMAP_AT_OUTPUT
     if (_colorOrder != co || _colorOrder != COL_ORDER_RGB) {
         switch (co) {
             case COL_ORDER_GRB:
@@ -524,6 +524,10 @@ void IRAM_ATTR_YN BusNetwork::setPixelColor(uint32_t pix, uint32_t c) {
         _data[offset] = R(c); _data[offset+1] = G(c); _data[offset+2] = B(c);
         if (_rgbw) _data[offset+3] = W(c);
     }
+    #else
+    _data[offset] = R(c); _data[offset + 1] = G(c); _data[offset + 2] = B(c);
+    if (_rgbw) _data[offset + 3] = W(c);
+    #endif
 }
 
 uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint32_t pix) const {
@@ -535,7 +539,7 @@ uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint32_t pix) const {
     uint8_t g = _data[offset + 1];
     uint8_t b = _data[offset + 2];
     uint8_t w = _rgbw ? _data[offset + 3] : 0;
-
+    #ifndef WLEDMM_REMAP_AT_OUTPUT
     switch (co) {
         case COL_ORDER_GRB: return RGBW32(g, r, b, w);
         case COL_ORDER_RGB: return RGBW32(r, g, b, w);
@@ -545,12 +549,15 @@ uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint32_t pix) const {
         case COL_ORDER_BGR: return RGBW32(b, g, r, w);
         default: return RGBW32(r, g, b, w); // default to RGB order
     }
+    #else
+    return RGBW32(r, g, b, w); // default to RGB order
+    #endif
 }
 
 void IRAM_ATTR BusNetwork::show() {
   if (!_valid || !canShow()) return;
   _broadcastLock = true;
-  realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _artnet_outputs, _artnet_leds_per_output, _artnet_fps_limit);
+  realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _artnet_outputs, _artnet_leds_per_output, _artnet_fps_limit, _colorOrder);
   _broadcastLock = false;
 }
 

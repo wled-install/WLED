@@ -911,91 +911,92 @@ void __attribute__((hot)) process_16bit(uint16_t* buffer, const uint32_t* transp
 
 } // namespace detail
 
+// 1. Add the color_order parameter to the function signature
 void create_transposed_led_output_optimized(
-    const uint8_t* input_buffer,
-    uint16_t* output_buffer, // Treated as a generic memory buffer
-    const uint32_t pixels_per_pin,
-    const uint32_t num_active_pins,
-    const bool is_rgbw,
-    const uint8_t bri)
+  const uint8_t* input_buffer,
+  uint16_t* output_buffer,
+  const uint32_t pixels_per_pin,
+  const uint32_t num_active_pins,
+  const bool is_rgbw,
+  const uint8_t bri,
+  const uint8_t color_order) 
 {
-    // --- Cache Initialization (unchanged) ---
-    static uint32_t waveform_cache[256];
-    static uint8_t brightness_cache[256];
-    static uint8_t last_bri = 0;
+  static uint32_t waveform_cache[256];
+  static uint8_t brightness_cache[256];
+  static uint8_t last_bri = 0;
 
-    static const uint16_t bitpatterns[16] = {
-        0b1000100010001000, 0b1000100010001110, 0b1000100011101000, 0b1000100011101110,
-        0b1000111010001000, 0b1000111010001110, 0b1000111011101000, 0b1000111011101110,
-        0b1110100010001000, 0b1110100010001110, 0b1110100011101000, 0b1110100011101110,
-        0b1110111010001000, 0b1110111010001110, 0b1110111011101000, 0b1110111011101110,
-    };
+  static const uint16_t bitpatterns[16] = {
+      0b1000100010001000, 0b1000100010001110, 0b1000100011101000, 0b1000100011101110,
+      0b1000111010001000, 0b1000111010001110, 0b1000111011101000, 0b1000111011101110,
+      0b1110100010001000, 0b1110100010001110, 0b1110100011101000, 0b1110100011101110,
+      0b1110111010001000, 0b1110111010001110, 0b1110111011101000, 0b1110111011101110,
+  };
 
-    if (bri != last_bri) {
-        for (int i = 0; i < 256; ++i) brightness_cache[i] = (i * bri) >> 8;
-        for (int i = 0; i < 256; ++i) {
-            const uint16_t p1 = bitpatterns[i >> 4];
-            const uint16_t p2 = bitpatterns[i & 0x0F];
-            waveform_cache[i] = (uint32_t(p2) << 16) | p1;
-        }
-        last_bri = bri;
+  if (bri != last_bri) {
+    for (int i = 0; i < 256; ++i) brightness_cache[i] = (i * bri) >> 8;
+    for (int i = 0; i < 256; ++i) {
+      const uint16_t p1 = bitpatterns[i >> 4];
+      const uint16_t p2 = bitpatterns[i & 0x0F];
+      waveform_cache[i] = (uint32_t(p2) << 16) | p1;
     }
-    
-    // --- Setup and Bit-Width Selection ---
-    const uint32_t COMPONENTS_PER_PIXEL = is_rgbw ? 4 : 3;
-    const uint32_t WAVEFORM_WORDS_PER_PIXEL = COMPONENTS_PER_PIXEL * 32;
-    const uint32_t total_output_words = pixels_per_pin * WAVEFORM_WORDS_PER_PIXEL;
+    last_bri = bri;
+  }
 
-    if (total_output_words == 0) return;
-    
-    // Select the minimal bit-width for the peripheral
-    uint8_t bit_width;
-    if (num_active_pins <= 1) bit_width = 1;
-    else if (num_active_pins <= 2) bit_width = 2;
-    else if (num_active_pins <= 4) bit_width = 4;
-    else if (num_active_pins <= 8) bit_width = 8;
-    else bit_width = 16;
+  const uint32_t COMPONENTS_PER_PIXEL = is_rgbw ? 4 : 3;
+  const uint32_t WAVEFORM_WORDS_PER_PIXEL = COMPONENTS_PER_PIXEL * 32;
+  const uint32_t total_output_words = pixels_per_pin * WAVEFORM_WORDS_PER_PIXEL;
 
-    // Calculate total output buffer size in bytes and clear it
-    const size_t total_bytes = (total_output_words * bit_width + 7) / 8;
-    memset(output_buffer, 0, total_bytes);
+  if (total_output_words == 0) return;
 
-    uint8_t* out_base_ptr = reinterpret_cast<uint8_t*>(output_buffer);
+  uint8_t bit_width;
+  if (num_active_pins <= 1) bit_width = 1;
+  else if (num_active_pins <= 2) bit_width = 2;
+  else if (num_active_pins <= 4) bit_width = 4;
+  else if (num_active_pins <= 8) bit_width = 8;
+  else bit_width = 16;
 
-    // --- Main Processing Loop ---
-    for (uint32_t pixel_in_pin = 0; pixel_in_pin < pixels_per_pin; ++pixel_in_pin) {
-        for (uint32_t component_in_pixel = 0; component_in_pixel < COMPONENTS_PER_PIXEL; ++component_in_pixel) {
-            
-            // 1. Transpose 32 time-slices into a temporary stack buffer. This is fast.
-            uint32_t transposed_slices[32];
-            LedMatrixDetail::transpose_32_slices(transposed_slices, input_buffer, pixel_in_pin, 
-                component_in_pixel, pixels_per_pin, num_active_pins, 
-                COMPONENTS_PER_PIXEL, waveform_cache, brightness_cache);
+  const size_t total_bytes = (total_output_words * bit_width + 7) / 8;
+  memset(output_buffer, 0, total_bytes);
 
-            // Calculate current position in the output byte stream
-            const uint32_t component_start_word = (pixel_in_pin * WAVEFORM_WORDS_PER_PIXEL) + (component_in_pixel * 32);
-            uint8_t* current_out_ptr = out_base_ptr + (component_start_word * bit_width / 8);
+  uint8_t* out_base_ptr = reinterpret_cast<uint8_t*>(output_buffer);
 
-            // 2. Dispatch to the correct packing function to write to the final buffer.
-            switch (bit_width) {
-                case 1:
-                    LedMatrixDetail::process_1bit(current_out_ptr, transposed_slices);
-                    break;
-                case 2:
-                    LedMatrixDetail::process_2bit(current_out_ptr, transposed_slices);
-                    break;
-                case 4:
-                    LedMatrixDetail::process_4bit(current_out_ptr, transposed_slices);
-                    break;
-                case 8:
-                    LedMatrixDetail::process_8bit(current_out_ptr, transposed_slices);
-                    break;
-                case 16:
-                    LedMatrixDetail::process_16bit(reinterpret_cast<uint16_t*>(current_out_ptr), transposed_slices);
-                    break;
-            }
-        }
+  uint8_t component_map[4] = { 0, 1, 2, 3 }; // Default to RGB(W)
+  switch (color_order) {
+    case COL_ORDER_GRB: component_map[0] = 1; component_map[1] = 0; component_map[2] = 2; break; // G, R, B
+    case COL_ORDER_RGB: break; // Default is already RGB
+    case COL_ORDER_BRG: component_map[0] = 2; component_map[1] = 0; component_map[2] = 1; break; // B, R, G
+    case COL_ORDER_RBG: component_map[0] = 0; component_map[1] = 2; component_map[2] = 1; break; // R, B, G
+    case COL_ORDER_BGR: component_map[0] = 2; component_map[1] = 1; component_map[2] = 0; break; // B, G, R
+    case COL_ORDER_GBR: component_map[0] = 1; component_map[1] = 2; component_map[2] = 0; break; // G, B, R
+  }
+  // The W component (if it exists) is always the last one.
+  if (is_rgbw) component_map[3] = 3;
+
+  // --- Main Processing Loop ---
+  for (uint32_t pixel_in_pin = 0; pixel_in_pin < pixels_per_pin; ++pixel_in_pin) {
+
+    for (uint32_t component_in_pixel = 0; component_in_pixel < COMPONENTS_PER_PIXEL; ++component_in_pixel) {
+
+      const uint32_t input_component = component_map[component_in_pixel];
+
+      uint32_t transposed_slices[32];
+
+      LedMatrixDetail::transpose_32_slices(transposed_slices, input_buffer, pixel_in_pin,
+        input_component, pixels_per_pin, num_active_pins,
+        COMPONENTS_PER_PIXEL, waveform_cache, brightness_cache);
+
+      const uint32_t component_start_word = (pixel_in_pin * WAVEFORM_WORDS_PER_PIXEL) + (component_in_pixel * 32);
+      uint8_t* current_out_ptr = out_base_ptr + (component_start_word * bit_width / 8);
+
+      switch (bit_width) {
+      case 1: LedMatrixDetail::process_1bit(current_out_ptr, transposed_slices); break;
+      case 2: LedMatrixDetail::process_2bit(current_out_ptr, transposed_slices); break;
+      case 4: LedMatrixDetail::process_4bit(current_out_ptr, transposed_slices); break;
+      case 8: LedMatrixDetail::process_8bit(current_out_ptr, transposed_slices); break;
+      case 16: LedMatrixDetail::process_16bit(reinterpret_cast<uint16_t*>(current_out_ptr), transposed_slices); break;
+      }
     }
+  }
 }
 
 parlio_tx_unit_handle_t parlio_tx_unit = NULL;
@@ -1008,7 +1009,7 @@ parlio_transmit_config_t transmit_config = {
     }
 };
 
-uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t *buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit) {
+uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit, uint8_t color_order) {
 
   if (length != outputs * leds_per_output) {
     delay(100);
@@ -1126,9 +1127,10 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   }
   #else
   parallel_buffer_remapped = buffer_in;
+  color_order = COL_ORDER_RGB; // This isn't actually changing the color order - we're already there from the BusNetwork doing the right thing pixel-by-pixel.
   #endif
 
-  create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri);
+  create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri, color_order);
 
   // Calculate the exact size of ONE PIXEL's data in bits and bytes.
   const uint32_t symbols_per_pixel = isRGBW ? 128 : 96;
