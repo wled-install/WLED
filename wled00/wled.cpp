@@ -251,6 +251,7 @@ static const char *TAG = "WLED";
           .create_backround_task = true,
           .task_priority = 5,
           .stack_size = 4096,
+          .core_id = 0,
           .callback = msc_event_cb,
       };
       ESP_ERROR_CHECK(msc_host_install(&msc_config));
@@ -676,8 +677,8 @@ void WLED::loop()
 #if INCLUDE_xTaskGetHandle
     DEBUG_PRINT(F("   TCP min free stack: ")); DEBUG_PRINT(wledmm_get_tcp_stacksize());
 #endif
-    DEBUG_PRINTLN(F(" ***"));    
-    debugTime = millis();
+    DEBUG_PRINTLN(F(" ***"));
+
   }
 #endif        // WLED_DEBUG_HEAP
 
@@ -1105,7 +1106,8 @@ void WLED::setup()
     DEBUG_PRINTLN( "Failed to create USB Host app_queue");
     return;
   }
-  xTaskCreate(usb_task, "usb_task", 4096, NULL, 2, NULL);
+  // xTaskCreate(usb_task, "usb_task", 4096, NULL, 2, NULL);
+  xTaskCreatePinnedToCore(usb_task, "usb_task", 4096, NULL, 2, NULL, 0);
   DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
 #endif
 

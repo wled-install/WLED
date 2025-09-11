@@ -105,6 +105,53 @@ static float mapf(float x, float in_min, float in_max, float out_min, float out_
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+void task_list() {
+
+#define MAX_TASKS 20
+
+  TaskStatus_t taskStatusArray[MAX_TASKS];
+  UBaseType_t taskCount;
+  uint32_t totalRunTime;
+
+  // Get all tasks' info
+  taskCount = uxTaskGetSystemState(taskStatusArray, MAX_TASKS, &totalRunTime);
+
+  // Sort the taskStatusArray by task name
+  std::sort(taskStatusArray, taskStatusArray + taskCount, [](const TaskStatus_t& a, const TaskStatus_t& b) {
+    return strcmp(a.pcTaskName, b.pcTaskName) < 0;
+    });
+
+  printf("Found %d tasks\n", taskCount);
+  printf("Name\t\tState\tPrio\tStack\tRun Time\tCPU %%\tCore\n");
+
+  for (UBaseType_t i = 0; i < taskCount; i++) {
+
+    TaskStatus_t* ts = &taskStatusArray[i];
+
+    const char* state;
+    switch (ts->eCurrentState) {
+    case eRunning:   state = "Running"; break;
+    case eReady:     state = "Ready"; break;
+    case eBlocked:   state = "Blocked"; break;
+    case eSuspended: state = "Suspended"; break;
+    case eDeleted:   state = "Deleted"; break;
+    default:         state = "Unknown"; break;
+    }
+
+    char cpu_percent[32];
+    snprintf(cpu_percent, sizeof(cpu_percent), "%5.2f%%", totalRunTime ? (100.0f * ts->ulRunTimeCounter) / totalRunTime : 0.0f);
+
+    printf("%-12s %-10s %4u\t%5u\t%10lu\t%s\t%2d\n",
+      ts->pcTaskName,
+      state,
+      ts->uxCurrentPriority,
+      ts->usStackHighWaterMark,
+      ts->ulRunTimeCounter,
+      cpu_percent,
+      ts->xCoreID == tskNO_AFFINITY ? -1 : ts->xCoreID);
+  }
+}
+
 void handleSerial()
 {
   if (pinManager.isPinAllocated(hardwareRX)) return;
@@ -165,8 +212,11 @@ void handleSerial()
           #else
           USER_PRINTLN("Boot partition switching is only available for ESP32 and newer boards.");
           #endif
-        } else if (next == 'X') { // WLEDMM - force reconnect via Serial
+        }
+        else if (next == 'X') { // WLEDMM - force reconnect via Serial
           forceReconnect = true;
+        } else if (next == 'C') { // WLEDMM - force reconnect via Serial
+          task_list();
         } else if (next == 'R') { // WLEDMM - force reboot via Serial
           Serial.print("Rebooting ");
           for (int i=0;i<5;i++) {
