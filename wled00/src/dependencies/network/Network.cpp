@@ -115,6 +115,8 @@ esp_err_t NetworkClass::get_hardware_mac_address(uint8_t* mac_addr) {
   esp_err_t err = ESP_FAIL;
   #if defined(WLED_USE_ETHERNET) 
   if (eth_handle != NULL) {
+    // Investigate esp_efuse_mac_get_default() in case we don't even need the eth_handle.
+    // Just need to check with one this returns, assuming Ethernet on the P4.
     err = esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
   }
   if (err == ESP_OK) {
