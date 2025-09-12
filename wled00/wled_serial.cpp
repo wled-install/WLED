@@ -111,7 +111,7 @@ static float mapf(float x, float in_min, float in_max, float out_min, float out_
 
 void task_list() {
 
-  #define MAX_TASKS 20
+  #define MAX_TASKS 30 // if you see "zero tasks" raise this number. If there's more tasks than this, you get NO tasks back.
 
   TaskStatus_t taskStatusArray[MAX_TASKS];
   UBaseType_t taskCount;
