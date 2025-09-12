@@ -105,9 +105,13 @@ static float mapf(float x, float in_min, float in_max, float out_min, float out_
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+#include <algorithm> // Required for std::sort
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 void task_list() {
 
-#define MAX_TASKS 20
+  #define MAX_TASKS 20
 
   TaskStatus_t taskStatusArray[MAX_TASKS];
   UBaseType_t taskCount;
@@ -116,30 +120,34 @@ void task_list() {
   // Get all tasks' info
   taskCount = uxTaskGetSystemState(taskStatusArray, MAX_TASKS, &totalRunTime);
 
-  // Sort the taskStatusArray by task name
+  // Sort tasks first by Core ID, then by descending Run Time (CPU usage)
   std::sort(taskStatusArray, taskStatusArray + taskCount, [](const TaskStatus_t& a, const TaskStatus_t& b) {
-    return strcmp(a.pcTaskName, b.pcTaskName) < 0;
-    });
+    // Primary sort: Core ID (Core 0, then Core 1, then unassigned)
+    if (a.xCoreID != b.xCoreID) {
+      return a.xCoreID < b.xCoreID;
+    }
+    // Secondary sort: Run Time (higher usage first)
+    return a.ulRunTimeCounter > b.ulRunTimeCounter;
+  });
 
   printf("Found %d tasks\n", taskCount);
   printf("Name\t\tState\tPrio\tStack\tRun Time\tCPU %%\tCore\n");
 
   for (UBaseType_t i = 0; i < taskCount; i++) {
-
     TaskStatus_t* ts = &taskStatusArray[i];
 
     const char* state;
     switch (ts->eCurrentState) {
-    case eRunning:   state = "Running"; break;
-    case eReady:     state = "Ready"; break;
-    case eBlocked:   state = "Blocked"; break;
-    case eSuspended: state = "Suspended"; break;
-    case eDeleted:   state = "Deleted"; break;
-    default:         state = "Unknown"; break;
+      case eRunning:   state = "Running"; break;
+      case eReady:     state = "Ready"; break;
+      case eBlocked:   state = "Blocked"; break;
+      case eSuspended: state = "Suspended"; break;
+      case eDeleted:   state = "Deleted"; break;
+      default:         state = "Unknown"; break;
     }
 
     char cpu_percent[32];
-    snprintf(cpu_percent, sizeof(cpu_percent), "%5.2f%%", totalRunTime ? (100.0f * ts->ulRunTimeCounter) / totalRunTime : 0.0f);
+    snprintf(cpu_percent, sizeof(cpu_percent), "%5.2f%%", totalRunTime > 0 ? (100.0f * ts->ulRunTimeCounter) / totalRunTime : 0.0f);
 
     printf("%-12s %-10s %4u\t%5u\t%10lu\t%s\t%2d\n",
       ts->pcTaskName,
@@ -152,8 +160,8 @@ void task_list() {
   }
 }
 
-void handleSerial()
-{
+void handleSerial() {
+
   if (pinManager.isPinAllocated(hardwareRX)) return;
   if (!Serial) return;              // arduino docs: `if (Serial)` indicates whether or not the USB CDC serial connection is open. For all non-USB CDC ports, this will always return true
   if (((pinManager.isPinAllocated(hardwareTX)) && (pinManager.getPinOwner(hardwareTX) != PinOwner::DebugOut))) return; // WLEDMM serial TX is necessary for adalight / TPM2
