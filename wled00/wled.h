@@ -113,6 +113,9 @@
 #else // ESP32
   #include <HardwareSerial.h>  // ensure we have the correct "Serial" on new MCUs (depends on ARDUINO_USB_MODE and ARDUINO_USB_CDC_ON_BOOT)
   #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    #if defined(WLED_USE_ETHERNET_ONLY) && !defined(WLED_USE_ETHERNET)
+      #define WLED_USE_ETHERNET
+    #endif
     #ifdef WLED_USE_ETHERNET
       #include <esp_eth.h>
     #endif

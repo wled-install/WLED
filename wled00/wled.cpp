@@ -3,9 +3,6 @@ static const char *TAG = "WLED";
 #include "wled.h"
 #include "wled_ethernet.h"
 #include <Arduino.h>
-#if defined(WLED_USE_ETHERNET_ONLY) && !defined(WLED_USE_ETHERNET)
-  #define WLED_USE_ETHERNET
-#endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   #include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
   esp_ldo_channel_handle_t ldo2 = NULL;
