@@ -912,6 +912,14 @@ String restartCode2Info(esp_reset_reason_t reason) {
 #endif
 // end WLEDMM
 
+// Helper function to format the MAC address (BSSID) into a string
+String format_mac_address(const uint8_t* mac) {
+  char mac_str[18];
+  snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(mac_str);
+}
+
 void serializeInfo(JsonObject root)
 {
   root[F("ver")] = versionString;
@@ -1018,24 +1026,173 @@ void serializeInfo(JsonObject root)
     outputs.add(busses.getBus(b)->getLength());
   }
 
-  JsonObject wifi_info = root.createNestedObject("wifi");
-  #ifdef ARDUINO_ARCH_ESP32P4
-    wifi_info[F("bssid")] = CLIENT_SSID;
-    int qrssi;
-    uint8_t primary_ch;
-    wifi_second_chan_t secondary_ch;
-    esp_wifi_get_channel(&primary_ch, &secondary_ch);
-    esp_wifi_sta_get_rssi(&qrssi);
-    wifi_info[F("rssi")] = qrssi;
-    wifi_info[F("signal")] = getSignalQuality(qrssi);
-    wifi_info[F("channel")] = primary_ch;
-  #else
-    wifi_info[F("bssid")] = WiFi.BSSIDstr();
-    int qrssi = WiFi.RSSI();
-    wifi_info[F("rssi")] = qrssi;
-    wifi_info[F("signal")] = getSignalQuality(qrssi);
-    wifi_info[F("channel")] = WiFi.channel();
-  #endif
+  JsonObject network_info = root.createNestedObject("network");
+  uint8_t mac[6];
+  esp_netif_ip_info_t ip_info;
+
+  // --- Get Interface Handles ---
+  esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+
+  // --- Wi-Fi Section ---
+  if (wifi_netif) {
+    JsonObject wifi_obj = network_info.createNestedObject("wifi");
+    // Get local Wi-Fi MAC
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+      wifi_obj["mac"] = format_mac_address(mac);
+    }
+    // Get local Wi-Fi IP
+    if (esp_netif_get_ip_info(wifi_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+      char ip_str[16];
+      sprintf(ip_str, IPSTR, IP2STR(&ip_info.ip));
+      wifi_obj["ip"] = ip_str;
+    }
+
+    // --- Detailed Access Point (AP) Info ---
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+      JsonObject ap_obj = wifi_obj.createNestedObject("ap");
+      ap_obj["ssid"] = (char*)ap_info.ssid;
+      ap_obj["bssid"] = format_mac_address(ap_info.bssid);
+      ap_obj["rssi"] = ap_info.rssi;
+      ap_obj["signal"] = getSignalQuality(ap_info.rssi);
+      ap_obj["channel"] = ap_info.primary;
+
+      const char* authmode_str = "Unknown";
+      switch (ap_info.authmode) {
+      case WIFI_AUTH_OPEN: authmode_str = "Open"; break;
+      case WIFI_AUTH_WEP: authmode_str = "WEP"; break;
+      case WIFI_AUTH_WPA_PSK: authmode_str = "WPA-PSK"; break;
+      case WIFI_AUTH_WPA2_PSK: authmode_str = "WPA2-PSK"; break;
+      case WIFI_AUTH_WPA_WPA2_PSK: authmode_str = "WPA/WPA2-PSK"; break;
+      case WIFI_AUTH_WPA2_ENTERPRISE: authmode_str = "WPA2-Ent"; break;
+      case WIFI_AUTH_WPA3_PSK: authmode_str = "WPA3-PSK"; break;
+      case WIFI_AUTH_WPA2_WPA3_PSK: authmode_str = "WPA2/WPA3-PSK"; break;
+      default: break;
+      }
+      ap_obj["auth"] = authmode_str;
+
+      uint8_t protocol_bitmap = 0;
+      if (esp_wifi_get_protocol(WIFI_IF_STA, &protocol_bitmap) == ESP_OK) {
+        String protocols = "";
+        if (protocol_bitmap & WIFI_PROTOCOL_11B)  protocols += "B,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11G)  protocols += "G,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11N)  protocols += "N,";
+        if (protocol_bitmap & WIFI_PROTOCOL_LR)   protocols += "LR,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11AX) protocols += "AX,";
+        // A and AC are 5GHz only.
+        if (protocol_bitmap & WIFI_PROTOCOL_11A)  protocols += "A,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11AC) protocols += "AC,";
+
+        if (protocols.length() > 0) {
+          protocols.remove(protocols.length() - 1);
+        }
+        wifi_obj["protocols"] = protocols;
+      }
+
+      const char* bandwidth_str;
+      switch (ap_info.bandwidth) {
+      case WIFI_BW_HT40:   bandwidth_str = "40MHz"; break;
+      case WIFI_BW80:      bandwidth_str = "80MHz"; break;
+      case WIFI_BW160:     bandwidth_str = "160MHz"; break;
+      case WIFI_BW80_BW80: bandwidth_str = "80+80MHz"; break;
+      case WIFI_BW_HT20:
+      default:             bandwidth_str = "20MHz"; break;
+      }
+      ap_obj["bw"] = bandwidth_str;
+
+      String phy_modes = "";
+      if (ap_info.phy_11b) phy_modes += "B,";
+      if (ap_info.phy_11g) phy_modes += "G,";
+      if (ap_info.phy_11n) phy_modes += "N,";
+      if (ap_info.phy_11ax) phy_modes += "AX,";
+      if (phy_modes.length() > 0) {
+        phy_modes.remove(phy_modes.length() - 1);
+      }
+      ap_obj["phy"] = phy_modes;
+
+      #ifndef CONFIG_IDF_TARGET_ESP32P4 // FIXME dunno if the P4 actually works for this with ESP-Hosted or maybe the C6 needs updating? 
+      wifi_phy_mode_t phymode;
+
+      if (esp_wifi_sta_get_negotiated_phymode(&phymode) == ESP_OK) {
+        const char* mode_str = "Unknown";
+        switch (phymode) {
+        case WIFI_PHY_MODE_11B:  mode_str = "802.11b"; break;
+        case WIFI_PHY_MODE_11G:  mode_str = "802.11g"; break;
+          // HT modes are part of 802.11n (Wi-Fi 4)
+        case WIFI_PHY_MODE_HT20: mode_str = "802.11n (20MHz)"; break;
+        case WIFI_PHY_MODE_HT40: mode_str = "802.11n (40MHz)"; break;
+          // HE mode is part of 802.11ax (Wi-Fi 6)
+        case WIFI_PHY_MODE_HE20: mode_str = "802.11ax (20MHz)"; break;
+          // Add other modes as needed
+        case WIFI_PHY_MODE_LR:   mode_str = "Low Rate"; break;
+        default: break;
+        }
+        wifi_obj["mode"] = mode_str;
+      } else {
+        wifi_obj["mode"] = "Unknown Mode";
+      }
+      #else
+      #warning FIXME: Skipping over esp_wifi_sta_get_negotiated_phymode code on ESP32-P4 and making an informed assumption. Maybe update the embedded C6?
+      uint8_t local_protocol_bitmap = 0;
+      esp_wifi_get_protocol(WIFI_IF_STA, &local_protocol_bitmap);
+
+      const char* mode_str = "Unknown";
+
+      // Check from the best protocol downwards
+      if ((local_protocol_bitmap & WIFI_PROTOCOL_11AX) && ap_info.phy_11ax) {
+        mode_str = "802.11ax (Wi-Fi 6)";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11N) && ap_info.phy_11n) {
+        mode_str = "802.11n (Wi-Fi 4)";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11G) && ap_info.phy_11g) {
+        mode_str = "802.11g";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11B) && ap_info.phy_11b) {
+        mode_str = "802.11b";
+      }
+      wifi_obj["mode"] = mode_str;
+      #endif
+
+      if (ap_info.country.cc[0] != 0) {
+        char country_str[3];
+        strncpy(country_str, (const char*)ap_info.country.cc, 2);
+        country_str[2] = '\0';
+        ap_obj["country"] = country_str;
+      }
+    }
+  }
+
+  // --- Ethernet Section ---
+  if (eth_netif && eth_handle) {
+    JsonObject eth_obj = network_info.createNestedObject("ethernet");
+    if (esp_netif_get_mac(eth_netif, mac) == ESP_OK) {
+      eth_obj["mac"] = format_mac_address(mac);
+    }
+    if (esp_netif_get_ip_info(eth_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+      char ip_str[16];
+      sprintf(ip_str, IPSTR, IP2STR(&ip_info.ip));
+      eth_obj["ip"] = ip_str;
+    }
+  }
+
+  // --- Routing Information Section ---
+  uint32_t wifi_metric = 999, eth_metric = 999; // Default to high values
+
+  if (wifi_netif) {
+    wifi_metric = esp_netif_get_route_prio(wifi_netif);
+  }
+  if (eth_netif) {
+    eth_metric = esp_netif_get_route_prio(eth_netif);
+  }
+
+  if (eth_netif && eth_metric < wifi_metric) {
+    network_info["default_route"] = "Ethernet";
+  }
+  else if (wifi_netif && wifi_metric < 999) {
+    network_info["default_route"] = "WiFi";
+  }
+  else {
+    network_info["default_route"] = "None";
+  }
 
   JsonObject fs_info = root.createNestedObject("fs");
   fs_info["u"] = fsBytesUsed / 1000;
@@ -1061,20 +1218,19 @@ void serializeInfo(JsonObject root)
   cache_info["f"] = ImageCacheManager::getInstance().getCurrentFile();
   cache_info["p"] = (ImageCacheManager::getInstance().getCacheUsedBytes())/1024;
 
-  uint64_t usb_bytes_total = 0;
-  uint64_t usb_bytes_free = 0;
-  const char* mount_path = "/usb0";
+  if (status == CacheStatus::IDLE) {
+    uint64_t usb_bytes_total = 0;
+    uint64_t usb_bytes_free = 0;
+    const char* mount_path = "/usb0";
 
-  // This single call checks for the drive and gets its info.
-  // It will return ESP_OK only if a drive is mounted at /usb0.
-  esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);
+    esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);
 
-  // Only add the "usb" object to your JSON if the call was successful.
-  if (result == ESP_OK) {
-    uint64_t usb_bytes_used = usb_bytes_total - usb_bytes_free;
-    JsonObject usb_info = root.createNestedObject("usb");
-    usb_info["u"] = usb_bytes_used;
-    usb_info["t"] = usb_bytes_total;
+    if (result == ESP_OK) {
+      uint64_t usb_bytes_used = usb_bytes_total - usb_bytes_free;
+      JsonObject usb_info = root.createNestedObject("usb");
+      usb_info["u"] = usb_bytes_used;
+      usb_info["t"] = usb_bytes_total;
+    }
   }
 
   root[F("ndc")] = nodeListEnabled ? (int)Nodes.size() : -1;

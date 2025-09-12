@@ -7,7 +7,6 @@ static const char *TAG = "WLED";
   #include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
   esp_ldo_channel_handle_t ldo2 = NULL;
   esp_ldo_channel_handle_t ldo3 = NULL;
-  esp_eth_handle_t eth_handle = NULL;
   // ESP32-P4 Board Log
   // ESP-ROM:esp32p4-eco2-20240710 // WaveShare Nano
   // ESP-ROM:esp32p4-eco2-20240710 // WaveShare P4 Module Dev Kit (4 USB-A ports, custom module)
@@ -689,14 +688,14 @@ void WLED::loop()
   if (xQueueReceive(app_queue, &msg, 0)) {
     switch (msg.id) {
       case 1: {
-        Serial.println("USB Device Connected");
         int slot;
         if (allocate_new_msc_device(&msg, &slot) == ESP_OK) {
+          // USER_PRINTLN("USB Disk Connected");
           msc_host_device_info_t info;
           ESP_ERROR_CHECK_WITHOUT_ABORT(msc_host_get_device_info(msc_devices[slot]->msc_device, &info));
           print_device_info(&info);
-          show_list_files_all_devices();
-          USER_PRINTLN("Background imaging caching started...");
+          // show_list_files_all_devices();
+          USER_PRINTLN("ImageCache started");
           ImageCacheManager::getInstance().startPreload("/usb0");
         } else {
           USER_PRINTLN("USB operation failed. Try replugging?");
@@ -715,7 +714,7 @@ void WLED::loop()
       }
 
       default:
-        USER_PRINTF("USB Subsystem", "Unknown USB Error message ID: %d\n", msg.id);
+        USER_PRINTF("Unknown USB Error message ID: %d\n", msg.id);
         break;
     }
   }
@@ -767,16 +766,16 @@ void WLED::disableWatchdog() {
 int retry_num=0;
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data){
   if(event_id == WIFI_EVENT_STA_START) {
-    USER_PRINTLN("WIFI STARTED");
+    USER_PRINTLN("WiFi Started");
   } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
-    USER_PRINTLN("WiFi CONNECTED");
+    USER_PRINTLN("WiFi Connected");
   } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    USER_PRINTLN("WiFi LOST CONNECTION");
+    USER_PRINTLN("WiFi Lost COnnection");
     if(retry_num<5){esp_wifi_connect();retry_num++;USER_PRINTLN("Retrying to Connect...\n");}
   } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE){
-    USER_PRINTLN("WiFi HOME CHANNEL CHAANGED");
+    // USER_PRINTLN("WiFi HOME CHANNEL CHAANGED");
   } else if (event_id == WIFI_EVENT_STA_STOP){
-    USER_PRINTLN("WiFi STOPPED");
+    USER_PRINTLN("WiFi Stopped");
   } else if (event_id == IP_EVENT_STA_GOT_IP){
     interfacesInited = false;
   } else {
@@ -784,24 +783,28 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
   }
 }
 
-# ifdef WLED_USE_ETHERNET
+#ifdef WLED_USE_ETHERNET
 
-static void eth_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-    if (event_id == ETHERNET_EVENT_CONNECTED) {
-      USER_PRINTLN("Ethernet Link Up");
-    } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
-      USER_PRINTLN("Ethernet Link Down");
-    } else if (event_id == ETHERNET_EVENT_START) {
-      USER_PRINTLN("Ethernet Started");
-    } else {
-      USER_PRINTF("Ethernet Undeclared Error %d\n", event_id);
-    }
+static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+  if (event_id == ETHERNET_EVENT_CONNECTED) {
+    USER_PRINTLN("Ethernet Link Up");
+    eth_is_connected = true;
+  } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
+    USER_PRINTLN("Ethernet Link Down");
+    eth_is_connected = false;
+  } else if (event_id == ETHERNET_EVENT_START) {
+    eth_is_connected = false;
+    // USER_PRINTLN("Ethernet Started");
+  } else {
+    USER_PRINTF("Ethernet Undeclared Error %d\n", event_id);
+  }
 }
 
 static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-    USER_PRINTF("Ethernet Got IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
-    USER_PRINTLN();
+  // ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+  // USER_PRINTF("Ethernet Got IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+  // USER_PRINTLN();
+  interfacesInited = false;
 }
 #endif
 
@@ -812,7 +815,7 @@ void WLED::setup()
   #endif 
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
-    #if !defined(WLED_USE_ETHERNET)
+    // #if !defined(WLED_USE_ETHERNET)
       #if defined(ARDUINO_ARCH_ESP32P4)
         esp_hosted_init();
       #endif
@@ -820,7 +823,7 @@ void WLED::setup()
       esp_event_loop_create_default();
       esp_netif_create_default_wifi_sta();
       wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
-      esp_wifi_init(&wifi_initiation); //     
+      esp_wifi_init(&wifi_initiation); 
       esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
       esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
       wifi_config_t wifi_configuration = {
@@ -828,11 +831,23 @@ void WLED::setup()
               .ssid = CLIENT_SSID,
               .password = CLIENT_PASS
               }
-          }; 
-      esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration);
+      };
+      
+      uint8_t wifi_protocols;
+      if (CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT) {
+        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX);
+      } else {
+        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
+      }
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
+      // wifi_tx_rate_config_t wifi_rate_config = {};
+      // wifi_rate_config.phymode = WIFI_PHY_MODE_HT40;
+      // wifi_rate_config.rate = WIFI_PHY_RATE_MCS3_LGI;
+      // esp_wifi_config_80211_tx((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_rate_config);
       esp_wifi_start();
-      delay(500);
-    #endif
+      // delay(500);
+    // #endif
 
     #ifdef WLED_USE_ETHERNET
       // Initialize TCP/IP network interface
@@ -886,7 +901,7 @@ void WLED::setup()
 #else
   if (!Serial) delay(300);  // just a tiny wait to avoid problems later when acessing serial
 #endif
-
+  Serial.flush();
 #ifdef ARDUINO_ARCH_ESP32
   #if defined(WLED_DEBUG) && (defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || ARDUINO_USB_CDC_ON_BOOT)
   if (!Serial) delay(2500);  // WLEDMM allow CDC USB serial to initialise (WLED_DEBUG only)
@@ -940,7 +955,6 @@ void WLED::setup()
 
   const esp_partition_t *running_partition = esp_ota_get_running_partition();
   USER_PRINTF("Running from: %s which is %u bytes and type %u subtype %u at address %x\n",running_partition->label,running_partition->size,running_partition->type,running_partition->subtype,running_partition->address);
-
 
   DEBUG_PRINT(F("esp32 "));
   DEBUG_PRINTLN(ESP.getSdkVersion());
@@ -1050,15 +1064,15 @@ void WLED::setup()
 
   // Try to acquire both channels
   if (esp_ldo_acquire_channel(&config2, &ldo2) == ESP_OK) {
-    USER_PRINTLN("LDO index 2 acquired");
+    DEBUG_PRINTLN("LDO index 2 acquired");
   } else {
     USER_PRINTLN("Failed to acquire LDO index 2");
   }
 
   if (esp_ldo_acquire_channel(&config3, &ldo3) == ESP_OK) {
-    USER_PRINTLN("LDO index 3 acquired");
+    DEBUG_PRINTLN("LDO index 3 acquired");
   } else {
-    USER_PRINTLN("Failed to acquire LDO index 3");
+    USER_PRINTLN("Failed to acquire LDO index 3 - higher GPOIOs may be unavailable.");
   }
   #else
   // GPIO16/GPIO17 reserved for SPI RAM
@@ -1106,7 +1120,6 @@ void WLED::setup()
     DEBUG_PRINTLN( "Failed to create USB Host app_queue");
     return;
   }
-  // xTaskCreate(usb_task, "usb_task", 4096, NULL, 2, NULL);
   xTaskCreatePinnedToCore(usb_task, "usb_task", 4096, NULL, 2, NULL, 0);
   DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
 #endif
@@ -1368,9 +1381,14 @@ void WLED::setup()
 
   USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
   USER_PRINTLN(F("WLED initialization done.\n"));
+  
+  Serial.flush();
+  Serial.flush();
+  Serial.flush(); // just in case of garbage.
+  
   delay(50);
-  // repeat Ada prompt
-  #ifdef WLED_ENABLE_ADALIGHT
+  
+  #ifdef WLED_ENABLE_ADALIGHT // repeat Ada prompt
   if (!pinManager.isPinAllocated(hardwareRX) && !pinManager.isPinAllocated(hardwareTX)) {
     if (Serial) Serial.println(F("\nAda"));
   }
@@ -1603,8 +1621,7 @@ void WLED::initConnection()
 
   #if !defined(WLED_USE_ETHERNET) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
     USER_PRINT("Connecting to WiFi: ");
-    USER_PRINT(clientSSID);
-    USER_PRINTLN(" / ******** ...");
+    USER_PRINTLN(clientSSID);
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_connect();
   #endif
@@ -1651,16 +1668,7 @@ void WLED::initInterfaces()
   if (netDebugPrintIP[0] == 0) {
     //WLEDMM: this code moved from net_debug.cpp as we store IP as IPAddress type
     if (!netDebugPrintIP && !netDebugPrintIP.fromString(WLED_DEBUG_HOST)) {
-      #ifdef ESP8266
-        WiFi.hostByName(WLED_DEBUG_HOST, netDebugPrintIP, 750);
-      #else
-        #ifdef WLED_USE_ETHERNET
-          // ETH.hostByName(WLED_DEBUG_HOST, netDebugPrintIP); WLEDMM: ETH.hostByName does not exist, WiFi.hostByName seems to do the same, but must be tested.
-          WiFi.hostByName(WLED_DEBUG_HOST, netDebugPrintIP);
-        #else
-          WiFi.hostByName(WLED_DEBUG_HOST, netDebugPrintIP);
-        #endif
-      #endif
+      Network.hostByName(WLED_DEBUG_HOST, netDebugPrintIP);
     } else {
       IPAddress ndIpAddress = Network.localIP();
       netDebugPrintIP[0] = ndIpAddress[0];
@@ -1720,7 +1728,9 @@ void WLED::initInterfaces()
 
   e131.begin(e131Multicast, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
   ddp.begin(false, DDP_DEFAULT_PORT);
+#ifndef WLED_DISABLE_HUESYNC
   reconnectHue();
+#endif
 #ifndef WLED_DISABLE_MQTT
   initMqtt();
 #endif
@@ -1747,10 +1757,10 @@ void WLED::handleConnection()
   static unsigned retryCount = 0;  // WLEDMM
   // reconnect WiFi to clear stale allocations if heap gets too low
   if ((!strip.isUpdating()) && (now - heapTime > 5000)) { // WLEDMM: updated with better logic for small heap available by block, not total. // WLEDMM trying to use a moment when the strip is idle
-#if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX) || defined(ARDUINO_ARCH_ESP32P4)
+#if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX) // || defined(ARDUINO_ARCH_ESP32P4)
     uint32_t heap = ESP.getFreeHeap(); // TroyHacks P4 - FIXME this was tripping but notihng was broken. // WLEDMM works better on -S2
 #else
-    uint32_t heap = heap_caps_get_largest_free_block(0x1800); // WLEDMM: This is a better metric for free heap.
+    uint32_t heap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL); // was (MALLOC_CAP_INTERNAL|MALLOC_CAP_DEFAULT) WLEDMM: This is a better metric for free heap.
 #endif
     if (heap < MIN_HEAP_SIZE && lastHeap < MIN_HEAP_SIZE) {
       if (retryCount < 5) {  // WLEDMM avoid repeated disconnects

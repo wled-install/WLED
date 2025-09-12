@@ -116,11 +116,11 @@
     #ifdef WLED_USE_ETHERNET
       #include <esp_eth.h>
     #endif
-      #ifdef CONFIG_IDF_TARGET_ESP32P4
-        #include <esp_hosted.h> // this was esp_hosted.h before v5.5 which includes esp_wifi.h
-      #else
-        #include <esp_wifi.h>
-      #endif
+    #ifdef CONFIG_IDF_TARGET_ESP32P4
+      #include <esp_hosted.h>
+    #else
+      #include <esp_wifi.h>
+    #endif
     #ifdef CONFIG_IDF_TARGET_ESP32P4
       #define I2S_SDPIN 11
       #define I2S_WSPIN 10
@@ -394,6 +394,9 @@ WLED_GLOBAL bool force802_3g _INIT(false);
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_NONE);             // use none for ethernet board type if default not defined
   #endif
 #endif
+WLED_GLOBAL esp_eth_handle_t eth_handle;
+WLED_GLOBAL bool eth_is_connected _INIT(false);
+
 // LED CONFIG
 WLED_GLOBAL bool turnOnAtBoot _INIT(true);                // turn on LEDs at power-up
 WLED_GLOBAL byte bootPreset   _INIT(0);                   // save preset to load after power-up
@@ -927,15 +930,7 @@ WLED_GLOBAL volatile uint8_t jsonBufferLock _INIT(0);
   WLED_GLOBAL unsigned long loops _INIT(0);
 #endif
 
-// #ifdef ARDUINO_ARCH_ESP32
-//   #define WLED_CONNECTED (WiFi.status() == WL_CONNECTED || ETH.localIP()[0] != 0)
-// #else
-//   #define WLED_CONNECTED (WiFi.status() == WL_CONNECTED)
-// #endif
-// #define WLED_WIFI_CONFIGURED (strlen(clientSSID) >= 1 && strcmp(clientSSID, DEFAULT_CLIENT_SSID) != 0)
-#ifdef ARDUINO_ARCH_ESP32P4
-  #define WLED_CONNECTED (ETH.localIP()[0] != 0)
-#endif
+#define WLED_CONNECTED (Network.isConnected())
 
 #ifndef WLED_AP_SSID_UNIQUE
   #define WLED_SET_AP_SSID() do { \

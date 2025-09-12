@@ -21,6 +21,7 @@ public:
   void localMAC(uint8_t* MAC);
   bool isConnected();
   bool isEthernet();
+  IPAddress hostByName(const char* hostname);
 };
 
 #ifdef ARDUINO_ARCH_ESP32

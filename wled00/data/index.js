@@ -707,27 +707,53 @@ ${i.opt&0x100?'<tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaG
 ${inforow("Build",i.vid)}
 ${inforow("Estimated current",pwru)}
 ${inforow("Average FPS",i.leds.fps)}
-${inforow("Signal strength",i.wifi.signal +"% ("+ i.wifi.rssi, " dBm)")}
-${inforow("MAC address",i.mac)}
+${(() => {
+  if (!i.network) return "";
+  let html = "";
+  if (i.network.wifi) {
+    const wifi = i.network.wifi;
+    if (wifi.ap) {
+      html += inforow("WiFi SSID", `${wifi.ap.ssid} (${wifi.ap.bw} ${wifi.ap.auth})`);
+      html += inforow("WiFi AP", `Ch: ${wifi.ap.channel} ${wifi.mode}`);
+      html += inforow("Signal", `${wifi.ap.signal}% (${wifi.ap.rssi} dBm)`);
+    }
+    if (wifi.ip) {
+      html += inforow("WiFi IP", wifi.ip);
+    }
+    html += inforow("WiFi MAC", wifi.mac);
+  }
+  if (i.network.ethernet) {
+    const eth = i.network.ethernet;
+    if (eth.ip) {
+      html += inforow("Ethernet IP", eth.ip);
+    }
+    html += inforow("Ethernet MAC", eth.mac);
+  }
+  if (i.network.default_route) {
+    html += inforow("Default Route", i.network.default_route);
+  }
+  return html;
+})()}
 ${inforow("Uptime",getRuntimeStr(i.uptime))}
 <!-- WLEDMM begin--> 
 <tr><td colspan=2><hr style="height:2px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
 ${inforow("Filesystem", i.fs.u + "/" + i.fs.t + " KB, " + Math.round(i.fs.u * 100 / i.fs.t) + "%")}
 ${(() => {
-  if (!i.usb) return ""; // Return empty string if no USB
-
-  const formatBytes = (bytes) => {
-    if (bytes >= 1024 * 1024 * 1024) {
-      return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
-    }
-    if (bytes >= 1024 * 1024) {
-      return (bytes / 1024 / 1024).toFixed(1) + " MB";
-    }
-    return Math.round(bytes / 1024) + " KB";
-  };
-  const usageStr = `${formatBytes(i.usb.u)} / ${formatBytes(i.usb.t)}`;
-  const percent = i.usb.t > 0 ? Math.round(i.usb.u * 100 / i.usb.t) : 0;
-  return inforow("USB Storage", `${usageStr}, ${percent}%`);
+  // This means the drive is present and the cache was idle, so we can show stats.
+  if (i.usb) {
+    const formatBytes = (bytes) => {
+      if (bytes >= 1000000000) { return (bytes / 1000000000).toFixed(2) + " GB"; }
+      if (bytes >= 1000000) { return (bytes / 1000000).toFixed(1) + " MB"; }
+      return Math.round(bytes / 1000) + " kB";
+    };
+    const usageStr = `${formatBytes(i.usb.u)} / ${formatBytes(i.usb.t)}`;
+    const percent = i.usb.t > 0 ? Math.round(i.usb.u * 100 / i.usb.t) : 0;
+    return inforow("USB Storage", `${usageStr}, ${percent}%`);
+  } else if (i.cache && i.cache.s !== 'Idle' && i.cache.f && i.cache.f.startsWith('/usb0')) {
+    return inforow("USB Storage", "Preloading");
+  } else {
+    return "";
+  }
 })()}
 ${i.cache ? inforow("ImageCache", i.cache.s) : ""}
 ${i.cache && i.cache.f ? inforow("ImageCache Dir", i.cache.f.substring(0, i.cache.f.lastIndexOf('/'))) : ""}
