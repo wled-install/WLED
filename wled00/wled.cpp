@@ -828,7 +828,7 @@ void WLED::setup()
       esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
       wifi_config_t wifi_configuration = {
           .sta = {
-              .ssid = CLIENT_SSID,
+              .ssid = CLIENT_SSID,      // TroyHacks FIXME - these are hardcoded my_config.h values for WiFi password.
               .password = CLIENT_PASS
               }
       };
@@ -1412,7 +1412,7 @@ void WLED::beginStrip()
 
 void WLED::initAP(bool resetAP)
 {
-  #ifndef ARDUINO_ARCH_ESP32P4
+  #ifndef ARDUINO_ARCH_ESP32P4 // TroyHacks FIXME - we have no softAP mode yet. 
   if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
     return;
 
