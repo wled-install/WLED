@@ -696,7 +696,7 @@ function populateInfo(i)
 	//if (i.ver.includes("0.14.0-b15.22")) vcn = "Lupo";
 	//if (i.ver.includes("0.14.1-b")) vcn = "Fried Chicken";  // final line of "One Vision" by Queen
 	if (i.ver.includes("0.14.3-b")) vcn = "Fried Chicken";
-	if (i.ver.includes("14.5.")) vcn = "Small Step";
+	if (i.ver.includes("14.5.")) vcn = "P4 Anniversary Edition";
 
 	cn += `v${i.ver} &nbsp;<i>"${vcn}"</i><p>(WLEDMM ${i.rel}.bin)</p><p><em>build ${i.vid}</em></p><table>
 ${urows}
