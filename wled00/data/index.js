@@ -705,7 +705,7 @@ ${i.opt&0x100?inforow("Net Print ☾","<button class=\"btn btn-xs\" onclick=\"re
 ${i.serialOnline?inforow(i.serialOnline,"TX="+i.sTX,"; RX="+i.sRX):""}
 ${i.opt&0x100?'<tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>':''}
 ${inforow("Build",i.vid)}
-${inforow("Estimated current",pwru)}
+${pwru !== "Not calculated" ? inforow("Estimated current", pwru) : ""}
 ${inforow("Average FPS",i.leds.fps)}
 ${(() => {
   if (!i.network) return "";
@@ -730,7 +730,7 @@ ${(() => {
     html += inforow("Ethernet MAC", eth.mac);
   }
   if (i.network.default_route) {
-    html += inforow("Default Route", i.network.default_route);
+    html += inforow("Priority", i.network.default_route);
   }
   return html;
 })()}
