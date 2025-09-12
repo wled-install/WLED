@@ -65,30 +65,25 @@ void NetworkClass::localMAC(uint8_t* MAC) {
 
 bool NetworkClass::isConnected() {
   esp_netif_t* netif = esp_netif_get_default_netif();
-
   if (netif == NULL) {
     return false;
   }
-
   esp_netif_ip_info_t ip_info;
   if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
     return (ip_info.ip.addr != 0);
   }
-
   return false;
 }
 
 IPAddress NetworkClass::hostByName(const char* hostname) {
   // Note: Arduino IPAddress is IPv4 only. This function will return
   // INADDR_NONE if the hostname resolves only to an IPv6 address.
-
   // Use getaddrinfo to perform the DNS lookup for ANY address family
   struct addrinfo hints = {
       .ai_family = AF_UNSPEC, // Allow either IPv4 or IPv6
       .ai_socktype = SOCK_STREAM,
   };
   struct addrinfo* res;
-
   if (getaddrinfo(hostname, NULL, &hints, &res) == 0 && res != NULL) {
     IPAddress result = INADDR_NONE;
     // Check the address family of the first result
@@ -104,7 +99,6 @@ IPAddress NetworkClass::hostByName(const char* hostname) {
     freeaddrinfo(res);
     return result;
   }
-
   // If we get here, the lookup failed
   return INADDR_NONE;
 }
@@ -118,11 +112,17 @@ String NetworkClass::format_mac_address(const uint8_t* mac) {
 
 esp_err_t NetworkClass::get_hardware_mac_address(uint8_t* mac_addr) {
   // This gets the MAC from the hardware, before any network init happens.
-  esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+  esp_err_t err;
+  #if defined(WLED_USE_ETHERNET) 
+  if (eth_handle != NULL) {
+    err = esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+  }
   if (err == ESP_OK) {
     return ESP_OK;
   }
+  #elif !defined(WLED_USE_ETHERNET_ONLY)
   err = esp_wifi_get_mac(WIFI_IF_STA, mac_addr);
+  #endif
   return err;
 }
 
