@@ -1202,28 +1202,7 @@ void WLED::setup()
   USER_PRINT(F("done Mounting FS; "));
   USER_PRINT(((fsBytesTotal-fsBytesUsed)/1024)); USER_PRINTLN(F(" kB free.\n"));
 
-  // generate module IDs must be done before AP setup
-  #ifdef ARDUINO_ARCH_ESP32P4
-    #ifdef WLED_USE_ETHERNET
-      char buf[18];
-      uint8_t mac_addr[6];
-      esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
-      sprintf(buf,"%02X:%02X:%02X:%02X:%02X:%02X", mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-      USER_PRINTF("Ethernet Mac Address: %02X:%02X:%02X:%02X:%02X:%02X\n", mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-      escapedMac = buf;
-    #else
-      uint8_t mymac[6];
-      char buf[18];
-      esp_err_t result = esp_wifi_get_mac(WIFI_IF_STA, mymac);
-      sprintf(buf,"%02X:%02X:%02X:%02X:%02X:%02X", mymac[0], mymac[1], mymac[2], mymac[3], mymac[4], mymac[5]);
-      USER_PRINTF("WiFi Mac Address: %02X:%02X:%02X:%02X:%02X:%02X\n", mymac[0], mymac[1], mymac[2], mymac[3], mymac[4], mymac[5]);
-      escapedMac = buf;
-    #endif
-  #else
-    escapedMac = WiFi.macAddress();
-  #endif
-  escapedMac.replace(":", "");
-  escapedMac.toLowerCase();
+  escapedMac = Network.getEscapedMac();
 
   WLED_SET_AP_SSID(); // otherwise it is empty on first boot until config is saved
 

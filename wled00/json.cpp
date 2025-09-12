@@ -912,14 +912,6 @@ String restartCode2Info(esp_reset_reason_t reason) {
 #endif
 // end WLEDMM
 
-// Helper function to format the MAC address (BSSID) into a string
-String format_mac_address(const uint8_t* mac) {
-  char mac_str[18];
-  snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  return String(mac_str);
-}
-
 void serializeInfo(JsonObject root)
 {
   root[F("ver")] = versionString;
@@ -1039,7 +1031,7 @@ void serializeInfo(JsonObject root)
     JsonObject wifi_obj = network_info.createNestedObject("wifi");
     // Get local Wi-Fi MAC
     if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
-      wifi_obj["mac"] = format_mac_address(mac);
+      wifi_obj["mac"] = Network.format_mac_address(mac);
     }
     // Get local Wi-Fi IP
     if (esp_netif_get_ip_info(wifi_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
@@ -1053,7 +1045,7 @@ void serializeInfo(JsonObject root)
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
       JsonObject ap_obj = wifi_obj.createNestedObject("ap");
       ap_obj["ssid"] = (char*)ap_info.ssid;
-      ap_obj["bssid"] = format_mac_address(ap_info.bssid);
+      ap_obj["bssid"] = Network.format_mac_address(ap_info.bssid);
       ap_obj["rssi"] = ap_info.rssi;
       ap_obj["signal"] = getSignalQuality(ap_info.rssi);
       ap_obj["channel"] = ap_info.primary;
@@ -1165,7 +1157,7 @@ void serializeInfo(JsonObject root)
   if (eth_netif && eth_handle) {
     JsonObject eth_obj = network_info.createNestedObject("ethernet");
     if (esp_netif_get_mac(eth_netif, mac) == ESP_OK) {
-      eth_obj["mac"] = format_mac_address(mac);
+      eth_obj["mac"] = Network.format_mac_address(mac);
     }
     if (esp_netif_get_ip_info(eth_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
       char ip_str[16];

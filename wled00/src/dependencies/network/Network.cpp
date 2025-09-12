@@ -48,17 +48,13 @@ IPAddress NetworkClass::gatewayIP() {
 }
 
 void NetworkClass::localMAC(uint8_t* MAC) {
-
   memset(MAC, 0, 6);
-
   esp_netif_t* default_netif = esp_netif_get_default_netif();
   if (default_netif == NULL) {
     return; // No default interface is active
   }
-
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
-
   if (default_netif == wifi_netif) {
     esp_wifi_get_mac(WIFI_IF_STA, MAC);
   } else {
@@ -111,6 +107,32 @@ IPAddress NetworkClass::hostByName(const char* hostname) {
 
   // If we get here, the lookup failed
   return INADDR_NONE;
+}
+
+String NetworkClass::format_mac_address(const uint8_t* mac) {
+  char mac_str[18];
+  snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(mac_str);
+}
+
+esp_err_t NetworkClass::get_hardware_mac_address(uint8_t* mac_addr) {
+  // This gets the MAC from the hardware, before any network init happens.
+  esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+  if (err == ESP_OK) {
+    return ESP_OK;
+  }
+  err = esp_wifi_get_mac(WIFI_IF_STA, mac_addr);
+  return err;
+}
+
+String NetworkClass::getEscapedMac() {
+  uint8_t mac_addr[6];
+  this->get_hardware_mac_address(mac_addr);
+  String formatted_mac = this->format_mac_address(mac_addr);
+  formatted_mac.replace(":", "");
+  formatted_mac.toLowerCase();
+  return formatted_mac;
 }
 
 bool NetworkClass::isEthernet() {
