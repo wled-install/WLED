@@ -111,7 +111,7 @@ String NetworkClass::format_mac_address(const uint8_t* mac) {
 }
 
 esp_err_t NetworkClass::get_hardware_mac_address(uint8_t* mac_addr) {
-  // This gets the MAC from the hardware, before any network init happens.
+  // This gets the MAC from the hardware, before any network service init happens.
   esp_err_t err = ESP_FAIL;
   #if defined(WLED_USE_ETHERNET) 
   if (eth_handle != NULL) {
