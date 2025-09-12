@@ -9615,7 +9615,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   return FRAMETIME;
 
 } // mode_PPA_TESTBED)
-static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "Image Player ☾🐺@Folder Picker,Fill (0==Bass),FPS Limit,Fade Colour,Transforms,Bass Scaler,Bass Flip,Enable Fill;!,,Peaks;!;2f;sx=1,ix=1,c1=30,c2=1,c3=1,o1=0,o2=1,o3=0";
+static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "Image Player ☾🐺@Folder Picker,Fill (0==Bass),FPS Limit,Fade Colour,Transforms,Bass Scaler,Bass Flip,Enable Fill;!,,Peaks;!;2f;sx=0,ix=0,c1=30,c2=0,c3=0,o1=0,o2=0,o3=0";
 
 #endif // WLED_DISABLE_2D
 
