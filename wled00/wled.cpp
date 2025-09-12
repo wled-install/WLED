@@ -3,6 +3,9 @@ static const char *TAG = "WLED";
 #include "wled.h"
 #include "wled_ethernet.h"
 #include <Arduino.h>
+#if defined(WLED_USE_ETHERNET_ONLY) && !defined(WLED_USE_ETHERNET)
+  #define WLED_USE_ETHERNET
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   #include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
   esp_ldo_channel_handle_t ldo2 = NULL;
@@ -815,7 +818,7 @@ void WLED::setup()
   #endif 
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
-    // #if !defined(WLED_USE_ETHERNET)
+    #if !defined(WLED_USE_ETHERNET_ONLY)
       #if defined(ARDUINO_ARCH_ESP32P4)
         esp_hosted_init();
       #endif
@@ -841,18 +844,18 @@ void WLED::setup()
       }
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
-      // wifi_tx_rate_config_t wifi_rate_config = {};
-      // wifi_rate_config.phymode = WIFI_PHY_MODE_HT40;
-      // wifi_rate_config.rate = WIFI_PHY_RATE_MCS3_LGI;
-      // esp_wifi_config_80211_tx((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_rate_config);
       esp_wifi_start();
       // delay(500);
-    // #endif
+    #endif
 
     #ifdef WLED_USE_ETHERNET
       // Initialize TCP/IP network interface
+
+      #if defined(WLED_USE_ETHERNET_ONLY)
+      // With coexistence you don't need these again (can crash!)
       ESP_ERROR_CHECK(esp_netif_init());
       ESP_ERROR_CHECK(esp_event_loop_create_default());
+      #endif
 
       // Create default Ethernet interface
       esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
