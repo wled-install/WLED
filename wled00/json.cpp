@@ -1103,7 +1103,7 @@ void serializeInfo(JsonObject root)
       }
       ap_obj["phy"] = phy_modes;
 
-      #ifndef CONFIG_IDF_TARGET_ESP32P4 // FIXME dunno if the P4 actually works for this with ESP-Hosted or maybe the C6 needs updating? 
+      #ifndef CONFIG_IDF_TARGET_ESP32P4
       wifi_phy_mode_t phymode;
 
       if (esp_wifi_sta_get_negotiated_phymode(&phymode) == ESP_OK) {
