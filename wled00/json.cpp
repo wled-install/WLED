@@ -1021,10 +1021,14 @@ void serializeInfo(JsonObject root)
   JsonObject wifi_info = root.createNestedObject("wifi");
   #ifdef ARDUINO_ARCH_ESP32P4
     wifi_info[F("bssid")] = CLIENT_SSID;
-    int qrssi = 69;
+    int qrssi;
+    uint8_t primary_ch;
+    wifi_second_chan_t secondary_ch;
+    esp_wifi_get_channel(&primary_ch, &secondary_ch);
+    esp_wifi_sta_get_rssi(&qrssi);
     wifi_info[F("rssi")] = qrssi;
     wifi_info[F("signal")] = getSignalQuality(qrssi);
-    wifi_info[F("channel")] = 99;
+    wifi_info[F("channel")] = primary_ch;
   #else
     wifi_info[F("bssid")] = WiFi.BSSIDstr();
     int qrssi = WiFi.RSSI();
