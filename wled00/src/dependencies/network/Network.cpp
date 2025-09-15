@@ -153,6 +153,21 @@ bool NetworkClass::isEthernet() {
   return eth_is_connected;
 }
 
+bool NetworkClass::setHostname(const char* hostname) {
+  esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (netif == NULL) {
+    ESP_LOGE(TAG, "Failed to get STA network interface handle.");
+    return false;
+  }
+  esp_err_t err = esp_netif_set_hostname(netif, hostname);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set hostname, error: %s", esp_err_to_name(err));
+    return false;
+  }
+  ESP_LOGI(TAG, "Hostname set to '%s'", hostname);
+  return true;
+}
+
 #ifdef ARDUINO_ARCH_ESP32
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 NetworkClass WL_Network;

@@ -767,22 +767,35 @@ int retry_num=0;
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data){
   if(event_id == WIFI_EVENT_STA_START) {
     USER_PRINTLN("WiFi Started");
+    interfacesInited = false;
     wifi_is_connected = false;
   } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
     USER_PRINTLN("WiFi Connected");
+    interfacesInited = false;
     wifi_is_connected = false;
   } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
     USER_PRINTLN("WiFi Lost Connection");
+    interfacesInited = false;
     wifi_is_connected = false;
     if(retry_num<5){esp_wifi_connect();retry_num++;USER_PRINTLN("Retrying to Connect...\n");}
   } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE){
     // USER_PRINTLN("WiFi HOME CHANNEL CHAANGED");
   } else if (event_id == WIFI_EVENT_STA_STOP){
     USER_PRINTLN("WiFi Stopped");
+    interfacesInited = false;
     wifi_is_connected = false;
-  } else if (event_id == IP_EVENT_STA_GOT_IP){
+  } else if (event_id == IP_EVENT_STA_GOT_IP) {
+    USER_PRINTLN("WiFi Got IP");
     interfacesInited = false;
     wifi_is_connected = true;
+  } else if (event_id == WIFI_EVENT_AP_START) {
+    USER_PRINTLN("SoftAP Started");
+    interfacesInited = false;
+    wifi_is_connected = false;
+  } else if (event_id == WIFI_EVENT_AP_STOP) {
+    USER_PRINTLN("SoftAP Stopped");
+    interfacesInited = false;
+    wifi_is_connected = false;
   } else {
     USER_PRINTF("WiFi threw unidentified code %d\n",event_id);
   }
@@ -824,7 +837,7 @@ void WLED::setup()
       #endif
       esp_netif_init();
       esp_event_loop_create_default();
-      esp_netif_create_default_wifi_sta();
+      // esp_netif_create_default_wifi_sta();
       wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
       esp_wifi_init(&wifi_initiation); 
       esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
@@ -836,6 +849,7 @@ void WLED::setup()
         wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
       }
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
     #endif
 
     #ifdef WLED_USE_ETHERNET
@@ -1405,7 +1419,7 @@ void WLED::beginStrip()
 
 void WLED::initAP(bool resetAP)
 {
-  #ifndef ARDUINO_ARCH_ESP32P4 // TroyHacks FIXME - we have no softAP mode yet. 
+  // #ifndef ARDUINO_ARCH_ESP32P4 // TroyHacks FIXME - we have no softAP mode yet. 
   if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
     return;
 
@@ -1415,8 +1429,51 @@ void WLED::initAP(bool resetAP)
   }
   USER_PRINT(F("Opening access point "));  // WLEDMM
   USER_PRINTLN(apSSID);                    // WLEDMM
-  WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
-  WiFi.softAP(apSSID, apPass, apChannel, apHide, 8); // WLED-MM allow up to 8 clients for ad-hoc "in the field" syncing.
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_stop());
+
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_init(&cfg));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+  wifi_config_t wifi_ap_config = {};
+  strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.ssid), apSSID, sizeof(wifi_ap_config.ap.ssid));
+  strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.password), apPass, sizeof(wifi_ap_config.sta.password));
+  wifi_ap_config.ap.ssid_len = strlen(apSSID);
+  wifi_ap_config.ap.channel = apChannel;
+  wifi_ap_config.ap.max_connection = 255;
+  wifi_ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  wifi_ap_config.ap.pmf_cfg.required = false;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
+
+  wifi_config_t wifi_sta_config = {};
+  strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
+  strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
+  wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+  wifi_sta_config.sta.failure_retry_cnt = 5;
+  wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+  wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
+
+  esp_netif_t* esp_netif_ap = esp_netif_create_default_wifi_ap();
+  esp_netif_t* esp_netif_sta = esp_netif_create_default_wifi_sta();
+
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+  
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+
+  // esp_netif_dns_info_t dns;
+  // esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns);
+  // uint8_t dhcps_offer_option = 0x02;
+  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(esp_netif_ap));
+  // ESP_ERROR_CHECK(esp_netif_dhcps_option(esp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
+  // ESP_ERROR_CHECK(esp_netif_set_dns_info(esp_netif_ap, ESP_NETIF_DNS_MAIN, &dns));
+  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(esp_netif_ap));
+
+  // WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
+  // WiFi.softAP(apSSID, apPass, apChannel, apHide, 8); // WLED-MM allow up to 8 clients for ad-hoc "in the field" syncing.
   #if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(ARDUINO_ARCH_ESP32P4))
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   #endif
@@ -1441,7 +1498,7 @@ void WLED::initAP(bool resetAP)
     dnsServer.start(53, "*", WiFi.softAPIP());
   }
   apActive = true;
-  #endif
+  // #endif
 }
 
 bool WLED::initEthernet()
@@ -1571,49 +1628,45 @@ void WLED::initConnection()
     busses.removeAll(); // TROYHACKS FAILSAFE IN CASE BUSSES ARE CAUSING CRASHES
   #endif
 
-  // if (!WLED_WIFI_CONFIGURED) {
-  //   USER_PRINTLN(F("No WiFi connection configured."));  // WLEDMM
-  //   if (!apActive) initAP();        // instantly go to ap mode
-  //   return;
-  // } else if (!apActive) {
-  //   if (apBehavior == AP_BEHAVIOR_ALWAYS) {
-  //     DEBUG_PRINTLN(F("Access point ALWAYS enabled."));
-  //     initAP();
-  //   } else {
-  //     DEBUG_PRINTLN(F("Access point disabled (init)."));
-  //     WiFi.softAPdisconnect(true);
-  //     WiFi.mode(WIFI_STA);
-  //   }
-  // }
-  // showWelcomePage = false;
+  if (!WLED_WIFI_CONFIGURED) {
+    USER_PRINTLN(F("No WiFi connection configured."));  // WLEDMM
+    if (!apActive) initAP();        // instantly go to ap mode
+    return;
+  } else if (!apActive) {
+    if (apBehavior == AP_BEHAVIOR_ALWAYS) {
+      DEBUG_PRINTLN(F("Access point ALWAYS enabled."));
+      initAP();
+    } else {
+      DEBUG_PRINTLN(F("Access point disabled (init)."));
+      wifi_mode_t mode;
+      esp_wifi_get_mode(&mode);
+      if (mode == WIFI_MODE_APSTA) {
+        esp_wifi_stop();
+        forceReconnect = true;
+      } 
+    }
+  }
+  showWelcomePage = false;
 
   // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
   char hostname[25];
   prepareHostname(hostname);
 
-  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_disconnect());
-    USER_PRINT("Connecting to WiFi: ");
-    USER_PRINTLN(clientSSID);
-    wifi_config_t wifi_configuration = {};
-    strncpy(reinterpret_cast<char*>(wifi_configuration.sta.ssid), clientSSID, sizeof(wifi_configuration.sta.ssid));
-    strncpy(reinterpret_cast<char*>(wifi_configuration.sta.password), clientPass, sizeof(wifi_configuration.sta.password));
-    wifi_configuration.sta.ssid[sizeof(wifi_configuration.sta.ssid) - 1] = '\0';
-    wifi_configuration.sta.password[sizeof(wifi_configuration.sta.password) - 1] = '\0';
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
-  #endif
+  USER_PRINT("Connecting to WiFi: ");
+  USER_PRINTLN(clientSSID);
+  wifi_config_t wifi_configuration = {};
+  strncpy(reinterpret_cast<char*>(wifi_configuration.sta.ssid), clientSSID, sizeof(wifi_configuration.sta.ssid));
+  strncpy(reinterpret_cast<char*>(wifi_configuration.sta.password), clientPass, sizeof(wifi_configuration.sta.password));
+  wifi_configuration.sta.ssid[sizeof(wifi_configuration.sta.ssid) - 1] = '\0';
+  wifi_configuration.sta.password[sizeof(wifi_configuration.sta.password) - 1] = '\0';
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
 
   #ifdef WLED_USE_ETHERNET
     USER_PRINTLN(F("Connecting to Ethernet"));
-    // USER_PRINTF("Network.isConnected = %d\n",Network.isConnected());
-    // USER_PRINTF("Network.isEthernet (not fixed, kinda lying) = %d\n",Network.isEthernet());
-    // USER_PRINTF("Network.localIP = %s\n",Network.localIP().toString());
-    // USER_PRINTF("Network.subnetMask = %s\n",Network.subnetMask().toString());
-    // USER_PRINTF("Network.gatewayIP = %s\n",Network.gatewayIP().toString());
-    // USER_PRINTF("Network.localMAC = %s\n",Network.localMAC());
-
+    USER_PRINTF("Network.isConnected = %d\n",Network.isConnected());
+    USER_PRINTF("Network.isEthernet = %d\n",Network.isEthernet());
   #endif
 
   // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
@@ -1623,7 +1676,7 @@ void WLED::initConnection()
   // WiFi.setTxPower(WIFI_POWER_8_5dBm);
   #endif
   // WiFi.setSleep(!noWifiSleep);
-  // WiFi.setHostname(hostname);
+  Network.setHostname(hostname);
 
 }
 
@@ -1724,8 +1777,8 @@ void WLED::handleConnection()
   static unsigned long heapTime = 0;
   unsigned long now = millis();
 
-  // if (now < 2000 && (!WLED_WIFI_CONFIGURED || apBehavior == AP_BEHAVIOR_ALWAYS))
-  //   return;
+  if (now < 2000 && (!WLED_WIFI_CONFIGURED || apBehavior == AP_BEHAVIOR_ALWAYS))
+    return;
 
   if (lastReconnectAttempt == 0) {
     DEBUG_PRINTLN(F("lastReconnectAttempt == 0"));
@@ -1777,12 +1830,13 @@ void WLED::handleConnection()
       stacO = stac;
       DEBUG_PRINT(F("Connected AP clients: "));
       DEBUG_PRINTLN(stac);
-      // if (!WLED_CONNECTED && WLED_WIFI_CONFIGURED) {        // trying to connect, but not connected
-      //   if (stac)
-      //     WiFi.disconnect();        // disable search so that AP can work
-      //   else
-      //     initConnection();         // restart search
-      // }
+      if (!WLED_CONNECTED && WLED_WIFI_CONFIGURED) {        // trying to connect, but not connected
+        if (stac) {
+          // WiFi.disconnect();        // disable search so that AP can work
+        } else {
+          initConnection();         // restart search
+        }
+      }
     }
   }
   if (forceReconnect) {
@@ -1804,16 +1858,18 @@ void WLED::handleConnection()
       sendImprovStateResponse(0x03, true);
       improvActive = 2;
     }
-    // if (now - lastReconnectAttempt > ((stac) ? 300000 : 18000) && WLED_WIFI_CONFIGURED) {
-    //   if (improvActive == 2) improvActive = 3;
-    //   DEBUG_PRINTLN(F("Last reconnect too old."));
-    //   initConnection();
-    // }
-    // if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
-    //   DEBUG_PRINTLN(F("Not connected AP."));
-    //   initAP();
-    // }
-  } else if (!interfacesInited) { //newly connected
+    if (now - lastReconnectAttempt > ((stac) ? 300000 : 18000) && WLED_WIFI_CONFIGURED) {
+      if (improvActive == 2) improvActive = 3;
+      DEBUG_PRINTLN(F("Last reconnect too old."));
+      initConnection();
+    }
+    if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
+      DEBUG_PRINTLN(F("Not connected AP."));
+      initAP();
+    }
+  } 
+  
+  if ((eth_is_connected || wifi_is_connected) && !interfacesInited) { //newly connected
     USER_PRINTLN();
     USER_PRINT(F("Connected! IP address: http://"));
     USER_PRINT(Network.localIP());
@@ -1833,13 +1889,13 @@ void WLED::handleConnection()
     usermods.connected();
     lastMqttReconnectAttempt = 0; // force immediate update
 
-    // shut down AP
-    // if (apBehavior != AP_BEHAVIOR_ALWAYS && apActive) {
-    //   dnsServer.stop();
-    //   WiFi.softAPdisconnect(true);
-    //   apActive = false;
-    //   USER_PRINTLN(F("Access point disabled (handle)."));
-    // }
+  } else {
+    wifi_mode_t mode;
+    esp_wifi_get_mode(&mode);
+    if (mode == WIFI_MODE_APSTA) {
+      esp_wifi_stop();
+      forceReconnect = true;
+    }
   }
 }
 

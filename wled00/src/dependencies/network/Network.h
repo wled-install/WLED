@@ -25,6 +25,7 @@ public:
   String format_mac_address(const uint8_t* mac);
   esp_err_t get_hardware_mac_address(uint8_t* mac_addr);
   String getEscapedMac();
+  bool setHostname(const char* hostname);
 };
 
 #ifdef ARDUINO_ARCH_ESP32
