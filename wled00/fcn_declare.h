@@ -468,6 +468,7 @@ float tan_approx(float x);
 void handleSerial();
 void updateBaudRate(uint32_t rate);
 bool canUseSerial(void);   // WLEDMM returns true if Serial can be used for debug output (i.e. not configured for other purpose)
+void serial_drain();
 
 //wled_server.cpp
 bool isIp(String str);

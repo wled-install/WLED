@@ -160,11 +160,21 @@ void task_list() {
   }
 }
 
+void serial_drain() {
+  if (Serial.available()) {
+    byte* garbage = (byte*)heap_caps_malloc_prefer(Serial.available() + 100, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
+    USER_PRINTF("Throwing away %u bag%s of serial garbage.\n", Serial.available(), Serial.available() > 1 ? "s" : "");
+    Serial.read(garbage, Serial.available());
+    heap_caps_free(garbage);
+  }
+}
+
 void handleSerial() {
 
   if (pinManager.isPinAllocated(hardwareRX)) return;
   if (!Serial) return;              // arduino docs: `if (Serial)` indicates whether or not the USB CDC serial connection is open. For all non-USB CDC ports, this will always return true
   if (((pinManager.isPinAllocated(hardwareTX)) && (pinManager.getPinOwner(hardwareTX) != PinOwner::DebugOut))) return; // WLEDMM serial TX is necessary for adalight / TPM2
+  if (Serial.available() > 1) { serial_drain(); return; }
 
   static auto state = AdaState::Header_A;
   static uint16_t count = 0;
