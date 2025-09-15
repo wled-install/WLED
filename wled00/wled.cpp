@@ -1419,7 +1419,6 @@ void WLED::beginStrip()
 
 void WLED::initAP(bool resetAP)
 {
-  // #ifndef ARDUINO_ARCH_ESP32P4 // TroyHacks FIXME - we have no softAP mode yet. 
   if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
     return;
 
@@ -1498,7 +1497,6 @@ void WLED::initAP(bool resetAP)
     dnsServer.start(53, "*", WiFi.softAPIP());
   }
   apActive = true;
-  // #endif
 }
 
 bool WLED::initEthernet()
