@@ -399,6 +399,7 @@ WLED_GLOBAL bool force802_3g _INIT(false);
 #endif
 WLED_GLOBAL esp_eth_handle_t eth_handle;
 WLED_GLOBAL bool eth_is_connected _INIT(false);
+WLED_GLOBAL bool wifi_is_connected _INIT(false);
 
 // LED CONFIG
 WLED_GLOBAL bool turnOnAtBoot _INIT(true);                // turn on LEDs at power-up

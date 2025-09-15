@@ -767,17 +767,22 @@ int retry_num=0;
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data){
   if(event_id == WIFI_EVENT_STA_START) {
     USER_PRINTLN("WiFi Started");
+    wifi_is_connected = false;
   } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
     USER_PRINTLN("WiFi Connected");
+    wifi_is_connected = false;
   } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    USER_PRINTLN("WiFi Lost COnnection");
+    USER_PRINTLN("WiFi Lost Connection");
+    wifi_is_connected = false;
     if(retry_num<5){esp_wifi_connect();retry_num++;USER_PRINTLN("Retrying to Connect...\n");}
   } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE){
     // USER_PRINTLN("WiFi HOME CHANNEL CHAANGED");
   } else if (event_id == WIFI_EVENT_STA_STOP){
     USER_PRINTLN("WiFi Stopped");
+    wifi_is_connected = false;
   } else if (event_id == IP_EVENT_STA_GOT_IP){
     interfacesInited = false;
+    wifi_is_connected = true;
   } else {
     USER_PRINTF("WiFi threw unidentified code %d\n",event_id);
   }
@@ -788,7 +793,7 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
 static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
   if (event_id == ETHERNET_EVENT_CONNECTED) {
     USER_PRINTLN("Ethernet Link Up");
-    eth_is_connected = true;
+    eth_is_connected = false;
   } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
     USER_PRINTLN("Ethernet Link Down");
     eth_is_connected = false;
@@ -801,9 +806,7 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
 }
 
 static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-  // ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-  // USER_PRINTF("Ethernet Got IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
-  // USER_PRINTLN();
+  eth_is_connected = true;
   interfacesInited = false;
 }
 #endif
@@ -826,13 +829,6 @@ void WLED::setup()
       esp_wifi_init(&wifi_initiation); 
       esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
       esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
-      wifi_config_t wifi_configuration = {
-          .sta = {
-              .ssid = CLIENT_SSID,      // TroyHacks FIXME - these are hardcoded my_config.h values for WiFi password.
-              .password = CLIENT_PASS
-              }
-      };
-      
       uint8_t wifi_protocols;
       if (CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT) {
         wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX);
@@ -840,9 +836,6 @@ void WLED::setup()
         wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
       }
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
-      esp_wifi_start();
-      // delay(500);
     #endif
 
     #ifdef WLED_USE_ETHERNET
@@ -1226,12 +1219,13 @@ void WLED::setup()
   usermods.setup();
   DEBUG_PRINT(F("heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
 
-  if (strcmp(clientSSID, DEFAULT_CLIENT_SSID) == 0)
+  if (strcmp(clientSSID, DEFAULT_CLIENT_SSID) == 0) {
     showWelcomePage = true;
-  // WiFi.persistent(false);
-  // #ifdef WLED_USE_ETHERNET
-  // WiFi.onEvent(WiFiEvent);
-  // #endif
+    // WiFi.persistent(false);
+    // #ifdef WLED_USE_ETHERNET
+    // WiFi.onEvent(WiFiEvent);
+    // #endif
+  }
 
   #ifdef WLED_ENABLE_ADALIGHT
   //Serial RX (Adalight, Improv, Serial JSON) only possible if GPIO3 unused
@@ -1361,10 +1355,9 @@ void WLED::setup()
   USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
   USER_PRINTLN(F("WLED initialization done.\n"));
   
+  serial_drain();
   Serial.flush();
-  Serial.flush();
-  Serial.flush(); // just in case of garbage.
-  
+
   delay(50);
   
   #ifdef WLED_ENABLE_ADALIGHT // repeat Ada prompt
@@ -1598,11 +1591,18 @@ void WLED::initConnection()
   char hostname[25];
   prepareHostname(hostname);
 
-  #if !defined(WLED_USE_ETHERNET) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
+  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_disconnect());
     USER_PRINT("Connecting to WiFi: ");
     USER_PRINTLN(clientSSID);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_connect();
+    wifi_config_t wifi_configuration = {};
+    strncpy(reinterpret_cast<char*>(wifi_configuration.sta.ssid), clientSSID, sizeof(wifi_configuration.sta.ssid));
+    strncpy(reinterpret_cast<char*>(wifi_configuration.sta.password), clientPass, sizeof(wifi_configuration.sta.password));
+    wifi_configuration.sta.ssid[sizeof(wifi_configuration.sta.ssid) - 1] = '\0';
+    wifi_configuration.sta.password[sizeof(wifi_configuration.sta.password) - 1] = '\0';
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
   #endif
 
   #ifdef WLED_USE_ETHERNET
@@ -1814,18 +1814,14 @@ void WLED::handleConnection()
     //   initAP();
     // }
   } else if (!interfacesInited) { //newly connected
-    USER_PRINTLN("");
+    USER_PRINTLN();
     USER_PRINT(F("Connected! IP address: http://"));
-    USER_PRINTLN(Network.localIP());
-    //if (Network.isEthernet()) {
-    //  #if ESP32
-    //  USER_PRINT(ETH.localIP());
-    //  USER_PRINTLN(" via Ethernet");
-    //  #endif
-    //} else {
-    //  USER_PRINT(Network.localIP());
-    //  USER_PRINTLN(" via WiFi");
-    //}
+    USER_PRINT(Network.localIP());
+    if (Network.isEthernet()) {
+     USER_PRINTLN(" via Ethernet");
+    } else {
+     USER_PRINTLN(" via WiFi");
+    }
 
     if (improvActive) {
       if (improvError == 3) sendImprovStateResponse(0x00, true);
