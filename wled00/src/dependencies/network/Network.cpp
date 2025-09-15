@@ -63,6 +63,18 @@ void NetworkClass::localMAC(uint8_t* MAC) {
   return;
 }
 
+// bool NetworkClass::isConnected() {
+//   esp_netif_t* netif = esp_netif_get_default_netif();
+//   if (netif == NULL) {
+//     return false;
+//   }
+//   esp_netif_ip_info_t ip_info;
+//   if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+//     return (ip_info.ip.addr != 0);
+//   }
+//   return false;
+// }
+
 bool NetworkClass::isConnected() {
   esp_netif_t* netif = esp_netif_get_default_netif();
   if (netif == NULL) {
@@ -70,7 +82,7 @@ bool NetworkClass::isConnected() {
   }
   esp_netif_ip_info_t ip_info;
   if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-    return (ip_info.ip.addr != 0);
+    return (ip_info.ip.addr != 0) && (ip_info.ip.addr != IPADDR_BROADCAST);
   }
   return false;
 }
