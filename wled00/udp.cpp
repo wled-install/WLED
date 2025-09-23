@@ -933,7 +933,9 @@ void create_transposed_led_output_optimized(
   };
 
   if (bri != last_bri) {
-    for (int i = 0; i < 256; ++i) brightness_cache[i] = (i * bri) >> 8;
+    for (int i = 0; i < 256; ++i) {
+      brightness_cache[i] = (gamma8(i) * bri) >> 8;
+    }
     for (int i = 0; i < 256; ++i) {
       const uint16_t p1 = bitpatterns[i >> 4];
       const uint16_t p2 = bitpatterns[i & 0x0F];
