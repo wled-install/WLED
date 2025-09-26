@@ -376,15 +376,6 @@ void handleIO()
   } else if (millis() - lastOnTime > 600)
   {
     if (!offMode) {
-      #ifdef ESP8266
-      // turn off built-in LED if strip is turned off
-      // this will break digital bus so will need to be re-initialised on On
-      PinOwner ledPinOwner = pinManager.getPinOwner(LED_BUILTIN);
-      if (!strip.isOffRefreshRequired() && (ledPinOwner == PinOwner::None || ledPinOwner == PinOwner::BusDigital)) {
-        pinMode(LED_BUILTIN, OUTPUT);
-        digitalWrite(LED_BUILTIN, HIGH);
-      }
-      #endif
       #ifdef ESP32_DATA_IDLE_HIGH
       esp32RMTInvertIdle();
       #endif
