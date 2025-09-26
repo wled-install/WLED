@@ -156,15 +156,15 @@ bool NetworkClass::isEthernet() {
 bool NetworkClass::setHostname(const char* hostname) {
   esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (netif == NULL) {
-    ESP_LOGE(TAG, "Failed to get STA network interface handle.");
+    ESP_LOGE("NetworkClass", "Failed to get STA network interface handle.");
     return false;
   }
   esp_err_t err = esp_netif_set_hostname(netif, hostname);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to set hostname, error: %s", esp_err_to_name(err));
+    ESP_LOGE("NetworkClass", "Failed to set hostname, error: %s", esp_err_to_name(err));
     return false;
   }
-  ESP_LOGI(TAG, "Hostname set to '%s'", hostname);
+  ESP_LOGI("NetworkClass", "Hostname set to '%s'", hostname);
   return true;
 }
 
