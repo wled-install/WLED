@@ -9210,18 +9210,23 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   static std::string last_folder_path;
 
   if (get_sequence_folder("/usb0", folder_path, SEGMENT.speed, rescan_source) != 0) {
-    USER_PRINTLN("No sequence folders found — skipping");
+    DEBUG_PRINTLN("No sequence folders found — skipping");
     delay(500);
     return 1;
   }
 
+  static uint16_t folder_size = 0;
+
   if (folder_path != last_folder_path) {
     last_folder_path = folder_path;
-    USER_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
+    folder_size = ImageCacheManager::getInstance().getFolderSize(folder_path); 
+    DEBUG_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
   }
 
-  if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
-      frame = 0;
+  if (folder_size == 1) {
+    frame = 0;  // Always use frame 0
+  } else {
+    if (frame >= folder_size) frame = 0;
   }
 
   ImageData* img = ImageCacheManager::getInstance().getImage(folder_path, frame);
@@ -9234,16 +9239,17 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     file_jpeg = img->buffer;
     file_jpeg_size = img->size;
 
-    frame++;
-    if (frame >= ImageCacheManager::getInstance().getFolderSize(folder_path)) {
-        frame = 0;
+    if (img && folder_size > 1) {
+      frame++;
+      if (frame >= folder_size) frame = 0;
     }
+    
   } else {
-    USER_PRINTF("Could not get image %d from %s.", frame, folder_path.c_str());
+    DEBUG_PRINTF("Could not get image %d from %s.", frame, folder_path.c_str());
   }
   
   if (!file_jpeg || file_jpeg_size == 0) {
-    USER_PRINTF("Cached image data missing for frame %d\n", frame);
+    DEBUG_PRINTF("Cached image data missing for frame %d\n", frame);
     frame = 0;
     delay(500);
     return 1;
