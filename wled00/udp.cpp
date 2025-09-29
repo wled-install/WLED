@@ -1011,6 +1011,8 @@ parlio_transmit_config_t transmit_config = {
     }
 };
 
+portMUX_TYPE parlio_spinlock = portMUX_INITIALIZER_UNLOCKED;
+
 uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit, uint8_t color_order) {
 
   if (length != outputs * leds_per_output) {
@@ -1188,7 +1190,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   #endif
   parallel_buffer_repacked = (parallel_buffer_repacked == parallel_buffer_repacked1) ? parallel_buffer_repacked2 : parallel_buffer_repacked1;
 
-  if (after-before > 50) delayMicroseconds(20);
+  if (after-before < 50) delayMicroseconds(20);
 
   for (int i = 0; i < num_chunks && i < 4; ++i) {
     ESP_ERROR_CHECK(parlio_tx_unit_transmit(parlio_tx_unit, chunk_ptrs[i], chunk_bits[i], &transmit_config));
@@ -1328,7 +1330,7 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
           if (buffer != nullptr) {
             heap_caps_free(buffer);
           }
-          buffer = (byte *) heap_caps_calloc_prefer(new_size+15, sizeof(byte), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
+          buffer = (byte*)heap_caps_calloc_prefer(new_size + 15, sizeof(byte), 2, MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM);
           buffer_size = new_size;
         }
         memmove(buffer + (length * 3), buffer, length * 3 * (volume_depth - 1));
