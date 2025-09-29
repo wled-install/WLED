@@ -94,7 +94,7 @@
 //#define WLED_DISABLE_BROWNOUT_DET
 
 // WLEDMM MANDATORY flags
-#define WLEDMM_PROTECT_SERVICE // prevents crashes when effects are drawing while asyncWebServer tries to modify segments at the same time
+#undef WLEDMM_PROTECT_SERVICE // TroyHacks FIXME? prevents crashes when effects are drawing while asyncWebServer tries to modify segments at the same time
 
 // Library inclusions.
 #include <Arduino.h>
