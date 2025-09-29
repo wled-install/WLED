@@ -1,4 +1,4 @@
-#if defined(ARDUINO_ARCH_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 .text
 .align 4
 .global p4_mul16x16

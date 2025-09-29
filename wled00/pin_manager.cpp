@@ -140,7 +140,7 @@ String PinManagerClass::getPinSpecialText(int gpio) {  // special purpose PIN in
     #elif defined(CONFIG_IDF_TARGET_ESP32C6)
       // ESP32-C6
       if (gpio > 11 && gpio < 14) return (F("USB (CDC) / JTAG"));
-    #elif defined(ARDUINO_ARCH_ESP32P4)
+    #elif defined(CONFIG_IDF_TARGET_ESP32P4)
       if (gpio >= 34 && gpio <= 38) return (F("(strapping pin)"));
       if (gpio == 26 || gpio == 27) return (F("Extra USB (usable)"));
       if (gpio == 6) return (F("ESP32-C6 wakeup (usable)"));
@@ -151,7 +151,7 @@ String PinManagerClass::getPinSpecialText(int gpio) {  // special purpose PIN in
       //if (gpio == 12) return (F("(strapping pin - MTDI)"));
       //if (gpio == 15) return (F("(strapping pin - MTDO)"));
       //if (gpio > 11 && gpio < 16) return (F("(optional) JTAG debug probe"));
-      #if defined(BOARD_HAS_PSRAM) && !defined(ARDUINO_ARCH_ESP32P4)
+      #if defined(BOARD_HAS_PSRAM) && !defined()
         if (gpio == 16 || gpio == 17) return (F("(reserved) PSRAM"));
       #endif
       #if defined(ARDUINO_TTGO_T7_V14_Mini32) || defined(ARDUINO_LOLIN_D32_PRO) || defined(ARDUINO_ADAFRUIT_FEATHER_ESP32_V2)

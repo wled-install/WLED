@@ -273,7 +273,7 @@ BusPwm::BusPwm(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
     deallocatePins(); return;
     }
     _pins[i] = currentPin; //store only after allocatePin() succeeds
-    #if defined(ESP8266) || defined (ARDUINO_ARCH_ESP32P4)
+  #if defined(ESP8266) || defined (CONFIG_IDF_TARGET_ESP32P4)
     pinMode(_pins[i], OUTPUT);
     #else
     ledcSetup(_ledcStart + i, _frequency, 8);
@@ -393,7 +393,7 @@ void BusPwm::deallocatePins() {
   for (uint8_t i = 0; i < numPins; i++) {
     pinManager.deallocatePin(_pins[i], PinOwner::BusPwm);
     if (!pinManager.isPinOk(_pins[i])) continue;
-    #if defined(ESP8266) || defined (ARDUINO_ARCH_ESP32P4)
+  #if defined(ESP8266) || defined (CONFIG_IDF_TARGET_ESP32P4)
     digitalWrite(_pins[i], LOW); //turn off PWM interrupt
     #else
     if (_ledcStart < 16) ledcDetachPin(_pins[i]);
@@ -474,7 +474,8 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
   }
   _UDPchannels = _rgbw ? 4 : 3;
   #ifdef ESP32
-  _data = (byte*) heap_caps_calloc_prefer((bc.count * _UDPchannels)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   #else
   _data = (byte*) calloc((bc.count * _UDPchannels)+15, sizeof(byte));
   #endif

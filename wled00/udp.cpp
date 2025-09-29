@@ -786,7 +786,7 @@ void sendSysInfoUDP()
 static       size_t sequenceNumber = 0; // this needs to be shared across all outputs
 static const byte   ART_NET_HEADER[12] PROGMEM = {0x41,0x72,0x74,0x2d,0x4e,0x65,0x74,0x00,0x00,0x50,0x00,0x0e};
 
-#if defined(ARDUINO_ARCH_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 extern "C" {
   int p4_mul16x16(uint8_t* outpacket, uint8_t* brightness, uint16_t num_loops, uint8_t* pixelbuffer);
 }
@@ -1095,15 +1095,25 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     return 0; // let's give it a frame to set up.
   }
 
-  static byte     *parallel_buffer_remapped  = NULL;
-  #ifdef WLEDMM_REMAP_AT_OUTPUT
-  static byte     *parallel_buffer_remapped1 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  static byte     *parallel_buffer_remapped2 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  #endif 
-  static uint16_t *parallel_buffer_repacked  = NULL; 
-  static uint16_t *parallel_buffer_repacked1 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  static uint16_t *parallel_buffer_repacked2 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // static byte     *parallel_buffer_remapped  = NULL;
+  // #ifdef WLEDMM_REMAP_AT_OUTPUT
+  // static byte     *parallel_buffer_remapped1 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // static byte     *parallel_buffer_remapped2 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // #endif 
+  // static uint16_t *parallel_buffer_repacked  = NULL; 
+  // static uint16_t *parallel_buffer_repacked1 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // static uint16_t *parallel_buffer_repacked2 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   
+
+  static byte* parallel_buffer_remapped = NULL;
+#ifdef WLEDMM_REMAP_AT_OUTPUT
+  static byte* parallel_buffer_remapped1 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  static byte* parallel_buffer_remapped2 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+#endif 
+  static uint16_t* parallel_buffer_repacked = NULL;
+  static uint16_t* parallel_buffer_repacked1 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  static uint16_t* parallel_buffer_repacked2 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+
   if (parallel_buffer_repacked == NULL) parallel_buffer_repacked = parallel_buffer_repacked1;
   #ifdef WLEDMM_REMAP_AT_OUTPUT
   if (parallel_buffer_remapped == NULL) parallel_buffer_remapped = parallel_buffer_remapped1;
@@ -1379,7 +1389,7 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
           bri = 0; // Set all brightness to 0 but keep all calculations the same and keep sending packets.
           #endif
 
-          #if defined(ARDUINO_ARCH_ESP32P4)
+        #if defined(CONFIG_IDF_TARGET_ESP32P4)
           p4_mul16x16(packet_buffer+18, &bri, (packetSize >> 4)+1, buffer+bufferOffset);
           #else
           if (bri == 255) { // speed hack - don't adjust brightness if full brightness

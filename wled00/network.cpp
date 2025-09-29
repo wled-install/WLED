@@ -22,7 +22,7 @@ const ethernet_settings ethernetBoards[] = {
   // None
   {
   },
-  #if defined(WLED_USE_ETHERNET) && !defined(ARDUINO_ARCH_ESP32P4)
+  #if defined(WLED_USE_ETHERNET) && !defined(CONFIG_IDF_TARGET_ESP32P4)
   // WT32-EHT01
   // Please note, from my testing only these pins work for LED outputs:
   //   IO2, IO4, IO12, IO14, IO15

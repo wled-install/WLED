@@ -264,7 +264,7 @@ void sendSysInfoUDP();
 
 //network.cpp
 int getSignalQuality(int rssi) __attribute__((const));
-#ifndef ARDUINO_ARCH_ESP32P4
+#ifndef CONFIG_IDF_TARGET_ESP32P4
 void WiFiEvent(WiFiEvent_t event);
 #endif
 
