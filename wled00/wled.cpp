@@ -1533,7 +1533,7 @@ bool WLED::initEthernet()
     { (int8_t)es.eth_power, true },  // [8] = optional pin, not all boards use
     { ((int8_t)0xFE),       false }, // [9] = replaced with eth_clk_mode, mandatory
   };
-  #if defined(WLED_USE_ETHERNET) && !defined(ARDUINO_ARCH_ESP32P4)
+#if defined(WLED_USE_ETHERNET) && !defined(CONFIG_IDF_TARGET_ESP32P4)
   // update the clock pin....
   if (es.eth_clk_mode == ETH_CLOCK_GPIO0_IN) {
     pinsToAllocate[9].pin = 0;
