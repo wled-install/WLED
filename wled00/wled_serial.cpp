@@ -162,7 +162,7 @@ void task_list() {
 
 void serial_drain() {
   if (Serial.available()) {
-    byte* garbage = (byte*)heap_caps_malloc_prefer(Serial.available() + 100, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
+    byte* garbage = (byte*)heap_caps_malloc_prefer(Serial.available() + 100, 2, MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM );
     USER_PRINTF("Throwing away %u bag%s of serial garbage.\n", Serial.available(), Serial.available() > 1 ? "s" : "");
     Serial.read(garbage, Serial.available());
     heap_caps_free(garbage);
