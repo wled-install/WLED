@@ -1,6 +1,7 @@
 #include "wled.h"
 #ifdef PARLIO
 #include "driver/parlio_tx.h"
+#include "portmacro.h"
 #endif
 
 /*
@@ -163,10 +164,10 @@ void realtimeLock(uint32_t timeoutMs, byte md)
     if (useMainSegmentOnly) { USER_PRINTLN(F(", main segment only].")); } else { USER_PRINTLN(F("]."));}
     USER_FLUSH();
 
-    if (strip.isServicing()) {
-      USER_PRINTLN(F("realtimeLock() entering RTM: strip is still drawing effects."));
-      strip.waitUntilIdle();
-    }
+    // if (strip.isServicing()) {
+    //   USER_PRINTLN(F("realtimeLock() entering RTM: strip is still drawing effects."));
+    //   strip.waitUntilIdle();
+    // }
     strip.service(); // WLEDMM make sure that all segments are properly initialized
     busses.invalidateCache(true);
     // WLEDMM end
@@ -1011,7 +1012,7 @@ parlio_transmit_config_t transmit_config = {
     }
 };
 
-portMUX_TYPE parlio_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE parlio_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit, uint8_t color_order) {
 
@@ -1048,7 +1049,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     for (int i = 0; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
       parlio_config.data_gpio_nums[i] = gpio_num_t(parallelPins[i]);
     }
-    parlio_config.dma_burst_size = 64; // may not exceed 64 on PSRAM and must be power of 2 (1,2,4,8,16,32,64) and <=4 fails.
     #ifdef PARLIO_AUTO_OVERCLOCK
     if (leds_per_output <= 256) {
         parlio_config.output_clk_freq_hz = 1200000 * 4;
@@ -1062,7 +1062,8 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     #endif
     parlio_config.valid_start_delay = 0; // 16-bit max any number >0 seems to fail. 
     parlio_config.valid_stop_delay = 0; // 16-bit max but any number >0 seems to fail.
-    parlio_config.trans_queue_depth = 4;
+    parlio_config.dma_burst_size = 64; // may not exceed 64 on PSRAM and must be power of 2 (1,2,4,8,16,32,64) and <=4 fails.
+    parlio_config.trans_queue_depth = 16;
     parlio_config.max_transfer_size = 65535;
     parlio_config.flags.clk_gate_en = 0;
     parlio_config.flags.io_loop_back = 0;
@@ -1113,11 +1114,11 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   static byte* parallel_buffer_remapped2 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
 #endif 
   static uint16_t* parallel_buffer_repacked = NULL;
-  static uint16_t* parallel_buffer_repacked1 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
-  static uint16_t* parallel_buffer_repacked2 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  static uint16_t* parallel_buffer_repacked1 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
+  static uint16_t* parallel_buffer_repacked2 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
 
   if (parallel_buffer_repacked == NULL) parallel_buffer_repacked = parallel_buffer_repacked1;
-  #ifdef WLEDMM_REMAP_AT_OUTPUT
+#ifdef WLEDMM_REMAP_AT_OUTPUT
   if (parallel_buffer_remapped == NULL) parallel_buffer_remapped = parallel_buffer_remapped1;
 
   uint32_t* mappingTable = strip.getCustomMappingTable();
@@ -1139,10 +1140,10 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
       parallel_buffer_remapped[dest_byte_pos + 3] = buffer_in[buf_pos++];
     }
   }
-  #else
+#else
   parallel_buffer_remapped = buffer_in;
   color_order = COL_ORDER_RGB; // This isn't actually changing the color order - we're already there from the BusNetwork doing the right thing pixel-by-pixel.
-  #endif
+#endif
 
   create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri, color_order);
 
@@ -1185,69 +1186,71 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
   ESP_ERROR_CHECK(parlio_tx_unit_wait_all_done(parlio_tx_unit, -1));
   unsigned long after = micros();
 
-  #ifdef WLEDMM_REMAP_AT_OUTPUT
+#ifdef WLEDMM_REMAP_AT_OUTPUT
   parallel_buffer_remapped = (parallel_buffer_remapped == parallel_buffer_remapped1) ? parallel_buffer_remapped2 : parallel_buffer_remapped1;
-  #endif
+#endif
   parallel_buffer_repacked = (parallel_buffer_repacked == parallel_buffer_repacked1) ? parallel_buffer_repacked2 : parallel_buffer_repacked1;
 
-  if (after-before < 50) delayMicroseconds(20);
-
+  if (after - before < 50) delayMicroseconds(20);
+  
+  // portENTER_CRITICAL(&parlio_spinlock);
   for (int i = 0; i < num_chunks && i < 4; ++i) {
     ESP_ERROR_CHECK(parlio_tx_unit_transmit(parlio_tx_unit, chunk_ptrs[i], chunk_bits[i], &transmit_config));
   }
+  // portEXIT_CRITICAL(&parlio_spinlock);
 
-  #ifdef PARLIO_TIMER
+#ifdef PARLIO_TIMER
   if (micros() % 100 < 3) {
-    USER_PRINTF("Parallel IO for %u pixels took %lu micros at %u FPS.\n",length, micros()-timer, strip.getFps());
+    USER_PRINTF("Parallel IO for %u pixels took %lu micros at %u FPS.\n", length, micros() - timer, strip.getFps());
   }
-  #endif
+#endif
 
   return 0;
 }
 
 #else  // regular Art-Net
 
-uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t *buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit)  {
+uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit) {
 
   if (!(apActive || interfacesInited) || !client[0] || !length) return 1;  // network not initialised or dummy/unset IP address  031522 ajn added check for ap
 
   // For some reason, this is faster outside of the case block...
   //
-  #ifdef ESP32
-  static byte *packet_buffer = (byte *) heap_caps_calloc_prefer(530, sizeof(byte), 2, MALLOC_CAP_DEFAULT, MALLOC_CAP_SPIRAM);
-  #else
-  static byte *packet_buffer = (byte *) calloc(530, sizeof(byte));
-  #endif
+#ifdef ESP32
+  static byte* packet_buffer = (byte*)heap_caps_calloc_prefer(530, sizeof(byte), 2, MALLOC_CAP_DEFAULT, MALLOC_CAP_SPIRAM);
+#else
+  static byte* packet_buffer = (byte*)calloc(530, sizeof(byte));
+#endif
   if (packet_buffer[0] != 0x41) memcpy(packet_buffer, ART_NET_HEADER, 12); // copy in the Art-Net header if it isn't there already
 
   switch (type) {
-    case 0: // DDP
-    {
-      WiFiUDP ddpUdp; 
+  case 0: // DDP
+  {
+    WiFiUDP ddpUdp;
 
-      // calculate the number of UDP packets we need to send
-      size_t channelCount = length * (isRGBW? 4:3); // 1 channel for every R,G,B value
-      size_t packetCount = ((channelCount-1) / DDP_CHANNELS_PER_PACKET) +1;
+    // calculate the number of UDP packets we need to send
+    size_t channelCount = length * (isRGBW ? 4 : 3); // 1 channel for every R,G,B value
+    size_t packetCount = ((channelCount - 1) / DDP_CHANNELS_PER_PACKET) + 1;
 
-      // there are 3 channels per RGB pixel
-      uint32_t channel = 0; // TODO: allow specifying the start channel
-      // the current position in the buffer
-      size_t bufferOffset = 0;
+    // there are 3 channels per RGB pixel
+    uint32_t channel = 0; // TODO: allow specifying the start channel
+    // the current position in the buffer
+    size_t bufferOffset = 0;
 
-      for (size_t currentPacket = 0; currentPacket < packetCount; currentPacket++) {
-        if (sequenceNumber > 15) sequenceNumber = 0;
+    for (size_t currentPacket = 0; currentPacket < packetCount; currentPacket++) {
+      if (sequenceNumber > 15) sequenceNumber = 0;
 
-        if (!ddpUdp.beginPacket(client, DDP_DEFAULT_PORT)) {  // port defined in ESPAsyncE131.h
-          DEBUG_PRINTLN(F("DDP WiFiUDP.beginPacket returned an error"));
-          return 1; // problem
-        }
+      if (!ddpUdp.beginPacket(client, DDP_DEFAULT_PORT)) {  // port defined in ESPAsyncE131.h
+        DEBUG_PRINTLN(F("DDP WiFiUDP.beginPacket returned an error"));
+        return 1; // problem
+      }
 
-        // the amount of data is AFTER the header in the current packet
-        size_t packetSize = DDP_CHANNELS_PER_PACKET;
+      // the amount of data is AFTER the header in the current packet
+      size_t packetSize = DDP_CHANNELS_PER_PACKET;
 
-        uint8_t flags = DDP_FLAGS1_VER1;
-        if (currentPacket == (packetCount - 1U)) {
-          // last packet, set the push flag
+      uint8_t flags = DDP_FLAGS1_VER1;
+      if (currentPacket == (packetCount - 1U)) {
+        // last packet, set the push flag
           // TODO: determine if we want to send an empty push packet to each destination after sending the pixel data
           flags = DDP_FLAGS1_VER1 | DDP_FLAGS1_PUSH;
           if (channelCount % DDP_CHANNELS_PER_PACKET) {
@@ -1330,7 +1333,7 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
           if (buffer != nullptr) {
             heap_caps_free(buffer);
           }
-          buffer = (byte*)heap_caps_calloc_prefer(new_size + 15, sizeof(byte), 2, MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM);
+          buffer = (byte*)heap_caps_calloc_prefer(new_size + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
           buffer_size = new_size;
         }
         memmove(buffer + (length * 3), buffer, length * 3 * (volume_depth - 1));

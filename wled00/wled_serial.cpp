@@ -7,7 +7,7 @@
  * Adalight and TPM2 handler
  */
 
-#define SERIAL_MAXTIME_MILLIS 100 // to avoid blocking other activities, do not spend more than 100ms with continuous reading
+#define SERIAL_MAXTIME_MILLIS 500 // to avoid blocking other activities, do not spend more than 100ms with continuous reading
 // at 115200 baud, 100ms is enough to send/receive 1280 chars
 
 enum class AdaState {
@@ -162,7 +162,7 @@ void task_list() {
 
 void serial_drain() {
   if (Serial.available()) {
-    byte* garbage = (byte*)heap_caps_malloc_prefer(Serial.available() + 100, 2, MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM );
+    byte* garbage = (byte*)heap_caps_malloc_prefer(Serial.available() + 100, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
     USER_PRINTF("Throwing away %u bag%s of serial garbage.\n", Serial.available(), Serial.available() > 1 ? "s" : "");
     Serial.read(garbage, Serial.available());
     heap_caps_free(garbage);
@@ -232,6 +232,7 @@ void handleSerial() {
           #endif
         }
         else if (next == 'X') { // WLEDMM - force reconnect via Serial
+          USER_PRINTLN("handleSerial forcing reconnect");
           forceReconnect = true;
         } else if (next == 'C') { // WLEDMM - force reconnect via Serial
           task_list();

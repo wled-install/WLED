@@ -94,7 +94,7 @@
 //#define WLED_DISABLE_BROWNOUT_DET
 
 // WLEDMM MANDATORY flags
-#define WLEDMM_PROTECT_SERVICE // prevents crashes when effects are drawing while asyncWebServer tries to modify segments at the same time
+#undef WLEDMM_PROTECT_SERVICE // prevents crashes when effects are drawing while asyncWebServer tries to modify segments at the same time
 
 // Library inclusions.
 #include <Arduino.h>
@@ -221,20 +221,30 @@
 #undef  ALL_JSON_TO_PSRAM
 #define ALL_JSON_TO_PSRAM
 
+template <typename T>
 struct PSRAM_Allocator {
-  void* allocate(size_t size) {
-    if (psramFound()) return ps_malloc(size); // use PSRAM if it exists
-    else              return malloc(size);    // fallback
+  using value_type = T;
+
+  PSRAM_Allocator() = default;
+
+  template <typename U>
+  PSRAM_Allocator(const PSRAM_Allocator<U>&) { }
+
+  T* allocate(std::size_t n) {
+    return static_cast<T*>(heap_caps_malloc_prefer(n * sizeof(T), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL));
   }
-  void* reallocate(void* ptr, size_t new_size) {
-    if (psramFound()) return ps_realloc(ptr, new_size); // use PSRAM if it exists
-    else              return realloc(ptr, new_size);    // fallback
+
+  void deallocate(T* p, std::size_t) {
+    heap_caps_free(p);
   }
-  void deallocate(void* pointer) {
-    free(pointer);
-  }
+
+  bool operator==(const PSRAM_Allocator&) const { return true; }
+  bool operator!=(const PSRAM_Allocator&) const { return false; }
 };
-using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator>;
+
+
+using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator<char>>;
+
 //#define DynamicJsonDocument PSRAMDynamicJsonDocument  // WLEDMM experiment
 #else
 #define PSRAMDynamicJsonDocument DynamicJsonDocument
@@ -330,6 +340,8 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator>;
 WLED_GLOBAL char versionString[] _INIT(TOSTRING(WLED_VERSION));
 WLED_GLOBAL char releaseString[] _INIT_PROGMEM(TOSTRING(WLED_RELEASE_NAME)); //WLEDMM: to show on update page // somehow this will not work if using "const char releaseString[]
 #define WLED_CODENAME "Hoshi"
+
+WLED_GLOBAL SemaphoreHandle_t busMutex _INIT(xSemaphoreCreateMutex());
 
 // AP and OTA default passwords (for maximum security change them!)
 WLED_GLOBAL char apPass[65]  _INIT(WLED_AP_PASS);
@@ -977,15 +989,15 @@ public:
   void setup() __attribute__((used));
 
   void loop()  __attribute__((used));
-  void reset();
+  static void reset();
 
   void beginStrip();
-  void handleConnection();
-  bool initEthernet(); // result is informational
-  void initAP(bool resetAP = false);
-  void initConnection();
-  void initInterfaces();
-  void handleStatusLED();
+  static void handleConnection();
+  static bool initEthernet(); // result is informational
+  static void initAP(bool resetAP = false);
+  static void initConnection();
+  static void initInterfaces();
+  static void handleStatusLED();
   void enableWatchdog();
   void disableWatchdog();
 };

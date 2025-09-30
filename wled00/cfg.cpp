@@ -91,16 +91,16 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   JsonObject hw_led = hw["led"];
 
   // WLEDMM: before changing strip, make sure our strip is _not_ servicing effects in parallel
-  suspendStripService = true; // temporarily lock out strip updates
+  // suspendStripService = true; // temporarily lock out strip updates
 #ifdef ARDUINO_ARCH_ESP32
-  if (strip.isServicing() && (strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) != 0)) { // if we are in looptask (arduino loop), its safe to proceed without waiting
-    if (fromFS) {
-      USER_PRINTLN(F("deserializeConfig(fromFS): strip is still drawing effects."));
-    } else {
-      USER_PRINTLN(F("deserializeConfig(): strip is still drawing effects."));
-    }
-    strip.waitUntilIdle();
-  }
+  // if (strip.isServicing() && (strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) != 0)) { // if we are in looptask (arduino loop), its safe to proceed without waiting
+  //   if (fromFS) {
+  //     USER_PRINTLN(F("deserializeConfig(fromFS): strip is still drawing effects."));
+  //   } else {
+  //     USER_PRINTLN(F("deserializeConfig(): strip is still drawing effects."));
+  //   }
+  //   strip.waitUntilIdle();
+  // }
 #endif
 
   CJSON(strip.ablMilliampsMax, hw_led[F("maxpwr")]);
@@ -636,7 +636,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
     needsSave = !usermods.readFromConfig(usermods_settings);
   }
 
-  suspendStripService = false; // WLEDMM release lock
+  // suspendStripService = false; // WLEDMM release lock
 
   if (fromFS) return needsSave;
   // if from /json/cfg

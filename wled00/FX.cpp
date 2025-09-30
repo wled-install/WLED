@@ -9168,7 +9168,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   if (SEGMENT.custom1 < 255 && SEGMENT.custom1 > 0) {
     while (imagelimiter > micros()) {
-      delayMicroseconds(100); // Make WLED obey fps_limit and just delay here until we're ready to send a frame.
+      // delayMicroseconds(100); // Make WLED obey fps_limit and just delay here until we're ready to send a frame.
+      return FRAMETIME;
     }
   }
 
@@ -9280,11 +9281,41 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
   };
 
+  static uint32_t pre_jpeg_height = 0;
+  static uint32_t pre_jpeg_width = 0;
+  static uint32_t pre_height = 0;
+  static uint32_t pre_width = 0;
+  static size_t rx_bitmap_size = 0;
+  static uint8_t* rx_bitmap = NULL;
+  static uint32_t blackbuffer_size = 0;
+  static uint8_t* blackbuffer = NULL;
+
   jpeg_decode_picture_info_t header_info;
   ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_get_info(file_jpeg, file_jpeg_size, &header_info));
 
-  size_t rx_bitmap_size = 0;
-  uint8_t *rx_bitmap = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height * 3, &rx_mem_cfg, &rx_bitmap_size);
+  if (header_info.width != pre_jpeg_width || header_info.height != pre_jpeg_height) {
+  
+    if (rx_bitmap != NULL) free(rx_bitmap);
+
+    rx_bitmap = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height * 3, &rx_mem_cfg, &rx_bitmap_size);
+
+    pre_jpeg_height = header_info.height;
+    pre_jpeg_width = header_info.width;
+
+  }
+
+  if (width != pre_width || height != pre_height) {
+
+    if (blackbuffer != NULL) free(blackbuffer);
+
+    blackbuffer_size = width * height * 4;
+
+    blackbuffer = (uint8_t*)heap_caps_calloc(blackbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+
+    pre_height = height;
+    pre_width = width;
+
+  }
   
   if (rx_bitmap == NULL) {
     USER_PRINTLN("Can't allocate received bitmap buffer!");
@@ -9295,9 +9326,9 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, file_jpeg, file_jpeg_size, rx_bitmap, rx_bitmap_size, &out_size));
   ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_del_decoder_engine(jpgd_handle));
-  
-  um_data_t *um_data = getAudioData();
-  uint8_t fftResult[NUM_GEQ_CHANNELS] = {0};
+
+  um_data_t* um_data = getAudioData();
+  uint8_t fftResult[NUM_GEQ_CHANNELS] = { 0 };
   if (um_data && um_data->u_data) {
     memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));
   }
@@ -9317,11 +9348,11 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       bass_peak_counter = 0;
     }
   }
-  
-  static uint8_t bass_average = 128;
-  bass_average = (bass_average*0.99) + (fftResult[0] * 0.01);
 
-  if (bass_average == 0 && bass_peak > 10) bass_average = bass_peak/2;
+  static uint8_t bass_average = 128;
+  bass_average = (bass_average * 0.99) + (fftResult[0] * 0.01);
+
+  if (bass_average == 0 && bass_peak > 10) bass_average = bass_peak / 2;
 
   if (1 || width != header_info.width || height != header_info.height) { // force this always until PPA scaling is mathed out so we always fill the frame.
 
@@ -9331,7 +9362,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       .max_pending_trans_num = 18,
     };
     ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
-    
+
     ppa_fill_oper_config_t fill_config = {};
     fill_config.out.buffer = busPixelData;
     fill_config.out.buffer_size = busPixelSize;
@@ -9381,11 +9412,11 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   srm_config.in.block_w = header_info.width;
   srm_config.in.block_h = header_info.height;
 
-  srm_config.scale_x = float(float(width)/float(header_info.width));
-  srm_config.scale_y = float(float(height)/float(header_info.height));
+  srm_config.scale_x = float(float(width) / float(header_info.width));
+  srm_config.scale_y = float(float(height) / float(header_info.height));
 
   if (SEGMENT.check1) {
-    
+
     // fftResult[0] = beatsin8(10,0,255); // fake music
     float bass_map = mapf(fftResult[0], bass_peak, 0, 0.5f, 1.0f);
 
@@ -9421,12 +9452,12 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
     // Final safety fallback if block doesn't fit
     if (srm_config.in.block_w > srm_config.in.pic_w || srm_config.in.block_h > srm_config.in.pic_h) {
-        srm_config.in.block_w = srm_config.in.pic_w;
-        srm_config.in.block_h = srm_config.in.pic_h;
-        srm_config.in.block_offset_x = 0;
-        srm_config.in.block_offset_y = 0;
-        srm_config.scale_x = 1.0f;
-        srm_config.scale_y = 1.0f;
+      srm_config.in.block_w = srm_config.in.pic_w;
+      srm_config.in.block_h = srm_config.in.pic_h;
+      srm_config.in.block_offset_x = 0;
+      srm_config.in.block_offset_y = 0;
+      srm_config.scale_x = 1.0f;
+      srm_config.scale_y = 1.0f;
     }
 
     while (srm_config.scale_x * srm_config.in.block_w > srm_config.out.pic_w) {
@@ -9439,7 +9470,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   }
 
-  if (SEGMENT.check2 && fftResult[0] > bass_peak*0.9) {
+  if (SEGMENT.check2 && fftResult[0] > bass_peak * 0.9) {
     xmirror = !xmirror;
     srm_config.mirror_x = xmirror;
   }
@@ -9447,7 +9478,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   if (SEGMENT.custom3 > 0) {
 
     uint8_t transformer = SEGMENT.custom3;
-    
+
     // PPA Transforms
 
     srm_config.mode = PPA_TRANS_MODE_NON_BLOCKING; // parallel the next ops
@@ -9461,22 +9492,22 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     } else if (transformer < 16) {    // mirror flip on X
       srm_config.scale_x /= 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_x = (srm_config.out.pic_w/2);
+      srm_config.out.block_offset_x = (srm_config.out.pic_w / 2);
       srm_config.mirror_x = true;
     } else if (transformer < 20) {    // mirror flip on Y
       srm_config.scale_y /= 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_y = (srm_config.out.pic_h/2);
+      srm_config.out.block_offset_y = (srm_config.out.pic_h / 2);
       srm_config.mirror_y = true;
     } else if (transformer < 24) {    // mirror flip on X and Y
       srm_config.scale_x /= 2;
       srm_config.scale_y /= 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      srm_config.out.block_offset_y = srm_config.out.pic_h / 2;
       srm_config.mirror_y = true;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
       srm_config.mirror_x = true;
-      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      srm_config.out.block_offset_x = srm_config.out.pic_w / 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
       srm_config.out.block_offset_y = 0;
       srm_config.mirror_x = true;
@@ -9487,9 +9518,9 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       srm_config.mirror_y = false;
       srm_config.mirror_y = false;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      srm_config.out.block_offset_y = srm_config.out.pic_h / 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      srm_config.out.block_offset_x = srm_config.out.pic_w / 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
       srm_config.out.block_offset_y = 0;
     } else if (transformer <= 32) {    // 4-up tiling with rotations
@@ -9498,14 +9529,14 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       srm_config.mirror_y = false;
       srm_config.mirror_y = false;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_y = srm_config.out.pic_h/2;
+      srm_config.out.block_offset_y = srm_config.out.pic_h / 2;
       srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-      srm_config.out.block_offset_x = srm_config.out.pic_w/2;
+      srm_config.out.block_offset_x = srm_config.out.pic_w / 2;
       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
       srm_config.out.block_offset_y = 0;
       srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    } 
+    }
     srm_config.mode = PPA_TRANS_MODE_BLOCKING; // last call blocks.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
   } else {
@@ -9525,9 +9556,6 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       .max_pending_trans_num = 18,
     };
     ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
-    
-    uint32_t blackbuffer_size = width * height * 4;
-    uint8_t* blackbuffer = (uint8_t *) heap_caps_calloc(blackbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
 
     ppa_fill_oper_config_t fill_config = {};
     fill_config.out.buffer = blackbuffer;
@@ -9538,7 +9566,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     fill_config.mode = PPA_TRANS_MODE_BLOCKING;
     fill_config.fill_block_w = width;
     fill_config.fill_block_h = height;
-    
+
     if (SEGMENT.custom2 > 0) {
       CHSV hsvColor(SEGMENT.custom2, 255, 128); // Full saturation and half brightness
       CRGB rgbColor;
@@ -9551,21 +9579,21 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       fill_config.fill_argb_color.g = 0;
       fill_config.fill_argb_color.b = 0;
     }
-      
+
     if (SEGMENT.intensity == 0) {
-      fill_config.fill_argb_color.a = map(map(fftResult[0],0,bass_peak,0,255),0,255,255,0);
+      fill_config.fill_argb_color.a = map(map(fftResult[0], 0, bass_peak, 0, 255), 0, 255, 255, 0);
     } else {
       fill_config.fill_argb_color.a = SEGMENT.intensity;
     }
 
     // if (micros() % 100 < 3) USER_PRINTF("Bass Brightness: Bass = %u Bass Avg = %u Bass Peak = %u, Bass Alpha = %u\n",fftResult[0], bass_average, bass_peak, fill_config.fill_argb_color.a);
-    
+
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black/colour
     ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
 
     ppa_blend_oper_config_t blend_config = {};
     blend_config.in_bg.buffer = busPixelData;
-    blend_config.in_bg.pic_w =width;
+    blend_config.in_bg.pic_w = width;
     blend_config.in_bg.pic_h = height;
     blend_config.in_bg.block_w = width;
     blend_config.in_bg.block_h = height;
@@ -9607,14 +9635,9 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
     ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
 
-    free(blackbuffer);
-
   }
 
   // if (micros() % 100 < 3) USER_PRINTF("Scale was %0.3f and %0.3f\n",srm_config.scale_x, srm_config.scale_y);
-
-  // free(tx_buf_1080p);
-  free(rx_bitmap);
 
   imagelimiter = timer + (1000000/max(uint8_t(1),SEGMENT.custom1));
   #endif // PPA Required

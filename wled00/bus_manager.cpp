@@ -473,12 +473,8 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
       break;
   }
   _UDPchannels = _rgbw ? 4 : 3;
-  #ifdef ESP32
-  _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-  // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  #else
-  _data = (byte*) calloc((bc.count * _UDPchannels)+15, sizeof(byte));
-  #endif
+  // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+  _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   if (_data == nullptr) return;
   _len = bc.count;
   _colorOrder = bc.colorOrder;
@@ -1303,10 +1299,10 @@ void BusManager::removeAll() {
 
 void __attribute__((hot)) BusManager::show() {
   for (unsigned i = 0; i < numBusses; i++) {
-#if 1 && defined(ARDUINO_ARCH_ESP32)
-    unsigned long t0 = millis();
-    while ((busses[i]->canShow() == false) && (millis() - t0 < 80)) delay(1); // WLEDMM experimental: wait until bus driver is ready (max 80ms) - costs us 1-2 fps but reduces flickering
-#endif
+    // #if 1 && defined(ARDUINO_ARCH_ESP32)
+    //     unsigned long t0 = millis();
+    //     while ((busses[i]->canShow() == false) && (millis() - t0 < 80)) delay(1); // WLEDMM experimental: wait until bus driver is ready (max 80ms) - costs us 1-2 fps but reduces flickering
+    // #endif
     busses[i]->show();
   }
 }

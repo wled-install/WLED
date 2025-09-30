@@ -96,11 +96,11 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
   }
 
   // WLEDMM: before changing segments, make sure our strip is _not_ servicing effects in parallel
-  suspendStripService = true; // temporarily lock out strip updates
-  if (strip.isServicing()) {
-    USER_PRINTLN(F("deserializeSegment(): strip is still drawing effects."));
-    strip.waitUntilIdle();
-  }
+  // suspendStripService = true; // temporarily lock out strip updates
+  // if (strip.isServicing()) {
+  //   USER_PRINTLN(F("deserializeSegment(): strip is still drawing effects."));
+  //   strip.waitUntilIdle();
+  // }
 
   Segment& seg = strip.getSegment(id);
   Segment prev = seg; //make a backup so we can tell if something changed // WLEDMM fixMe: copy constructor = waste of memory
@@ -132,7 +132,8 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
       deserializeSegment(elem, i, presetId); // recursive call with new id // WLEDMM expect problems like heap overflow
       if (iAmGroot) inDeepCall = false;  // WLEDMM toplevel -> reset recursion flag
     }
-    if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+    // if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+    suspendStripService = false; // WLEDMM release lock
     return true;
   }
 
@@ -195,7 +196,8 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
 	if (newSeg) seg.refreshLightCapabilities(); // fix for #3403
 
   if (seg.reset && seg.stop == 0) {
-    if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+    // if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+    suspendStripService = false; // WLEDMM release lock
 
     if (id == strip.getMainSegmentId()) strip.setMainSegmentId(0); // fix for #3403
     return true; // segment was deleted & is marked for reset, no need to change anything else
@@ -330,10 +332,10 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
     uint8_t oldMap1D2D = seg.map1D2D;
     seg.map1D2D = M12_Pixels; // no mapping
     // WLEDMM begin - we need to init segment caches before putting any pixels
-    if (strip.isServicing()) {
-      USER_PRINTLN(F("deserializeSegment() image: strip is still drawing effects."));
-      strip.waitUntilIdle();
-    }
+    // if (strip.isServicing()) {
+      // USER_PRINTLN(F("deserializeSegment() image: strip is still drawing effects."));
+      // strip.waitUntilIdle();
+    // }
     seg.startFrame();
     // WLEDMM end
 
@@ -394,7 +396,8 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
     }
   }
 
-  if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+  // if (iAmGroot) 
+  suspendStripService = false; // WLEDMM release lock
   return true;
 }
 
@@ -454,16 +457,16 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
     }
   }
 
-#ifdef ARDUINO_ARCH_ESP32
-  delay(2); // WLEDMM experimental - de-serialize takes time, so allow other tasks to run
-#endif
+// #ifdef ARDUINO_ARCH_ESP32
+//   delay(2); // WLEDMM experimental - de-serialize takes time, so allow other tasks to run
+// #endif
 
   // WLEDMM: before changing strip, make sure our strip is _not_ servicing effects in parallel
-  suspendStripService = true; // temporarily lock out strip updates
-  if (strip.isServicing()) {
-    USER_PRINTLN(F("deserializeState(): strip is still drawing effects."));
-    strip.waitUntilIdle();
-  }
+  // suspendStripService = true; // temporarily lock out strip updates
+  // if (strip.isServicing()) {
+  //   USER_PRINTLN(F("deserializeState(): strip is still drawing effects."));
+  //   strip.waitUntilIdle();
+  // }
 
   // temporary transition (applies only once)
   tr = root[F("tt")] | -1;
@@ -589,7 +592,8 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
       presetCycCurr = ps;
       unloadPlaylist();          // applying a preset unloads the playlist
       applyPreset(ps, callMode); // async load from file system (only preset ID was specified)
-      if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+      // if (iAmGroot) suspendStripService = false; // WLEDMM release lock
+      suspendStripService = false; // WLEDMM release lock
       return stateResponse;
     }
   }
@@ -1250,8 +1254,8 @@ void serializeInfo(JsonObject root)
 
   #if defined(ARDUINO_ARCH_ESP32)
   unsigned long t_wait = millis();
-  while(strip.isUpdating() && (millis() - t_wait < 125)) delay(1); // WLEDMM try to catch a moment when strip is idle
-  while(strip.isUpdating() && (millis() - t_wait < 160)) yield();  //        try harder
+  // while(strip.isUpdating() && (millis() - t_wait < 125)) delay(1); // WLEDMM try to catch a moment when strip is idle
+  // while(strip.isUpdating() && (millis() - t_wait < 160)) yield();  //        try harder
   //if (strip.isUpdating()) USER_PRINTLN("serializeInfo: strip still updating.");
   #endif
 
