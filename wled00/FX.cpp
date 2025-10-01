@@ -9026,6 +9026,10 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
 
   const uint16_t width = SEGMENT.virtualWidth();
   const uint16_t height = SEGMENT.virtualHeight();
+  static uint16_t pre_width = 0;
+  static uint16_t pre_height = 0;
+  static uint32_t renderbuffer_size = 0;
+  static uint8_t* renderbuffer = nullptr;
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
 
@@ -9041,15 +9045,13 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   }
 
   if (SEGENV.call == 0) {
-    // SEGMENT.setUpLeds();
-    // SEGMENT.fill(BLACK);
     SEGENV.aux0 = 0;
   }
 
   ppa_client_handle_t ppa_fill_handle = NULL;
   ppa_client_config_t ppa_fill_config = {
     .oper_type = PPA_OPERATION_FILL,
-    .max_pending_trans_num = 1,
+    .max_pending_trans_num = 15,
   };
   ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
 
@@ -9062,30 +9064,113 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
   fill_config.fill_block_w = width;
   fill_config.fill_block_h = height;
+  fill_config.fill_argb_color.r = 0;
+  fill_config.fill_argb_color.g = 0;
+  fill_config.fill_argb_color.b = 0;
+  fill_config.fill_argb_color.a = 0;
 
-  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
+  if (SEGMENT.check1 && SEGMENT.intensity != 255) { // allow overlay but at 255 we don't need transparcy
 
-  um_data_t *um_data = getAudioData();
-  uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
+    if (SEGMENT.intensity == 0) return FRAMETIME;
 
-  for (int i = 0; i<16; i++) {
+    if (width != pre_width || height != pre_height) {
+
+      if (renderbuffer != nullptr) {
+        free(renderbuffer);
+        renderbuffer = nullptr;
+      }
+
+      renderbuffer_size = width * height * 4;
+
+      renderbuffer = (uint8_t*)heap_caps_calloc(renderbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+
+      pre_height = height;
+      pre_width = width;
+
+    }
+
+    fill_config.out.buffer = renderbuffer;
+    fill_config.out.buffer_size = renderbuffer_size;
+    fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
+
+  }
+  
+  if (!SEGMENT.check1) {
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
+  }
+
+  um_data_t* um_data = getAudioData();
+  uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+
+  for (int i = 0; i < 16; i++) {
     fill_config.out.block_offset_x = i*(width/16);
     int bar_height = map8(fftResult[i],0,height);
     if (bar_height == 0) continue;
     fill_config.out.block_offset_y = height-bar_height;
     fill_config.fill_block_w =  width/16;
     fill_config.fill_block_h = bar_height;
-    fill_config.fill_argb_color.r = beatsin8(60,0,255,i*32,0); // B
-    fill_config.fill_argb_color.g = beatsin8(60,0,255,i*32,85); // R
-    fill_config.fill_argb_color.b = beatsin8(60,0,255,i*32,170); // G
+    fill_config.fill_argb_color.r = beatsin8(60, 0, 255, i * 32, 0); // B
+    fill_config.fill_argb_color.g = beatsin8(60, 0, 255, i * 32, 85); // R
+    fill_config.fill_argb_color.b = beatsin8(60, 0, 255, i * 32, 170); // G
+    fill_config.fill_argb_color.a = SEGMENT.intensity;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
   }
 
   ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
+
+  if (SEGMENT.check1 && SEGMENT.intensity != 255) {
+
+    ppa_blend_oper_config_t blend_config = {};
+    blend_config.in_bg.buffer = busPixelData;
+    blend_config.in_bg.pic_w = width;
+    blend_config.in_bg.pic_h = height;
+    blend_config.in_bg.block_w = width;
+    blend_config.in_bg.block_h = height;
+    blend_config.in_bg.block_offset_x = 0;
+    blend_config.in_bg.block_offset_y = 0;
+    blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.in_fg.buffer = renderbuffer;
+    blend_config.in_fg.pic_w = width;
+    blend_config.in_fg.pic_h = height;
+    blend_config.in_fg.block_w = width;
+    blend_config.in_fg.block_h = height;
+    blend_config.in_fg.block_offset_x = 0;
+    blend_config.in_fg.block_offset_y = 0;
+    blend_config.bg_rgb_swap = 0;
+    blend_config.bg_byte_swap = 0;
+    blend_config.fg_rgb_swap = 0;
+    blend_config.fg_byte_swap = 0;
+    blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+    blend_config.out.buffer = busPixelData;
+    blend_config.out.buffer_size = busPixelSize;
+    blend_config.out.pic_w = width;
+    blend_config.out.pic_h = height;
+    blend_config.out.block_offset_x = 0;
+    blend_config.out.block_offset_y = 0;
+    blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.bg_ck_en = false;
+    blend_config.fg_ck_en = false;
+    blend_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    ppa_client_handle_t ppa_blend_handle = NULL;
+    ppa_client_config_t ppa_blend_config = {
+      .oper_type = PPA_OPERATION_BLEND,
+      .max_pending_trans_num = 1,
+    };
+
+    ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
+    ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
+    // if (micros() % 100 < 3) USER_PRINTF("Rendering Overlay at %u\n", fill_config.fill_argb_color.a);
+  }
+
   #endif
   return FRAMETIME;
 } // mode_GEQPPA()
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Check 2,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
 
 #include <algorithm>
 #include <dirent.h>
@@ -9168,8 +9253,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   if (SEGMENT.custom1 < 255 && SEGMENT.custom1 > 0) {
     while (imagelimiter > micros()) {
-      // delayMicroseconds(100); // Make WLED obey fps_limit and just delay here until we're ready to send a frame.
-      return FRAMETIME;
+      delayMicroseconds(100); // Make WLED obey fps_limit and just delay here until we're ready to send a frame.
+      // return FRAMETIME;
     }
   }
 
@@ -9221,7 +9306,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   if (folder_path != last_folder_path) {
     last_folder_path = folder_path;
     folder_size = ImageCacheManager::getInstance().getFolderSize(folder_path); 
-    DEBUG_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
+    USER_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
   }
 
   if (folder_size == 1) {
@@ -9243,6 +9328,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     if (img && folder_size > 1) {
       frame++;
       if (frame >= folder_size) frame = 0;
+    } else if (folder_size == 1) {
+      frame = 0;
     }
     
   } else {
@@ -9261,8 +9348,6 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     delay(500);
     return 0;
   }
-
-  frame++;
 
   jpeg_decoder_handle_t jpgd_handle;
 
@@ -9295,6 +9380,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   if (header_info.width != pre_jpeg_width || header_info.height != pre_jpeg_height) {
   
+    USER_PRINTF("IP JPEG Size %u x %u\n", header_info.width, header_info.height);
+
     if (rx_bitmap != NULL) free(rx_bitmap);
 
     rx_bitmap = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height * 3, &rx_mem_cfg, &rx_bitmap_size);
