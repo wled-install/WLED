@@ -1049,7 +1049,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     for (int i = 0; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
       parlio_config.data_gpio_nums[i] = gpio_num_t(parallelPins[i]);
     }
-    #ifdef PARLIO_AUTO_OVERCLOCK
+    #ifdef PARLIO_AUTO_OVERCLOCK // This has caused minor annoying glitching.
     if (leds_per_output <= 256) {
         parlio_config.output_clk_freq_hz = 1200000 * 4;
     } else if (leds_per_output <= 512) {
