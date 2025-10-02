@@ -928,6 +928,20 @@ WLED_GLOBAL volatile uint8_t jsonBufferLock _INIT(0);
 #define USER_FLUSH()       DEBUGOUTFlush()
 // WLEDMM end
 
+#ifdef WLED_DISABLE_LOGGING
+  // First, undefine the existing macros to avoid redefinition warnings
+#undef USER_PRINT
+#undef USER_PRINTLN
+#undef USER_PRINTF
+#undef USER_FLUSH
+
+// Now, redefine them as completely empty
+#define USER_PRINT(x)
+#define USER_PRINTLN(x)
+#define USER_PRINTF(x...)
+#define USER_FLUSH()
+#endif
+
 #ifdef WLED_DEBUG_FS
   #define DEBUGFS_PRINT(x) DEBUGOUT(x)
   #define DEBUGFS_PRINTLN(x) DEBUGOUTLN(x)
