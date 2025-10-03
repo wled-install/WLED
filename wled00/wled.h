@@ -336,6 +336,22 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator<char>>;
   #define WLED_RELEASE_NAME mdev_release
 #endif
 
+#ifdef CONFIG_SOC_PPA_SUPPORTED
+#include "esp_heap_caps.h"
+#include "driver/ppa.h"
+#include "driver/jpeg_decode.h"
+#include "esp_h264_dec_sw.h"
+#include "ImageCacheManager.h"
+WLED_GLOBAL ppa_client_handle_t ppa_blend_handle _INIT(NULL);
+WLED_GLOBAL ppa_client_config_t ppa_blend_config _INIT_N(({ .oper_type = PPA_OPERATION_BLEND, .max_pending_trans_num = 1, .data_burst_length = PPA_DATA_BURST_LENGTH_128 }));
+WLED_GLOBAL ppa_client_handle_t ppa_fill_handle _INIT(NULL);
+WLED_GLOBAL ppa_client_config_t ppa_fill_config _INIT_N((({ .oper_type = PPA_OPERATION_FILL, .max_pending_trans_num = 1, .data_burst_length = PPA_DATA_BURST_LENGTH_128 })));
+WLED_GLOBAL ppa_client_handle_t ppa_srm_handle _INIT(NULL);
+WLED_GLOBAL ppa_client_config_t ppa_srm_config _INIT_N((({ .oper_type = PPA_OPERATION_SRM, .max_pending_trans_num = 1, .data_burst_length = PPA_DATA_BURST_LENGTH_128 })));
+WLED_GLOBAL jpeg_decoder_handle_t jpgd_handle _INIT(NULL);
+WLED_GLOBAL jpeg_decode_engine_cfg_t decode_eng_cfg _INIT_N((({ .timeout_ms = 40, })));
+#endif
+
 // Global Variable definitions
 WLED_GLOBAL char versionString[] _INIT(TOSTRING(WLED_VERSION));
 WLED_GLOBAL char releaseString[] _INIT_PROGMEM(TOSTRING(WLED_RELEASE_NAME)); //WLEDMM: to show on update page // somehow this will not work if using "const char releaseString[]

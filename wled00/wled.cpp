@@ -647,7 +647,7 @@ void background_loop(void* pvParameters) {
   //     DEBUG_PRINT(F("Avail heap: "));     DEBUG_PRINTLN(ESP.getMaxAllocHeap());
   //     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
   //   #endif
-  //   #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(ARDUINO_ARCH_ESP32P4)
+  //   #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ESP32P4)
   //     if (psramFound()) {  // OK use
   //       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
   //       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram() / 1024); DEBUG_PRINTLN("kB");
@@ -955,7 +955,7 @@ void WLED::loop() {
     DEBUG_PRINT(F("Avail heap: "));     DEBUG_PRINTLN(ESP.getMaxAllocHeap());
     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
   #endif
-  #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(ARDUINO_ARCH_ESP32P4)
+  #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (psramFound()) {  // OK use
       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram() / 1024); DEBUG_PRINTLN("kB");
@@ -1155,7 +1155,7 @@ void WLED::setup() {
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
     #if !defined(WLED_USE_ETHERNET_ONLY)
-      #if defined(ARDUINO_ARCH_ESP32P4)
+      #if defined(CONFIG_IDF_TARGET_ESP32P4)
         esp_hosted_init();
       #endif
       esp_netif_init();
@@ -1442,7 +1442,12 @@ void WLED::setup() {
     DEBUG_PRINTLN(F("PSRAM not used."));
   #endif
 #endif
-
+#ifdef CONFIG_SOC_PPA_SUPPORTED
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
+  ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)
   DEBUG_PRINTLN("Initializing USB Host...");
   app_queue = xQueueCreate(APP_QUEUE_SIZE, sizeof(app_message_t));
@@ -1807,7 +1812,7 @@ void WLED::initAP(bool resetAP)
 
   // WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
   // WiFi.softAP(apSSID, apPass, apChannel, apHide, 8); // WLED-MM allow up to 8 clients for ad-hoc "in the field" syncing.
-  #if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(ARDUINO_ARCH_ESP32P4))
+#if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4))
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   #endif
 
@@ -2008,7 +2013,7 @@ void WLED::initConnection() {
   // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
   // wifi_init_sta();
 
-#if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(ARDUINO_ARCH_ESP32P4))
+#if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4))
 // WiFi.setTxPower(WIFI_POWER_8_5dBm);
 #endif
 // WiFi.setSleep(!noWifiSleep);
@@ -2125,7 +2130,7 @@ void WLED::handleConnection()
   static unsigned retryCount = 0;  // WLEDMM
   // reconnect WiFi to clear stale allocations if heap gets too low
 //   if ((!strip.isUpdating()) && (now - heapTime > 5000)) { // WLEDMM: updated with better logic for small heap available by block, not total. // WLEDMM trying to use a moment when the strip is idle
-// #if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX) // || defined(ARDUINO_ARCH_ESP32P4)
+// #if defined(ARDUINO_ARCH_ESP32S2) || defined(WLED_ENABLE_HUB75MATRIX) // || defined(CONFIG_IDF_TARGET_ESP32P4)
 //     uint32_t heap = ESP.getFreeHeap(); // WLEDMM works better on -S2
 // #else
 //     uint32_t heap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL); // was (MALLOC_CAP_INTERNAL|MALLOC_CAP_DEFAULT) WLEDMM: This is a better metric for free heap.

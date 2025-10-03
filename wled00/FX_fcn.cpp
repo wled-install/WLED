@@ -231,15 +231,6 @@ bool Segment::allocateData(size_t len) {
   //DEBUG_PRINTF("allocateData(%u) start %d, stop %d, vlen %d\n", len, start, stop, virtualLength());
   deallocateData();
   if (len == 0) return false; // nothing to do
-  #if defined(ARDUINO_ARCH_ESP32) && !defined(WLED_USE_PSRAM)
-  if (Segment::getUsedSegmentData() + len > MAX_SEGMENT_DATA) {
-    //USER_PRINTF("Segment::allocateData: Segment data quota exceeded! used:%u request:%u max:%d\n", Segment::getUsedSegmentData(), len, MAX_SEGMENT_DATA);
-    if (len > 0) errorFlag = ERR_LOW_SEG_MEM;  // WLEDMM raise errorflag
-    return false; //not enough memory
-  }
-  #endif
-  // do not use SPI RAM on ESP32 since it is slow 
-  // TroyHacks says not to worry about this. 
   data = (byte*)heap_caps_calloc_prefer(len, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
   if (!data) {
     _dataLen = 0; // WLEDMM reset dataLen

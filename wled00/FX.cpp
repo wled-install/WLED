@@ -9,13 +9,6 @@
 #include "wled.h"
 #include "FX.h"
 #include "fcn_declare.h"
-#ifdef CONFIG_SOC_PPA_SUPPORTED
-  #include "esp_heap_caps.h"
-  #include "driver/ppa.h"
-  #include "driver/jpeg_decode.h"
-  #include "esp_h264_dec_sw.h"
-  #include "ImageCacheManager.h"
-#endif
 #ifdef WLEDMM_FASTPATH
 #undef SEGMENT
 #undef SEGENV
@@ -8215,33 +8208,33 @@ static void setFlatPixelXY(bool flatMode, int x, int y, uint32_t color, unsigned
   }
 }
 
-uint16_t mode_2DGEQ(void) { // By Will Tatam. Code reduction by Ewoud Wijma. Flat Mode added by softhack007
-  //if (!strip.isMatrix) return mode_static(); // not a 2D set-up, not a problem
-  bool flatMode = !SEGMENT.is2D() || (SEGMENT.width() < 3) || (SEGMENT.height() < 3); // also use flat mode when less than 3 colums or rows
+/*
+* Optimized version of 2D GEQ effect.
+* By Will Tatam.Code reduction by Ewoud Wijma.
+* Flat Mode added by softhack007.
+* Optimizations by Gemini.
+*/
+uint16_t mode_2DGEQ(void) {
+  bool flatMode = !SEGMENT.is2D() || (SEGMENT.width() < 3) || (SEGMENT.height() < 3);
 
   const int NUM_BANDS = map2(SEGMENT.custom1, 0, 255, 1, 16);
-  const int vLength = SEGLEN;                                                               // for flat mode
-  const uint16_t cols = flatMode ? min(max(2, NUM_BANDS), (vLength+1)/2) : SEGMENT.virtualWidth();
+  const int vLength = SEGLEN;
+  const uint16_t cols = flatMode ? min(max(2, NUM_BANDS), (vLength + 1) / 2) : SEGMENT.virtualWidth();
   const uint16_t rows = flatMode ? vLength / cols : SEGMENT.virtualHeight();
-  const unsigned offset = flatMode ? max(0, (vLength - rows*cols +1) / 2) : 0;              // flatmode: always center effect
+  const unsigned offset = flatMode ? max(0, (vLength - rows * cols + 1) / 2) : 0;
 
-  if ((cols <=1) || (rows <=1)) return mode_static(); // too small
+  if ((cols <= 1) || (rows <= 1)) return mode_static();
 
-  if (!SEGENV.allocateData(cols*sizeof(uint16_t))) return mode_static(); //allocation failed
-  uint16_t *previousBarHeight = reinterpret_cast<uint16_t*>(SEGENV.data); //array of previous bar heights per frequency band
+  if (!SEGENV.allocateData(cols * sizeof(uint16_t))) return mode_static();
+  uint16_t* previousBarHeight = reinterpret_cast<uint16_t*>(SEGENV.data);
 
-  um_data_t *um_data = getAudioData();
-  uint8_t fftResult[NUM_GEQ_CHANNELS] = {0};
-  if (um_data->u_data != nullptr) memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));  // WLEDMM buffer curent values
-
-  #ifdef SR_DEBUG
-  uint8_t samplePeak = *(uint8_t*)um_data->u_data[3];
-  #endif
+  um_data_t* um_data = getAudioData();
+  uint8_t fftResult[NUM_GEQ_CHANNELS] = { 0 };
+  if (um_data->u_data != nullptr) memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));
 
   if (SEGENV.call == 0) {
-    for (int i=0; i<cols; i++) previousBarHeight[i] = 0;
-    SEGMENT.setUpLeds(); // WLEDMM use lossless getPixelColor()
-    SEGMENT.fill(BLACK);
+    for (int i = 0; i < cols; i++) previousBarHeight[i] = 0;
+    SEGMENT.setUpLeds();
   }
 
   bool rippleTime = false;
@@ -8250,76 +8243,80 @@ uint16_t mode_2DGEQ(void) { // By Will Tatam. Code reduction by Ewoud Wijma. Fla
     rippleTime = true;
   }
 
-  if (SEGENV.call == 0) SEGMENT.fill(BLACK);
   int fadeoutDelay = (256 - SEGMENT.speed) / 64;
-  if ((fadeoutDelay <= 1 ) || ((SEGENV.call % fadeoutDelay) == 0)) SEGMENT.fadeToBlackBy(SEGMENT.speed);
+  if ((fadeoutDelay <= 1) || ((SEGENV.call % fadeoutDelay) == 0)) SEGMENT.fadeToBlackBy(SEGMENT.speed);
 
-  uint16_t lastBandHeight = 0;  // WLEDMM: for smoothing out bars
+  // --- Pre-calculate frame-constant booleans for cleaner logic inside the loop ---
+  const bool do_smooth = SEGMENT.check2;
+  const bool use_vertical_color = SEGMENT.check1;
+  const bool use_draw_line = !use_vertical_color && !flatMode;
+  const bool use_full_range = (NUM_BANDS < 16) && (NUM_BANDS > 1);
+  const bool show_peaks = !flatMode && (SEGMENT.intensity < 255);
 
-  //WLEDMM: evenly ditribute bands
-  float bandwidth = (float)cols / NUM_BANDS;
-  float remaining = bandwidth;
-  uint8_t band = 0;
-  for (int x=0; x < cols; x++) {
-    //WLEDMM if not enough remaining
-    if (remaining < 1) {band++; remaining+= bandwidth;} //increase remaining but keep the current remaining
-    remaining--; //consume remaining
+  uint16_t lastBandHeight = 0;
 
-    // Serial.printf("x %d b %d n %d w %f %f\n", x, band, NUM_BANDS, bandwidth, remaining);
-    uint8_t frBand = ((NUM_BANDS < 16) && (NUM_BANDS > 1)) ? map(band, 0, NUM_BANDS - 1, 0, 15):band; // always use full range. comment out this line to get the previous behaviour.
-    // frBand = constrain(frBand, 0, 15); //WLEDMM can never be out of bounds (I think...)
-    uint16_t colorIndex = frBand * 17; //WLEDMM 0.255
-    uint16_t bandHeight = fftResult[frBand];  // WLEDMM we use the original ffResult, to preserve accuracy
+  for (int x = 0; x < cols; x++) {
+    // OPTIMIZATION: Use fast integer math for band distribution, avoids floats.
+    uint8_t band = (uint32_t)(x * NUM_BANDS) / cols;
+    uint8_t frBand = use_full_range ? map(band, 0, NUM_BANDS - 1, 0, 15) : band;
 
-    // WLEDMM begin - smooth out bars
-    if ((x > 0) && (x < (cols-1)) && (SEGMENT.check2)) {
-      // get height of next (right side) bar
-      uint8_t nextband = (remaining < 1)? band +1: band;
-      nextband = constrain(nextband, 0, 15);  // just to be sure
-      frBand = ((NUM_BANDS < 16) && (NUM_BANDS > 1)) ? map(nextband, 0, NUM_BANDS - 1, 0, 15):nextband; // always use full range. comment out this line to get the previous behaviour.
-      uint16_t nextBandHeight = fftResult[frBand];
-      // smooth Band height
-      bandHeight = (7*bandHeight + 3*lastBandHeight + 3*nextBandHeight) / 12;   // yeees, its 12 not 13 (10% amplification)
-      bandHeight = constrain(bandHeight, 0, 255);   // remove potential over/underflows
-      colorIndex = map(x, 0, cols-1, 0, 255); //WLEDMM
-    }
-    lastBandHeight = bandHeight; // remember BandHeight (left side) for next iteration
-    uint16_t barHeight = map2(bandHeight, 0, 255, 0, rows); // Now we map bandHeight to barHeight. do not subtract -1 from rows here
-    // WLEDMM end
+    uint16_t bandHeight = fftResult[frBand];
+    uint16_t colorIndex;
 
-    if (barHeight > rows) barHeight = rows;                      // WLEDMM map() can "overshoot" due to rounding errors
-    if (barHeight > previousBarHeight[x]) previousBarHeight[x] = barHeight; //drive the peak up
+    // --- Smoothing ---
+    if (do_smooth && x > 0 && x < (cols - 1)) {
+      uint8_t nextBand = (uint32_t)((x + 1) * NUM_BANDS) / cols;
+      uint8_t nextFrBand = use_full_range ? map(nextBand, 0, NUM_BANDS - 1, 0, 15) : nextBand;
+      uint16_t nextBandHeight = fftResult[nextFrBand];
 
-    uint32_t ledColor = BLACK;
-    if ((! SEGMENT.check1) && !flatMode && (barHeight > 0)) {  // use faster drawLine when single-color bars are needed
-      ledColor = SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0);
-      SEGMENT.drawLine(int(x), max(0,int(rows)-barHeight), int(x), int(rows-1), ledColor, false); // max(0, ...) to prevent negative Y
+      bandHeight = (7 * bandHeight + 3 * lastBandHeight + 3 * nextBandHeight) / 12;
+      bandHeight = constrain(bandHeight, 0, 255);
+      colorIndex = map(x, 0, cols - 1, 0, 255); // Use a smooth gradient across the panel
     } else {
-    for (int y=0; y < barHeight; y++) {
-      if (SEGMENT.check1) //color_vertical / color bars toggle
-        colorIndex = map(y, 0, rows-1, 0, 255);
+      colorIndex = frBand * 17; // Use distinct colors for each band
+    }
+    lastBandHeight = bandHeight; // for next iteration's smoothing
 
-      ledColor = SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0);
-      setFlatPixelXY(flatMode, x, rows-1 - y, ledColor, cols, rows, offset);
-    } }
-    if (!flatMode && (SEGMENT.intensity < 255) && (previousBarHeight[x] > 0) && (previousBarHeight[x] < rows))  // WLEDMM avoid "overshooting" into other segments - disable ripple pixels in 1D mode 
-      setFlatPixelXY(flatMode, x, rows - previousBarHeight[x], (SEGCOLOR(2) != BLACK) ? SEGCOLOR(2) : ledColor, cols, rows, offset);
+    uint16_t barHeight = map2(bandHeight, 0, 255, 0, rows);
+    if (barHeight > rows) barHeight = rows;
 
-    if (rippleTime && previousBarHeight[x]>0) previousBarHeight[x]--;    //delay/ripple effect
+    if (barHeight > previousBarHeight[x]) previousBarHeight[x] = barHeight;
+
+    // --- Drawing ---
+    if (use_draw_line) {
+      if (barHeight > 0) {
+        uint32_t ledColor = SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0);
+        SEGMENT.drawLine(x, rows - barHeight, x, rows - 1, ledColor, false);
+      }
+    } else {
+      for (int y = 0; y < barHeight; y++) {
+        uint16_t finalColorIndex = use_vertical_color ? map(y, 0, rows - 1, 0, 255) : colorIndex;
+        uint32_t ledColor = SEGMENT.color_from_palette(finalColorIndex, false, PALETTE_SOLID_WRAP, 0);
+        setFlatPixelXY(flatMode, x, rows - 1 - y, ledColor, cols, rows, offset);
+      }
+    }
+
+    // --- Peak & Ripple ---
+    if (show_peaks && previousBarHeight[x] > 0 && previousBarHeight[x] < rows) {
+      uint32_t peakColor = (SEGCOLOR(2) != BLACK)
+        ? SEGCOLOR(2)
+        : SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0);
+      setFlatPixelXY(flatMode, x, rows - previousBarHeight[x], peakColor, cols, rows, offset);
+    }
+
+    if (rippleTime && previousBarHeight[x] > 0) previousBarHeight[x]--;
   }
 
 #ifdef SR_DEBUG
   if (!flatMode) {
-  // WLEDMM: abuse top left/right pixels for peak detection debugging
-  SEGMENT.setPixelColorXY(cols-1, 0, (samplePeak > 0) ? GREEN : BLACK);
-  if (samplePeak > 0) SEGMENT.setPixelColorXY(0, 0, GREEN);
-  // WLEDMM end
+    uint8_t samplePeak = *(uint8_t*)um_data->u_data[3];
+    SEGMENT.setPixelColorXY(cols - 1, 0, (samplePeak > 0) ? GREEN : BLACK);
+    if (samplePeak > 0) SEGMENT.setPixelColorXY(0, 0, GREEN);
   }
 #endif
   return FRAMETIME;
-} // mode_2DGEQ()
-static const char _data_FX_MODE_2DGEQ[] PROGMEM = "GEQ ☾@Fade speed,Ripple decay,# of bands,,,Color bars,Smooth bars ☾;!,,Peaks;!;12f;c1=255,c2=64,pal=11,si=0"; // Beatsin
-
+}
+static const char _data_FX_MODE_2DGEQ[] PROGMEM = "GEQ ☾@Fade speed,Ripple decay,# of bands,,,Color bars,Smooth bars ☾;!,,Peaks;!;12f;c1=255,c2=64,pal=11,si=0";
 
 /////////////////////////
 //  ** 2D Funky plank  //
@@ -9020,8 +9017,6 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   // Author: @TroyHacks
   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 
-  // *** Stashing some PPA code for later testing. ***
-
   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
 
   const uint16_t width = SEGMENT.virtualWidth();
@@ -9031,7 +9026,16 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   static uint32_t renderbuffer_size = 0;
   static uint8_t* renderbuffer = nullptr;
 
+  uint16_t box_start_x = SEGMENT.start;
+  uint16_t box_start_y = SEGMENT.startY;
+  uint16_t box_stop_x = SEGMENT.stop;
+  uint16_t box_stop_y = SEGMENT.stopY;
+
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
+
+  if (SEGENV.call == 0) {
+    SEGMENT.setUpLeds();
+  }
 
   byte* busPixelData = nullptr;
   uint32_t busPixelSize = 0;
@@ -9044,16 +9048,6 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
     return 1;
   }
 
-  if (SEGENV.call == 0) {
-    SEGENV.aux0 = 0;
-  }
-
-  ppa_client_handle_t ppa_fill_handle = NULL;
-  ppa_client_config_t ppa_fill_config = {
-    .oper_type = PPA_OPERATION_FILL,
-    .max_pending_trans_num = 15,
-  };
-  ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
 
   ppa_fill_oper_config_t fill_config = {};
   fill_config.out.buffer = busPixelData;
@@ -9117,8 +9111,6 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
   }
 
-  ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
-
   if (SEGMENT.check1 && SEGMENT.intensity != 255) {
 
     ppa_blend_oper_config_t blend_config = {};
@@ -9155,15 +9147,8 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
     blend_config.fg_ck_en = false;
     blend_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-    ppa_client_handle_t ppa_blend_handle = NULL;
-    ppa_client_config_t ppa_blend_config = {
-      .oper_type = PPA_OPERATION_BLEND,
-      .max_pending_trans_num = 1,
-    };
-
-    ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-    ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
+
     // if (micros() % 100 < 3) USER_PRINTF("Rendering Overlay at %u\n", fill_config.fill_argb_color.a);
   }
 
@@ -9349,13 +9334,13 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     return 0;
   }
 
-  jpeg_decoder_handle_t jpgd_handle;
+  // jpeg_decoder_handle_t jpgd_handle;
 
-  jpeg_decode_engine_cfg_t decode_eng_cfg = {
-    .timeout_ms = 40,
-  };
+  // jpeg_decode_engine_cfg_t decode_eng_cfg = {
+  //   .timeout_ms = 40,
+  // };
 
-  ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
+  // ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
 
   jpeg_decode_cfg_t decode_cfg_rgb = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB888,
@@ -9412,7 +9397,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
   uint32_t out_size = 0; // we don't use this anywhere but need to catch it. PPA may need this depending on the operation.
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, file_jpeg, file_jpeg_size, rx_bitmap, rx_bitmap_size, &out_size));
-  ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_del_decoder_engine(jpgd_handle));
+  // ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_del_decoder_engine(jpgd_handle));
 
   um_data_t* um_data = getAudioData();
   uint8_t fftResult[NUM_GEQ_CHANNELS] = { 0 };
@@ -9443,13 +9428,6 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
   if (1 || width != header_info.width || height != header_info.height) { // force this always until PPA scaling is mathed out so we always fill the frame.
 
-    ppa_client_handle_t ppa_fill_handle = NULL;
-    ppa_client_config_t ppa_fill_config = {
-      .oper_type = PPA_OPERATION_FILL,
-      .max_pending_trans_num = 18,
-    };
-    ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
-
     ppa_fill_oper_config_t fill_config = {};
     fill_config.out.buffer = busPixelData;
     fill_config.out.buffer_size = busPixelSize;
@@ -9461,16 +9439,8 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     fill_config.fill_block_h = height;
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
-    ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
 
   }
-
-  ppa_client_handle_t ppa_srm_handle = NULL;
-  ppa_client_config_t ppa_srm_config = {
-      .oper_type = PPA_OPERATION_SRM,
-      .max_pending_trans_num = 5,
-  };
-  ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
 
   ppa_srm_oper_config_t srm_config = {};
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
@@ -9568,8 +9538,6 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
 
     // PPA Transforms
 
-    srm_config.mode = PPA_TRANS_MODE_NON_BLOCKING; // parallel the next ops
-
     if (transformer < 4) {            // mirror everything on X 
       srm_config.mirror_x = true;
     } else if (transformer < 8) {     // mirror everything on Y
@@ -9624,25 +9592,14 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
       srm_config.out.block_offset_y = 0;
       srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
     }
-    srm_config.mode = PPA_TRANS_MODE_BLOCKING; // last call blocks.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
   } else {
-    srm_config.mode = PPA_TRANS_MODE_BLOCKING; // last call blocks, just in case.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
   }
 
   if (!SEGMENT.check2) xmirror = false;
 
-  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_unregister_client(ppa_srm_handle));
-
   if (SEGMENT.check3) {
-
-    ppa_client_handle_t ppa_fill_handle = NULL;
-    ppa_client_config_t ppa_fill_config = {
-      .oper_type = PPA_OPERATION_FILL,
-      .max_pending_trans_num = 18,
-    };
-    ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
 
     ppa_fill_oper_config_t fill_config = {};
     fill_config.out.buffer = blackbuffer;
@@ -9676,7 +9633,6 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     // if (micros() % 100 < 3) USER_PRINTF("Bass Brightness: Bass = %u Bass Avg = %u Bass Peak = %u, Bass Alpha = %u\n",fftResult[0], bass_average, bass_peak, fill_config.fill_argb_color.a);
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black/colour
-    ESP_ERROR_CHECK(ppa_unregister_client(ppa_fill_handle));
 
     ppa_blend_oper_config_t blend_config = {};
     blend_config.in_bg.buffer = busPixelData;
@@ -9712,15 +9668,7 @@ uint16_t IRAM_ATTR mode_PPA_TESTBED() {
     blend_config.fg_ck_en = false;
     blend_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-    ppa_client_handle_t ppa_blend_handle = NULL;
-    ppa_client_config_t ppa_blend_config = {
-      .oper_type = PPA_OPERATION_BLEND,
-      .max_pending_trans_num = 1,
-    };
-
-    ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-    ESP_ERROR_CHECK(ppa_unregister_client(ppa_blend_handle));
 
   }
 
