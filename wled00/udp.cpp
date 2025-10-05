@@ -1098,16 +1098,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     return 0; // let's give it a frame to set up.
   }
 
-  // static byte     *parallel_buffer_remapped  = NULL;
-  // #ifdef WLEDMM_REMAP_AT_OUTPUT
-  // static byte     *parallel_buffer_remapped1 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  // static byte     *parallel_buffer_remapped2 = (byte*)      heap_caps_calloc_prefer((1024 * 16 * 4)+15, sizeof(byte), 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  // #endif 
-  // static uint16_t *parallel_buffer_repacked  = NULL; 
-  // static uint16_t *parallel_buffer_repacked1 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  // static uint16_t *parallel_buffer_repacked2 = (uint16_t *) heap_caps_calloc_prefer((1024 * 16 * 16), 1, 3, MALLOC_CAP_SPIRAM|MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_DMA|MALLOC_CAP_32BIT|MALLOC_CAP_CACHE_ALIGNED|MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
-  
-
   static byte* parallel_buffer_remapped = NULL;
 #ifdef WLEDMM_REMAP_AT_OUTPUT
   static byte* parallel_buffer_remapped1 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
@@ -1123,7 +1113,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
 
   uint32_t* mappingTable = strip.getCustomMappingTable();
   uint32_t mappingTableSize = strip.getCustomMappingTableSize();
-  int my_bytes_per_pixel = isRGBW ? 4 : 3;
+  uint8_t my_bytes_per_pixel = isRGBW ? 4 : 3;
 
   uint32_t buf_pos = 0;
 
@@ -1210,7 +1200,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
 
 #else  // regular Art-Net
 
-uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit) {
+uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit, uint8_t color_order) {
 
   if (!(apActive || interfacesInited) || !client[0] || !length) return 1;  // network not initialised or dummy/unset IP address  031522 ajn added check for ap
 
@@ -1321,35 +1311,16 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
       #endif
       unsigned long timer = micros();
 
-      // Volumetric test code
-      #ifdef ESP32 // Older ESP boards should not attempt this.
-      uint8_t volume_depth = outputs*leds_per_output/length;
-      static byte* buffer = nullptr; // Declare static buffer
-      static size_t buffer_size = 0; // Track the buffer size
-
-      if (volume_depth > 1) { // always assume to buffer output
-        size_t new_size = (length * (isRGBW ? 4 : 3) * volume_depth);
-        if (buffer == nullptr || buffer_size < new_size) {
-          if (buffer != nullptr) {
-            heap_caps_free(buffer);
-          }
-          buffer = (byte*)heap_caps_calloc_prefer(new_size + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
-          buffer_size = new_size;
-        }
-        memmove(buffer + (length * 3), buffer, length * 3 * (volume_depth - 1));
-        memcpy(buffer, buffer_in, length * 3);
-        length *= volume_depth;
-      } else {
-        buffer = buffer_in;
-      }
-      #else
-      buffer = buffer_in;
-      #endif
-
       AsyncUDP artnetudp;// AsyncUDP so we can just blast packets.
 
       const uint_fast16_t ARTNET_CHANNELS_PER_PACKET = isRGBW?512:510; // 512/4=128 RGBW LEDs, 510/3=170 RGB LEDs
-      
+
+      #ifdef WLEDMM_REMAP_AT_OUTPUT
+      uint32_t* mappingTable = strip.getCustomMappingTable();
+      uint32_t mappingTableSize = strip.getCustomMappingTableSize();
+      uint8_t my_bytes_per_pixel = isRGBW ? 4 : 3;
+      #endif
+
       uint_fast32_t bufferOffset = 0;
       uint_fast16_t hardware_output_universe = 0;
       
@@ -1394,8 +1365,33 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
           bri = 0; // Set all brightness to 0 but keep all calculations the same and keep sending packets.
           #endif
 
-        #if defined(CONFIG_IDF_TARGET_ESP32P4)
-          p4_mul16x16(packet_buffer+18, &bri, (packetSize >> 4)+1, buffer+bufferOffset);
+          #ifdef WLEDMM_REMAP_AT_OUTPUT
+          uint16_t packetNumPixels = packetSize / my_bytes_per_pixel;
+          uint32_t startPixel = bufferOffset / my_bytes_per_pixel;
+          for (uint_fast16_t i = 0; i < packetNumPixels; ++i) {
+            uint32_t mappedIdx = mappingTable[startPixel + i];
+            uint32_t sourceOffset = mappedIdx * my_bytes_per_pixel;
+            uint32_t destOffset = 18 + (i * my_bytes_per_pixel);
+
+            uint8_t r = (bri == 255) ? gamma8(buffer_in[sourceOffset]) : (gamma8(buffer_in[sourceOffset]) * bri) >> 8;
+            uint8_t g = (bri == 255) ? gamma8(buffer_in[sourceOffset + 1]) : (gamma8(buffer_in[sourceOffset + 1]) * bri) >> 8;
+            uint8_t b = (bri == 255) ? gamma8(buffer_in[sourceOffset + 2]) : (gamma8(buffer_in[sourceOffset + 2]) * bri) >> 8;
+
+            switch (color_order) {
+            case COL_ORDER_GRB: packet_buffer[destOffset] = g; packet_buffer[destOffset + 1] = r; packet_buffer[destOffset + 2] = b; break;
+            case COL_ORDER_RGB: default: packet_buffer[destOffset] = r; packet_buffer[destOffset + 1] = g; packet_buffer[destOffset + 2] = b; break;
+            case COL_ORDER_BRG: packet_buffer[destOffset] = b; packet_buffer[destOffset + 1] = r; packet_buffer[destOffset + 2] = g; break;
+            case COL_ORDER_RBG: packet_buffer[destOffset] = r; packet_buffer[destOffset + 1] = b; packet_buffer[destOffset + 2] = g; break;
+            case COL_ORDER_BGR: packet_buffer[destOffset] = b; packet_buffer[destOffset + 1] = g; packet_buffer[destOffset + 2] = r; break;
+            case COL_ORDER_GBR: packet_buffer[destOffset] = g; packet_buffer[destOffset + 1] = b; packet_buffer[destOffset + 2] = r; break;
+            }
+            if (isRGBW) {
+              packet_buffer[destOffset + 3] = (bri == 255) ? gamma8(buffer_in[sourceOffset + 3]) : (gamma8(buffer_in[sourceOffset + 3]) * bri) >> 8;
+            }
+          }
+          #else
+          #if defined(CONFIG_IDF_TARGET_ESP32P4)
+          p4_mul16x16(packet_buffer + 18, &bri, (packetSize >> 4) + 1, buffer + bufferOffset);
           #else
           if (bri == 255) { // speed hack - don't adjust brightness if full brightness
             memcpy(packet_buffer+18, buffer+bufferOffset, packetSize);
@@ -1403,12 +1399,13 @@ uint8_t IRAM_ATTR_YN realtimeBroadcast(uint8_t type, IPAddress client, uint32_t 
             for (uint_fast16_t i = 0; i < packetSize; i+=(isRGBW?4:3)) {
               // set brightness values in the packet - seems slightly faster than scale8()?
               // for some reason, doing 3 (or 4) at a time is 200 micros faster than 1 at a time.
-              packet_buffer[i+18] = (buffer[bufferOffset+i] * bri) >> 8;
-              packet_buffer[i+19] = (buffer[bufferOffset+i+1] * bri) >> 8;
-              packet_buffer[i+20] = (buffer[bufferOffset+i+2] * bri) >> 8; 
-              if (isRGBW) packet_buffer[i+21] = (buffer[bufferOffset+i+3] * bri) >> 8; 
+              packet_buffer[i + 18] = (buffer_in[bufferOffset + i] * bri) >> 8;
+              packet_buffer[i + 19] = (buffer_in[bufferOffset + i + 1] * bri) >> 8;
+              packet_buffer[i + 20] = (buffer_in[bufferOffset + i + 2] * bri) >> 8;
+              if (isRGBW) packet_buffer[i + 21] = (buffer_in[bufferOffset + i + 3] * bri) >> 8;
             }
           }
+          #endif
           #endif
 
           bufferOffset += packetSize;
