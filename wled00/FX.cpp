@@ -9149,9 +9149,7 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
 
-    // if (micros() % 100 < 3) USER_PRINTF("Rendering Overlay at %u\n", fill_config.fill_argb_color.a);
   }
-
   #endif
   return FRAMETIME;
 } // mode_GEQPPA()

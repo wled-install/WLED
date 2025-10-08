@@ -449,7 +449,7 @@
 
 #ifndef E131_MAX_UNIVERSE_COUNT
   #ifdef WLED_USE_ETHERNET
-    #define E131_MAX_UNIVERSE_COUNT 20
+    #define E131_MAX_UNIVERSE_COUNT 128
   #else
     #ifdef ESP8266
       #define E131_MAX_UNIVERSE_COUNT 9

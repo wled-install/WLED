@@ -444,7 +444,7 @@ void background_loop(void* pvParameters) {
     // #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: handleNotifications() calls strip.show(); handleTransitions modifies segments
     //   if (!suspendStripService) {
     //   #endif
-        handleNotifications();
+        // handleNotifications();
     //     handleTransitions();
     //   #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM end 
     //   }
@@ -776,8 +776,11 @@ void WLED::loop() {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: handleNotifications() calls strip.show(); handleTransitions modifies segments
   if (!suspendStripService) {
   #endif
-    // handleNotifications();
-    handleTransitions();
+    handleNotifications();
+    // if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+      handleTransitions();
+    //   xSemaphoreGive(busMutex);
+    // }
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM end 
   }
 #endif
@@ -877,6 +880,9 @@ void WLED::loop() {
     if (stripMillis > maxStripMillis) maxStripMillis = stripMillis;
   #endif
   }
+  // } else {
+  //   if (micros() % 100 < 3) USER_PRINTLN("Realtime Locked!");
+  // }
 
   //millis() rolls over every 50 days
   // if (lastMqttReconnectAttempt > millis()) {
