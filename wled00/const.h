@@ -40,9 +40,12 @@
         #define WLED_MAX_BUSSES 7             // will allow 5 digital & 2 analog
         #define WLED_MIN_VIRTUAL_BUSSES 3
       #endif
-    #elif defined(CONFIG_IDF_TARGET_ESP32S3)  // 4 RMT, 8 LEDC, has 2 I2S but NPB does not support them ATM
+      #elif defined(CONFIG_IDF_TARGET_ESP32S3)  // 4 RMT, 8 LEDC, has 2 I2S but NPB does not support them ATM
       #define WLED_MAX_BUSSES 6               // will allow 4 digital & 2 analog
       #define WLED_MIN_VIRTUAL_BUSSES 4
+      #elif defined(CONFIG_IDF_TARGET_ESP32P4)  // becasue of framebuffer, for now we support 1 physical or 1 local bus
+      #define WLED_MAX_BUSSES 1               // will allow 4 digital & 2 analog
+      #define WLED_MIN_VIRTUAL_BUSSES 0
     #else
       #if defined(USERMOD_AUDIOREACTIVE)      // requested by @softhack007 https://github.com/blazoncek/WLED/issues/33
         #define WLED_MAX_BUSSES 9             // WLEDMM I2S#1 is availeable for LEDs
@@ -256,6 +259,9 @@
 #define TYPE_NET_ARTNET_RGB      82            //network ArtNet RGB bus (master broadcast bus)
 #define TYPE_NET_ARTNET_RGBW     83            //network ArtNet RGB bus (master broadcast bus)
 #define TYPE_NET_DDP_RGBW        88            //network DDP RGBW bus (master broadcast bus)
+
+#define TYPE_PARLIO_RGB         90
+#define TYPE_PARLIO_RGBW        91
 
 #define IS_DIGITAL(t) (((t) & 0x10) || ((t)==TYPE_HUB75MATRIX)) //digital are 16-31 and 48-63 // WLEDMM added HUB75
 #define IS_PWM(t)     ((t) > 40 && (t) < 46)

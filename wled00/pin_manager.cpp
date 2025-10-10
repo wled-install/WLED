@@ -33,7 +33,7 @@ String PinManagerClass::getPinOwnerText(int gpio) {
 String PinManagerClass::getOwnerText(PinOwner tag) {
   switch(tag) {
     case PinOwner::None       : return(F("no owner")); break;       // unknown - no owner
-    case PinOwner::DebugOut   : return(F("debug output")); break;   // 'Dbg'  == debug output always IO1
+    case PinOwner::DebugOut   : return(F("Serial (hw)")); break;    // 'Dbg'  == debug output always IO1
     case PinOwner::Ethernet   : return(F("Ethernet")); break;       // Ethernet
     case PinOwner::BusDigital : return(F("LEDs (digital)")); break; // Digital LEDs
     case PinOwner::BusPwm     : return(F("LEDs (PWM)")); break;     // PWM output using BusPwm
@@ -820,9 +820,11 @@ bool PinManagerClass::isPinOk(byte gpio, bool output) const
     if (gpio > 23 && gpio <  26) return false;     // USB Pins
     if (gpio > 27 && gpio <  32) return false;     // Ethernet pins
     if (gpio > 33 && gpio <  36) return false;     // Ethernet pins - boot button is on 35 and works... but messes with Ethernet if enabled in WLED
+    // if (gpio > 36 && gpio <  38) return false;     // Serial console.
     if (gpio > 38 && gpio <  46) return false;     // SD1 Pins - 45 is NC unless you modify the board.
     if (gpio > 48 && gpio <  53) return false;     // Ethernet pins & others
     if (             gpio == 54) return false;     // C6 WiFi EN pin
+    // 
     // 24-25 is is USB, but so is 26-27 but they're exposed on the header and work OK for pin outout.
     // 6 is C5 wakeup - but works fine for pin outout.
     // 45 is SD power but it's NC without hacking the board.

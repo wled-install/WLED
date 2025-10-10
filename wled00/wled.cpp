@@ -1415,30 +1415,38 @@ void WLED::setup() {
   managed_pin_type pins[] = { {16, true}, {17, true} };
   pinManager.allocateMultiplePins(pins, sizeof(pins)/sizeof(managed_pin_type), PinOwner::SPI_RAM);
   #endif
-  #if defined(SOC_PARLIO_SUPPORTED) && defined(PARLIO) 
-    #ifndef PARLIO_PINS
-      #define PARLIO_PINS -1
-    #endif
-    constexpr int8_t tempPins[] = { PARLIO_PINS };  // You can define more than 16 here
-    constexpr int totalDefined = sizeof(tempPins) / sizeof(tempPins[0]);
-
-    managed_pin_type parlio_pins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
-    int allocatedCount = 0;
-
-    for (int i = 0; i < totalDefined && allocatedCount < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
-        byte gpio = tempPins[i];
-
-        // Try to allocate the pin
-        if (pinManager.allocatePin(gpio, true, PinOwner::Parallel_IO)) {
-            parlio_pins[allocatedCount++] = { static_cast<int8_t>(gpio), true };
-        }
-    }
-
-    // Fill remaining slots with -1 to mark unused
-    for (int i = allocatedCount; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
-        parlio_pins[i] = { -1, false };
-    }
+  
+  #ifdef SOC_RX0
+  pinManager.allocatePin(SOC_RX0, false, PinOwner::DebugOut);
   #endif
+  #ifdef SOC_TX0
+  pinManager.allocatePin(SOC_TX0, true, PinOwner::DebugOut);
+  #endif
+
+  // #if defined(SOC_PARLIO_SUPPORTED) && defined(PARLIO) 
+  //   #ifndef PARLIO_PINS
+  //     #define PARLIO_PINS -1
+  //   #endif
+  //   constexpr int8_t tempPins[] = { PARLIO_PINS };  // You can define more than 16 here
+  //   constexpr int totalDefined = sizeof(tempPins) / sizeof(tempPins[0]);
+
+  //   managed_pin_type parlio_pins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
+  //   int allocatedCount = 0;
+
+  //   for (int i = 0; i < totalDefined && allocatedCount < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
+  //       byte gpio = tempPins[i];
+
+  //       // Try to allocate the pin
+  //       if (pinManager.allocatePin(gpio, true, PinOwner::Parallel_IO)) {
+  //           parlio_pins[allocatedCount++] = { static_cast<int8_t>(gpio), true };
+  //       }
+  //   }
+
+  //   // Fill remaining slots with -1 to mark unused
+  //   for (int i = allocatedCount; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
+  //       parlio_pins[i] = { -1, false };
+  //   }
+  // #endif
   #if defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON))       // WLEDMM
   if (psramFound()) {  // OK use
     DEBUG_PRINT(F("Total PSRAM: ")); DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
