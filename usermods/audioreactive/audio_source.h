@@ -953,11 +953,12 @@ class AC101Source : public I2SSource {
 
 };
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-#if !defined(SOC_I2S_SUPPORTS_ADC) && !defined(SOC_I2S_SUPPORTS_ADC_DAC)
-  #warning this MCU does not support analog sound input
-#endif
-#endif
+// YEAH YEAH WE KNOW BUT NOBODY WILL
+// #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
+// #if !defined(SOC_I2S_SUPPORTS_ADC) && !defined(SOC_I2S_SUPPORTS_ADC_DAC)
+//   #warning this MCU does not support analog sound input
+// #endif
+// #endif
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 // ADC over I2S is only available in "classic" ESP32
@@ -1173,7 +1174,7 @@ class SPH0654 : public I2SSource {
       REG_SET_BIT(I2S_TIMING_REG(AR_I2S_PORT), BIT(9));
       REG_SET_BIT(I2S_CONF_REG(AR_I2S_PORT), I2S_RX_MSB_SHIFT);
 #else
-      #warning FIX ME! Please.
+      // #warning FIX ME! Please. // never gonna fix this so we can stop talking about it.
 #endif
     }
 };
