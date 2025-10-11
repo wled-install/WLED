@@ -979,11 +979,8 @@ void serializeInfo(JsonObject root)
     case REALTIME_MODE_INACTIVE: root["lm"] = ""; break;
     case REALTIME_MODE_GENERIC:  root["lm"] = ""; break;
     case REALTIME_MODE_UDP:      root["lm"] = F("UDP"); break;
-    case REALTIME_MODE_HYPERION: root["lm"] = F("Hyperion"); break;
     case REALTIME_MODE_E131:     root["lm"] = F("E1.31"); break;
-    case REALTIME_MODE_ADALIGHT: root["lm"] = F("USB Adalight/TPM2"); break;
     case REALTIME_MODE_ARTNET:   root["lm"] = F("Art-Net"); break;
-    case REALTIME_MODE_TPM2NET:  root["lm"] = F("tpm2.net"); break;
     case REALTIME_MODE_DDP:      root["lm"] = F("DDP"); break;
     case REALTIME_MODE_DMX:      root["lm"] = F("DMX"); break;
   }
@@ -1394,12 +1391,6 @@ void serializeInfo(JsonObject root)
   #endif
   #ifndef WLED_DISABLE_FILESYSTEM
   os += 0x08;
-  #endif
-  #ifndef WLED_DISABLE_HUESYNC
-  os += 0x04;
-  #endif
-  #ifdef WLED_ENABLE_ADALIGHT
-  os += 0x02;
   #endif
   #ifndef WLED_DISABLE_OTA
   os += 0x01;

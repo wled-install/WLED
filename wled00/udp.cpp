@@ -240,8 +240,8 @@ static uint8_t udpIn[UDP_IN_MAXSIZE+1];
 // WLEDMM end
 #endif
 
-void handleNotifications()
-{
+void handleNotifications() {
+
   IPAddress localIP;
 
   //send second notification if enabled
@@ -277,30 +277,19 @@ void handleNotifications()
 
   //hyperion / raw RGB
   if (!packetSize && udpRgbConnected) {
-#ifdef ARDUINO_ARCH_ESP32
     rgbUdp.flush();
-#endif
     packetSize = rgbUdp.parsePacket();
     if (packetSize) {
-#ifdef ARDUINO_ARCH_ESP32
       if (!receiveDirect) {rgbUdp.flush(); notifierUdp.flush(); notifier2Udp.flush(); return;}
       if (packetSize > UDP_IN_MAXSIZE || packetSize < 3) {rgbUdp.flush(); notifierUdp.flush(); notifier2Udp.flush(); return;}
-#else
-      if (!receiveDirect) {return;}
-      if (packetSize > UDP_IN_MAXSIZE || packetSize < 3) {return;}
-#endif
       realtimeIP = rgbUdp.remoteIP();
       DEBUG_PRINTLN(rgbUdp.remoteIP());
       #ifndef ARDUINO_ARCH_ESP32
       uint8_t lbuf[packetSize+1]; // WLEDMM: use global buffer on ESP32
       #endif
       rgbUdp.read(lbuf, packetSize);
-      realtimeLock(realtimeTimeoutMs, REALTIME_MODE_HYPERION);
-#ifdef ARDUINO_ARCH_ESP32
+      realtimeLock(realtimeTimeoutMs, REALTIME_MODE_GENERIC);
       if (realtimeOverride && !(realtimeMode && useMainSegmentOnly)) {notifierUdp.flush(); notifier2Udp.flush(); return;}
-#else
-      if (realtimeOverride && !(realtimeMode && useMainSegmentOnly)) {return;}
-#endif
       uint16_t id = 0;
       uint16_t totalLen = strip.getLengthTotal();
       for (int i = 0; i < packetSize -2; i += 3)
@@ -313,25 +302,14 @@ void handleNotifications()
     }
   }
 
-#ifdef ARDUINO_ARCH_ESP32
   if (!(receiveNotifications || receiveDirect)) {notifierUdp.flush(); notifier2Udp.flush(); return;}
-#else
-  if (!(receiveNotifications || receiveDirect)) {return;}
-#endif
 
   localIP = Network.localIP();
   //notifier and UDP realtime
-#ifdef ARDUINO_ARCH_ESP32
+
   if (!packetSize || packetSize > UDP_IN_MAXSIZE) {notifierUdp.flush(); notifier2Udp.flush(); return;}
   if (!isSupp && notifierUdp.remoteIP() == localIP) {notifierUdp.flush(); notifier2Udp.flush(); return;} //don't process broadcasts we send ourselves
-#else
-  if (!packetSize || packetSize > UDP_IN_MAXSIZE) {return;}
-  if (!isSupp && notifierUdp.remoteIP() == localIP) {return;} //don't process broadcasts we send ourselves
-#endif
 
-  #ifndef ARDUINO_ARCH_ESP32
-  uint8_t udpIn[packetSize +1];  // WLEDMM: use global buffer on ESP32
-  #endif
   uint16_t len;
   if (isSupp) len = notifier2Udp.read(udpIn, packetSize);
   else        len =  notifierUdp.read(udpIn, packetSize);
@@ -368,8 +346,8 @@ void handleNotifications()
   }
 
   //wled notifier, ignore if realtime packets active
-  if (udpIn[0] == 0 && !realtimeMode && receiveNotifications)
-  {
+  if (udpIn[0] == 0 && !realtimeMode && receiveNotifications) {
+
     //ignore notification if received within a second after sending a notification ourselves
     if (millis() - notificationSentTime < 1000) return;
     if (udpIn[1] > 199) return; //do not receive custom versions
@@ -528,109 +506,6 @@ void handleNotifications()
 
   if (!receiveDirect) return;
 
-  //TPM2.NET
-  if (udpIn[0] == 0x9c)
-  {
-    //WARNING: this code assumes that the final TMP2.NET payload is evenly distributed if using multiple packets (ie. frame size is constant)
-    //if the number of LEDs in your installation doesn't allow that, please include padding bytes at the end of the last packet
-    byte tpmType = udpIn[1];
-    if (tpmType == 0xaa) { //TPM2.NET polling, expect answer
-      sendTPM2Ack(); return;
-    }
-    if (tpmType != 0xda) return; //return if notTPM2.NET data
-
-    realtimeIP = (isSupp) ? notifier2Udp.remoteIP() : notifierUdp.remoteIP();
-    realtimeLock(realtimeTimeoutMs, REALTIME_MODE_TPM2NET);
-    if (realtimeOverride && !(realtimeMode && useMainSegmentOnly)) return;
-
-    tpmPacketCount++; //increment the packet count
-    if (tpmPacketCount == 1) tpmPayloadFrameSize = (udpIn[2] << 8) + udpIn[3]; //save frame size for the whole payload if this is the first packet
-    byte packetNum = udpIn[4]; //starts with 1!
-    byte numPackets = udpIn[5];
-
-    uint16_t id = (tpmPayloadFrameSize/3)*(packetNum-1); //start LED
-    uint16_t totalLen = strip.getLengthTotal();
-    for (size_t i = 6; i < tpmPayloadFrameSize + 4U; i += 3)
-    {
-      if (id < totalLen)
-      {
-        setRealtimePixel(id, udpIn[i], udpIn[i+1], udpIn[i+2], 0);
-        id++;
-      }
-      else break;
-    }
-    if (tpmPacketCount == numPackets) //reset packet count and show if all packets were received
-    {
-      tpmPacketCount = 0;
-      strip.show();
-    }
-    return;
-  }
-
-  //UDP realtime: 1 warls 2 drgb 3 drgbw
-  if (udpIn[0] > 0 && udpIn[0] < 5)
-  {
-    realtimeIP = (isSupp) ? notifier2Udp.remoteIP() : notifierUdp.remoteIP();
-    DEBUG_PRINTLN(realtimeIP);
-    if (packetSize < 2) return;
-
-    if (udpIn[1] == 0)
-    {
-      realtimeTimeout = 0;
-      return;
-    } else {
-      realtimeLock(udpIn[1]*1000 +1, REALTIME_MODE_UDP);
-    }
-    if (realtimeOverride && !(realtimeMode && useMainSegmentOnly)) return;
-
-    uint16_t totalLen = strip.getLengthTotal();
-    if (udpIn[0] == 1 && packetSize > 5) //warls
-    {
-      for (int i = 2; i < packetSize -3; i += 4)
-      {
-        setRealtimePixel(udpIn[i], udpIn[i+1], udpIn[i+2], udpIn[i+3], 0);
-      }
-    } else if (udpIn[0] == 2 && packetSize > 4) //drgb
-    {
-      uint16_t id = 0;
-      for (int i = 2; i < packetSize -2; i += 3)
-      {
-        setRealtimePixel(id, udpIn[i], udpIn[i+1], udpIn[i+2], 0);
-
-        id++; if (id >= totalLen) break;
-      }
-    } else if (udpIn[0] == 3 && packetSize > 6) //drgbw
-    {
-      uint16_t id = 0;
-      for (int i = 2; i < packetSize -3; i += 4)
-      {
-        setRealtimePixel(id, udpIn[i], udpIn[i+1], udpIn[i+2], udpIn[i+3]);
-
-        id++; if (id >= totalLen) break;
-      }
-    } else if (udpIn[0] == 4 && packetSize > 7) //dnrgb
-    {
-      uint16_t id = ((udpIn[3] << 0) & 0xFF) + ((udpIn[2] << 8) & 0xFF00);
-      for (int i = 4; i < packetSize -2; i += 3)
-      {
-        if (id >= totalLen) break;
-        setRealtimePixel(id, udpIn[i], udpIn[i+1], udpIn[i+2], 0);
-        id++;
-      }
-    } else if (udpIn[0] == 5 && packetSize > 8) //dnrgbw
-    {
-      uint16_t id = ((udpIn[3] << 0) & 0xFF) + ((udpIn[2] << 8) & 0xFF00);
-      for (int i = 4; i < packetSize -2; i += 4)
-      {
-        if (id >= totalLen) break;
-        setRealtimePixel(id, udpIn[i], udpIn[i+1], udpIn[i+2], udpIn[i+3]);
-        id++;
-      }
-    }
-    strip.show();
-    return;
-  }
-
   // API over UDP
   udpIn[packetSize] = '\0';
 
@@ -647,7 +522,6 @@ void handleNotifications()
     releaseJSONBufferLock();
   }
 }
-
 
 void setRealtimePixel(uint16_t i, byte r, byte g, byte b, byte w)
 {

@@ -2401,12 +2401,11 @@ class AudioReactive : public Usermod {
           useNetworkAudio = true;  // don't fall back to local audio in standard "receive mode"
       }
 
-      // suspend local sound processing when "real time mode" is active (E131, UDP, ADALIGHT, ARTNET)
+      // suspend local sound processing when "real time mode" is active (E131, UDP, ARTNET)
       if (  (realtimeOverride == REALTIME_OVERRIDE_NONE)  // please add other overrides here if needed
           &&( (realtimeMode == REALTIME_MODE_GENERIC)
             ||(realtimeMode == REALTIME_MODE_E131)
             ||(realtimeMode == REALTIME_MODE_UDP)
-            ||(realtimeMode == REALTIME_MODE_ADALIGHT)
             ||(realtimeMode == REALTIME_MODE_ARTNET) ) )  // please add other modes here if needed
       {
         #ifdef WLED_DEBUG

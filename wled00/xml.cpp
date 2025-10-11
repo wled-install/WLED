@@ -225,37 +225,6 @@ void appendGPIOinfo() {
     #endif
   #endif
 
-  //Note: Using pin 3 (RX) disables Adalight / Serial JSON
-
-  #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM)
-    #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32P4)
-    if (psramFound()) oappend(SET_F(",16,17")); // GPIO16 & GPIO17 reserved for SPI RAM on ESP32 (not on S2, S3 or C3)
-    #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-    if (psramFound()) oappend(SET_F(",33,34,35,36,37")); // in use for "octal" PSRAM or "octal" FLASH -seems that octal PSRAM is very common on S3.
-    #endif
-  #endif
-
-  #if defined(WLED_USE_ETHERNET) && !defined(CONFIG_IDF_TARGET_ESP32P4)
-  if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
-    for (uint8_t p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) { oappend(","); oappend(itoa(esp32_nonconfigurable_ethernet_pins[p].pin,nS,10)); }
-    if (ethernetBoards[ethernetType].eth_power>=0)     { oappend(","); oappend(itoa(ethernetBoards[ethernetType].eth_power,nS,10)); }
-    if (ethernetBoards[ethernetType].eth_mdc>=0)       { oappend(","); oappend(itoa(ethernetBoards[ethernetType].eth_mdc,nS,10)); }
-    if (ethernetBoards[ethernetType].eth_mdio>=0)      { oappend(","); oappend(itoa(ethernetBoards[ethernetType].eth_mdio,nS,10)); }
-    switch (ethernetBoards[ethernetType].eth_clk_mode) {
-      case ETH_CLOCK_GPIO0_IN:
-      case ETH_CLOCK_GPIO0_OUT:
-        oappend(SET_F(",0"));
-        break;
-      case ETH_CLOCK_GPIO16_OUT:
-        oappend(SET_F(",16"));
-        break;
-      case ETH_CLOCK_GPIO17_OUT:
-        oappend(SET_F(",17"));
-        break;
-    }
-  }
-  #endif
-
   oappend(SET_F("];"));
 
   // add info for read-only GPIO
@@ -701,9 +670,6 @@ void getSettingsJS(AsyncWebServerRequest* request, byte subPage, char* dest) //W
 
 #ifdef WLED_ENABLE_LOXONE
     oappend(SET_F("hideNoLOX();"));  // WLEDMM hide "not compiled in" message    
-#endif
-#ifdef WLED_ENABLE_ADALIGHT
-    oappend(SET_F("hideNoADA();"));  // WLEDMM hide "not compiled in" message    
 #endif
 
   }

@@ -182,11 +182,8 @@
 #define REALTIME_MODE_INACTIVE    0
 #define REALTIME_MODE_GENERIC     1
 #define REALTIME_MODE_UDP         2
-#define REALTIME_MODE_HYPERION    3
 #define REALTIME_MODE_E131        4
-#define REALTIME_MODE_ADALIGHT    5
 #define REALTIME_MODE_ARTNET      6
-#define REALTIME_MODE_TPM2NET     7
 #define REALTIME_MODE_DDP         8
 #define REALTIME_MODE_DMX         9
 

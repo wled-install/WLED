@@ -420,60 +420,51 @@ void WLED::reset()
 
 void background_loop(void* pvParameters) {
   while (true) {
-  #ifdef WLED_DEBUG
+    #ifdef WLED_DEBUG
     // esp_log_level_set("*",ESP_LOG_VERBOSE);
     static unsigned long maxUsermodMillis = 0;
     static uint16_t avgUsermodMillis = 0;
     static unsigned long maxStripMillis = 0;
     static uint16_t avgStripMillis = 0;
-  #endif
-
+    #endif
     handleTime();
-  #ifndef WLED_DISABLE_INFRARED
+    #ifndef WLED_DISABLE_INFRARED
     handleIR();        // 2nd call to function needed for ESP32 to return valid results -- should be good for ESP8266, too
-  #endif
-      WLED::handleConnection();
-  #ifndef WLED_DISABLE_ESPNOW
+    #endif
+    WLED::handleConnection();
+    #ifndef WLED_DISABLE_ESPNOW
     handleRemote();
-  #endif
+    #endif
     handleSerial();
-  #ifndef WLED_DISABLE_IMPROV_WIFISCAN
+    #ifndef WLED_DISABLE_IMPROV_WIFISCAN
     handleImprovWifiScan();
-  #endif
+    #endif
 
-    // #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: handleNotifications() calls strip.show(); handleTransitions modifies segments
-    //   if (!suspendStripService) {
-    //   #endif
-        // handleNotifications();
-    //     handleTransitions();
-    //   #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM end 
-    //   }
-    // #endif
+    handleNotifications();
+    handleTransitions();
 
-    //   if (!interfacesInited || strip.getBrightness() == 0) delay(10); // TroyHacks: burn some loop in case there's nothing else to do.
-
-  #ifdef WLED_ENABLE_DMX
+    #ifdef WLED_ENABLE_DMX
     handleDMXOutput();
-  #endif
-  #ifdef WLED_ENABLE_DMX_INPUT
+    #endif
+    #ifdef WLED_ENABLE_DMX_INPUT
     dmxInput.update();
-  #endif
+    #endif
     userLoop();
 
-  #ifdef WLED_DEBUG
+    #ifdef WLED_DEBUG
     unsigned long usermodMillis = millis();
-  #endif
+    #endif
 
     if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
       usermods.loop();
       xSemaphoreGive(busMutex);
     }
 
-  #ifdef WLED_DEBUG
+    #ifdef WLED_DEBUG
     usermodMillis = millis() - usermodMillis;
     avgUsermodMillis += usermodMillis;
     if (usermodMillis > maxUsermodMillis) maxUsermodMillis = usermodMillis;
-  #endif
+    #endif
 
     handleIO();
 
@@ -520,37 +511,40 @@ void background_loop(void* pvParameters) {
       }
     }
 
-    //WLEDMM refactored (to be done: setUpMatrix is called in finalizeInit and also in deserializeMap, deserializeMap is called in finalizeInit and also here)
     if (loadLedmap) {
       if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-        if (!strip.deserializeMap(loadedLedmap) && strip.isMatrix) strip.setUpMatrix(); //WLEDMM: always if nonexistent:  && loadedLedmap == 0
+        if (!strip.deserializeMap(loadedLedmap) && strip.isMatrix) strip.setUpMatrix();
         strip.enumerateLedmaps(); //WLEDMM
         loadLedmap = false;
       }
       xSemaphoreGive(busMutex);
     }
 
-  #ifndef WLED_DISABLE_INFRARED
+    #ifndef WLED_DISABLE_INFRARED
     handleIR();
-  #endif
-  #ifndef WLED_DISABLE_ALEXA
-    handleAlexa();
-  #endif
-
-    if (doReboot && !doInitBusses) // if busses have to be inited & saved, wait until next iteration
-      WLED::reset();
-
-    if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly))  // block stuff if WARLS/Adalight is enabled
-    {
-      if (apActive) dnsServer.processNextRequest();
-    #ifndef WLED_DISABLE_OTA
-      if (WLED_CONNECTED && aOtaEnabled && !otaLock && correctPIN) ArduinoOTA.handle();
     #endif
+
+    #ifndef WLED_DISABLE_ALEXA
+    handleAlexa();
+    #endif
+
+    if (doReboot && !doInitBusses) { // if busses have to be inited & saved, wait until next iteration
+      WLED::reset();
+    }
+
+    if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
+
+      if (apActive) dnsServer.processNextRequest();
+
+      #ifndef WLED_DISABLE_OTA
+      if (WLED_CONNECTED && aOtaEnabled && !otaLock && correctPIN) ArduinoOTA.handle();
+      #endif
+
       handleNightlight();
       
-    #ifndef WLED_DISABLE_HUESYNC
+      #ifndef WLED_DISABLE_HUESYNC
       handleHue();
-    #endif
+      #endif
 
       if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
         handlePlaylist();
@@ -559,49 +553,9 @@ void background_loop(void* pvParameters) {
         xSemaphoreGive(busMutex);
       }
 
-      //   #if defined(_MoonModules_WLED_) && defined(WLEDMM_FASTPATH)
-      //   #ifdef WLED_DEBUG
-      //     unsigned long usermod2Millis = millis();
-      //   #endif
-      
-  //   #ifdef WLED_DEBUG
-  //     usermod2Millis = millis() - usermod2Millis;
-  //     avgUsermodMillis += usermod2Millis;
-  //     if (usermod2Millis > maxUsermodMillis) maxUsermodMillis = usermod2Millis;
-  //   #endif
-  //   #endif
-
-  //   #ifdef WLED_DEBUG
-  //     unsigned long stripMillis = millis();
-  //   #endif
-  //     if (!offMode || strip.isOffRefreshRequired()) {
-  //     #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental 
-  //       static unsigned long lastTimeService = 0; // WLEDMM needed to remove stale lock
-  //       if (!suspendStripService && !doInitBusses && !loadLedmap) { // WLEDMM prevent effect drawing while strip or segments are being updated
-  //       #endif
-  //         strip.service();
-  //       #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)
-  //         lastTimeService = millis();
-  //       } else {
-  //         if (suspendStripService && (millis() - lastTimeService > 1500)) { // WLEDMM remove stale lock after 1.5 seconds
-  //           USER_PRINTLN("--> looptask: stale suspendStripService lock removed after 1500 ms."); // should not happen - check for missing "suspendStripService = false"
-  //           suspendStripService = false;
-  //         }
-  //       }
-  //     #endif
-  //     }
-  //   #ifdef WLED_DEBUG
-  //     stripMillis = millis() - stripMillis;
-  //   #ifndef WLED_DEBUG_HEAP  // WLEDMM heap debug messages take some time - this warning is popping in too often
-  //     if (stripMillis > 50) DEBUG_PRINTLN("Slow strip.");
-  //   #endif
-  //     avgStripMillis += stripMillis;
-  //     if (stripMillis > maxStripMillis) maxStripMillis = stripMillis;
-  //   #endif
     }
 
-    //millis() rolls over every 50 days
-    if (lastMqttReconnectAttempt > millis()) {
+    if (lastMqttReconnectAttempt > millis()) { //millis() rolls over every 50 days
       rolloverMillis++;
       lastMqttReconnectAttempt = 0;
       ntpLastSyncTime = NTP_NEVER;  // force new NTP query
@@ -610,11 +564,12 @@ void background_loop(void* pvParameters) {
 
     if (millis() - lastMqttReconnectAttempt > 30000 || lastMqttReconnectAttempt == 0) { // lastMqttReconnectAttempt==0 forces immediate broadcast
       lastMqttReconnectAttempt = millis();
-    #ifndef WLED_DISABLE_MQTT
+
+      #ifndef WLED_DISABLE_MQTT
       initMqtt();
-    #endif
-      // refresh WLED nodes list
-      refreshNodeList();
+      #endif
+
+      refreshNodeList(); // refresh WLED nodes list
       if (nodeBroadcastEnabled) sendSysInfoUDP();
     }
 
@@ -624,81 +579,15 @@ void background_loop(void* pvParameters) {
       createEditHandler(false);
     }
 
+    handleWs();
 
-  // #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: pause handleWs while strip/segment data might be inconsistent
-  //   if (!suspendStripService)
-  // #endif
-  handleWs();
-  #ifdef STATUSLED
+    #ifdef STATUSLED
     WLED::handleStatusLED();
-  #endif
-
-  //   // DEBUG serial logging (every 30s)
-  // #if defined(WLED_DEBUG) && !defined(WLED_DEBUG_HEAP)
-  //   if (millis() - debugTime > 29999) {
-  //     DEBUG_PRINTLN(F("---DEBUG INFO---"));
-  //     DEBUG_PRINT(F("Name: "));       DEBUG_PRINTLN(serverDescription);
-  //     DEBUG_PRINT(F("Runtime: "));       DEBUG_PRINTLN(millis());
-  //     DEBUG_PRINT(F("Unix time: "));     toki.printTime(toki.getTime());
-  //     DEBUG_PRINT(F("Free heap : "));     DEBUG_PRINTLN(ESP.getFreeHeap());
-  //     DEBUG_PRINT(F("Free heap: "));     DEBUG_PRINTLN(ESP.getFreeHeap());
-  //     //WLEDMM
-  //   #ifdef ARDUINO_ARCH_ESP32
-  //     DEBUG_PRINT(F("Avail heap: "));     DEBUG_PRINTLN(ESP.getMaxAllocHeap());
-  //     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
-  //   #endif
-  //   #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ESP32P4)
-  //     if (psramFound()) {  // OK use
-  //       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
-  //       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram() / 1024); DEBUG_PRINTLN("kB");
-  //       DEBUG_PRINT(F("Avail PSRAM: "));     DEBUG_PRINT(ESP.getMaxAllocPsram() / 1024); DEBUG_PRINTLN("kB");
-  //       DEBUG_PRINT(F("PSRAM in use:")); DEBUG_PRINT(int(ESP.getPsramSize() - ESP.getFreePsram())); DEBUG_PRINTLN(F(" Bytes"));
-
-  //     } else {
-  //       //DEBUG_PRINTLN(F("No PSRAM"));
-  //     }
-  //   #endif
-  //     // DEBUG_PRINT(F("Wifi state: "));      DEBUG_PRINTLN(WiFi.status());
-
-  //     // if (WiFi.status() != lastWifiState) {
-  //     //   wifiStateChangedTime = millis();
-  //     // }
-  //     // lastWifiState = WiFi.status();
-  //     DEBUG_PRINT(F("State time: "));      DEBUG_PRINTLN(wifiStateChangedTime);
-  //     DEBUG_PRINT(F("NTP last sync: "));   DEBUG_PRINTLN(ntpLastSyncTime);
-  //     DEBUG_PRINT(F("Client IP: "));       DEBUG_PRINTLN(Network.localIP());
-  //     if (loops > 0) { // avoid division by zero
-  //       DEBUG_PRINT(F("Loops/sec: "));       DEBUG_PRINTLN(loops / 30);
-  //       DEBUG_PRINT(F("UM time[ms]: "));     DEBUG_PRINT(avgUsermodMillis / loops); DEBUG_PRINT("/");DEBUG_PRINTLN(maxUsermodMillis);
-  //       DEBUG_PRINT(F("Strip time[ms]: "));  DEBUG_PRINT(avgStripMillis / loops); DEBUG_PRINT("/"); DEBUG_PRINTLN(maxStripMillis);
-  //     }
-  //     strip.printSize();
-  //     loops = 0;
-  //     maxUsermodMillis = 0;
-  //     maxStripMillis = 0;
-  //     avgUsermodMillis = 0;
-  //     avgStripMillis = 0;
-  //     debugTime = millis();
-  //     DEBUG_PRINTLN(F("---END OF DEBUG INFO---"));
-  //   }
-  //   loops++;
-  // #endif
-  // #ifdef WLED_DEBUG_HEAP
-  //   if (millis() - debugTime > 4999) { // WLEDMM: Special case for debugging heap faster
-  //     DEBUG_PRINT(F("*** Free heap: "));     DEBUG_PRINT(heap_caps_get_free_size(0x1800));
-  //     DEBUG_PRINT(F("\tLargest free block: "));     DEBUG_PRINT(heap_caps_get_largest_free_block(0x1800));
-  //     DEBUG_PRINT(F(" *** \t\tArduino min free stack: ")); DEBUG_PRINT(uxTaskGetStackHighWaterMark(NULL));
-  //   #if INCLUDE_xTaskGetHandle
-  //     DEBUG_PRINT(F("   TCP min free stack: ")); DEBUG_PRINT(wledmm_get_tcp_stacksize());
-  //   #endif
-  //     DEBUG_PRINTLN(F(" ***"));
-
-  //   }
-  // #endif        // WLED_DEBUG_HEAP
+    #endif
 
     app_message_t msg;
 
-  #ifdef SOC_USB_OTG_SUPPORTED
+    #ifdef SOC_USB_OTG_SUPPORTED
     // Poll for messages without blocking
     if (xQueueReceive(app_queue, &msg, 0)) {
       switch (msg.id) {
@@ -733,18 +622,10 @@ void background_loop(void* pvParameters) {
         break;
       }
     }
-  #endif // SOC_USB_OTG_SUPPORTED
+    #endif // SOC_USB_OTG_SUPPORTED
 
-  //   toki.resetTick();
-
-  // #if WLED_WATCHDOG_TIMEOUT > 0
-  //   // we finished our mainloop, reset the watchdog timer
-  //   if (!strip.isUpdating())
-  //     esp_task_wdt_reset();
-  // #endif
-    // vTaskDelay(pdMS_TO_TICKS(10));
     vTaskDelay(1);
-    // yield();
+
   }
 }
 
@@ -754,201 +635,37 @@ void WLED::loop() {
     vTaskPrioritySet(NULL, configMAX_PRIORITIES - 1);
     raised_priority = true;
   }
-#ifdef WLED_DEBUG
+  #ifdef WLED_DEBUG
   // esp_log_level_set("*",ESP_LOG_VERBOSE);
   static unsigned long maxUsermodMillis = 0;
   static uint16_t avgUsermodMillis = 0;
   static unsigned long maxStripMillis = 0;
   static uint16_t avgStripMillis = 0;
-#endif
-
-//   handleTime();
-// #ifndef WLED_DISABLE_INFRARED
-//   handleIR();        // 2nd call to function needed for ESP32 to return valid results -- should be good for ESP8266, too
-// #endif
-  // handleConnection();
-// #ifndef WLED_DISABLE_ESPNOW
-//   handleRemote();
-// #endif
-  // handleSerial();
-  // handleImprovWifiScan();
-
-#if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: handleNotifications() calls strip.show(); handleTransitions modifies segments
-  if (!suspendStripService) {
   #endif
-    handleNotifications();
-    // if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-      handleTransitions();
-    //   xSemaphoreGive(busMutex);
-    // }
-  #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM end 
-  }
-#endif
 
   if (!interfacesInited || strip.getBrightness() == 0) delay(10); // TroyHacks: burn some loop in case there's nothing else to do.
 
-// #ifdef WLED_ENABLE_DMX
-//   handleDMXOutput();
-// #endif
-// #ifdef WLED_ENABLE_DMX_INPUT
-//   dmxInput.update();
-// #endif
-//   userLoop();
+  if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
 
-// #ifdef WLED_DEBUG
-//   unsigned long usermodMillis = millis();
-// #endif
-  // usermods.loop();
-// #ifdef WLED_DEBUG
-//   usermodMillis = millis() - usermodMillis;
-//   avgUsermodMillis += usermodMillis;
-//   if (usermodMillis > maxUsermodMillis) maxUsermodMillis = usermodMillis;
-// #endif
-
-//   handleIO();
-// #ifndef WLED_DISABLE_INFRARED
-//   handleIR();
-// #endif
-// #ifndef WLED_DISABLE_ALEXA
-//   handleAlexa();
-// #endif
-
-  // https://github.com/Makuna/NeoPixelBus/wiki/ESP32-and-RTOS-Tasks
-  // On ESP32, when the CPU is loaded, asynchronous WiFi libraries (like ESPAsyncWebServer or async-mqtt-client) may interfere with interrupts used to control the LEDs (I2S mode is less affected by this), 
-  // which causes flickering of LEDs.
-// #if defined(ARDUINO_ARCH_ESP32) && (defined(WLEDMM_FASTPATH) || defined(WLEDMM_PROTECT_SERVICE))  // WLEDMM experimental: avoid strip flickering
-// #define FILEWRITE_MAX_WAIT_MS 30  // max time for waiting - aligned with 33 fps
-//if (doReboot || doSerializeConfig || doCloseFile || loadLedmap || presetsActionPending()) {     // WLEDMM trx this to also wait before reading from files
-//   if (doReboot || doSerializeConfig || doCloseFile || presetsSavePending()) {                       // WLEDMM wait until strip gets idle before writing to files
-//     unsigned long waitStripStart = millis();
-//     while (strip.isUpdating() && (millis() - waitStripStart < FILEWRITE_MAX_WAIT_MS)) { delay(3); }
-//   }
-// #endif
-
-//   if (doSerializeConfig) {
-//     serializeConfig();
-//   }
-
-
-//   if (doReboot && !doInitBusses) // if busses have to be inited & saved, wait until next iteration
-//     reset();
-
-//   if (doCloseFile) {
-//     closeFile();
-//   }
-
-  if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly))  // block stuff if WARLS/Adalight is enabled
-  {
-  //   if (apActive) dnsServer.processNextRequest();
-  // #ifndef WLED_DISABLE_OTA
-  //   if (WLED_CONNECTED && aOtaEnabled && !otaLock && correctPIN) ArduinoOTA.handle();
-  // #endif
-  //   handleNightlight();
-  //   handlePlaylist();
-  // #ifndef WLED_DISABLE_HUESYNC
-  //   handleHue();
-  // #endif
-  //   handlePresets();
-
-  #if defined(_MoonModules_WLED_) && defined(WLEDMM_FASTPATH)
-  #ifdef WLED_DEBUG
-    unsigned long usermod2Millis = millis();
-  #endif
-    // usermods.loop2();
-  #ifdef WLED_DEBUG
-    usermod2Millis = millis() - usermod2Millis;
-    avgUsermodMillis += usermod2Millis;
-    if (usermod2Millis > maxUsermodMillis) maxUsermodMillis = usermod2Millis;
-  #endif
-  #endif
-
-  #ifdef WLED_DEBUG
+    #ifdef WLED_DEBUG
     unsigned long stripMillis = millis();
-  #endif
-  if (!offMode || strip.isOffRefreshRequired()) {
-    if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-      strip.service();
-      xSemaphoreGive(busMutex);
+    #endif
+
+    if (!offMode || strip.isOffRefreshRequired()) {
+      if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+        strip.service();
+        xSemaphoreGive(busMutex);
+      }
     }
-  }
-  #ifdef WLED_DEBUG
+    
+    #ifdef WLED_DEBUG
     stripMillis = millis() - stripMillis;
-  #ifndef WLED_DEBUG_HEAP  // WLEDMM heap debug messages take some time - this warning is popping in too often
-    // if (stripMillis > 50) DEBUG_PRINTLN("Slow strip.");
-  #endif
     avgStripMillis += stripMillis;
     if (stripMillis > maxStripMillis) maxStripMillis = stripMillis;
-  #endif
+    #endif
   }
-  // } else {
-  //   if (micros() % 100 < 3) USER_PRINTLN("Realtime Locked!");
-  // }
 
-  //millis() rolls over every 50 days
-  // if (lastMqttReconnectAttempt > millis()) {
-  //   rolloverMillis++;
-  //   lastMqttReconnectAttempt = 0;
-  //   ntpLastSyncTime = NTP_NEVER;  // force new NTP query
-  //   strip.restartRuntime();
-  // }
-
-  // if (millis() - lastMqttReconnectAttempt > 30000 || lastMqttReconnectAttempt == 0) { // lastMqttReconnectAttempt==0 forces immediate broadcast
-  //   lastMqttReconnectAttempt = millis();
-  // #ifndef WLED_DISABLE_MQTT
-  //   initMqtt();
-  // #endif
-  //   // refresh WLED nodes list
-  //   refreshNodeList();
-  //   if (nodeBroadcastEnabled) sendSysInfoUDP();
-  // }
-
-  // 15min PIN time-out
-  // if (strlen(settingsPIN) > 0 && millis() - lastEditTime > 900000) {
-  //   correctPIN = false;
-  //   createEditHandler(false);
-  // }
-
-  //LED settings have been saved, re-init busses
-  //This code block causes severe FPS drop on ESP32 with the original "if (busConfigs[0] != nullptr)" conditional. Investigate!
-  // if (doInitBusses) {
-  //   unsigned long waitStart = millis();                                             // WLEDMM: to avoid crash,
-  //   while (strip.isUpdating() && (millis() - waitStart < 250)) { yield(); delay(5); } // wait a bit until busses are idle (max 250ms)
-  //   doInitBusses = false;
-  //   DEBUG_PRINTLN(F("Re-init busses."));
-  //   bool aligned = strip.checkSegmentAlignment(); //see if old segments match old bus(ses)
-  //   busses.removeAll();
-  //   uint32_t mem = 0;
-  //   for (uint8_t i = 0; i < WLED_MAX_BUSSES + WLED_MIN_VIRTUAL_BUSSES; i++) {
-  //     if (busConfigs[i] == nullptr) break;
-  //     mem += BusManager::memUsage(*busConfigs[i]);
-  //     if (mem <= MAX_LED_MEMORY) {
-  //       busses.add(*busConfigs[i]);
-  //     }
-  //     delete busConfigs[i]; busConfigs[i] = nullptr;
-  //   }
-  //   strip.finalizeInit();
-  //   busses.setBrightness(bri); // fix re-initialised bus' brightness #4005
-  //   loadLedmap = true;
-  //   if (aligned) strip.makeAutoSegments();
-  //   else strip.fixInvalidSegments();
-  //   serializeConfig();
-  // }
-
-  // //WLEDMM refactored (to be done: setUpMatrix is called in finalizeInit and also in deserializeMap, deserializeMap is called in finalizeInit and also here)
-  // if (loadLedmap) {
-  //   if (!strip.deserializeMap(loadedLedmap) && strip.isMatrix) strip.setUpMatrix(); //WLEDMM: always if nonexistent:  && loadedLedmap == 0
-  //   strip.enumerateLedmaps(); //WLEDMM
-  //   loadLedmap = false;
-  // }
-
-// #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_PROTECT_SERVICE)  // WLEDMM experimental: pause handleWs while strip/segment data might be inconsistent
-//   if (!suspendStripService)
-//   #endif
-//     handleWs();
-//   handleStatusLED();
-
-  // DEBUG serial logging (every 30s)
-#if defined(WLED_DEBUG) && !defined(WLED_DEBUG_HEAP)
+  #if defined(WLED_DEBUG) && !defined(WLED_DEBUG_HEAP) // DEBUG serial logging (every 30s)
   if (millis() - debugTime > 29999) {
     DEBUG_PRINTLN(F("---DEBUG INFO---"));
     DEBUG_PRINT(F("Name: "));       DEBUG_PRINTLN(serverDescription);
@@ -957,21 +674,20 @@ void WLED::loop() {
     DEBUG_PRINT(F("Free heap : "));     DEBUG_PRINTLN(ESP.getFreeHeap());
     DEBUG_PRINT(F("Free heap: "));     DEBUG_PRINTLN(ESP.getFreeHeap());
     //WLEDMM
-  #ifdef ARDUINO_ARCH_ESP32
+    #ifdef ARDUINO_ARCH_ESP32
     DEBUG_PRINT(F("Avail heap: "));     DEBUG_PRINTLN(ESP.getMaxAllocHeap());
     DEBUG_PRINTF("%s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
-  #endif
-  #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+    #endif
+    #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (psramFound()) {  // OK use
       //DEBUG_PRINT(F("Total PSRAM: "));    DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Free PSRAM : "));     DEBUG_PRINT(ESP.getFreePsram() / 1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("Avail PSRAM: "));     DEBUG_PRINT(ESP.getMaxAllocPsram() / 1024); DEBUG_PRINTLN("kB");
       DEBUG_PRINT(F("PSRAM in use:")); DEBUG_PRINT(int(ESP.getPsramSize() - ESP.getFreePsram())); DEBUG_PRINTLN(F(" Bytes"));
-
     } else {
       //DEBUG_PRINTLN(F("No PSRAM"));
     }
-  #endif
+    #endif
     // DEBUG_PRINT(F("Wifi state: "));      DEBUG_PRINTLN(WiFi.status());
 
     // if (WiFi.status() != lastWifiState) {
@@ -996,68 +712,28 @@ void WLED::loop() {
     DEBUG_PRINTLN(F("---END OF DEBUG INFO---"));
   }
   loops++;
-#endif
-#ifdef WLED_DEBUG_HEAP
+  #endif
+  #ifdef WLED_DEBUG_HEAP
   if (millis() - debugTime > 4999) { // WLEDMM: Special case for debugging heap faster
     DEBUG_PRINT(F("*** Free heap: "));     DEBUG_PRINT(heap_caps_get_free_size(0x1800));
     DEBUG_PRINT(F("\tLargest free block: "));     DEBUG_PRINT(heap_caps_get_largest_free_block(0x1800));
     DEBUG_PRINT(F(" *** \t\tArduino min free stack: ")); DEBUG_PRINT(uxTaskGetStackHighWaterMark(NULL));
-  #if INCLUDE_xTaskGetHandle
+    #if INCLUDE_xTaskGetHandle
     DEBUG_PRINT(F("   TCP min free stack: ")); DEBUG_PRINT(wledmm_get_tcp_stacksize());
-  #endif
+    #endif
     DEBUG_PRINTLN(F(" ***"));
-
   }
-#endif        // WLED_DEBUG_HEAP
-
-//   app_message_t msg;
-
-// #ifdef SOC_USB_OTG_SUPPORTED
-//   // Poll for messages without blocking
-//   if (xQueueReceive(app_queue, &msg, 0)) {
-//     switch (msg.id) {
-//     case 1: {
-//       int slot;
-//       if (allocate_new_msc_device(&msg, &slot) == ESP_OK) {
-//         // USER_PRINTLN("USB Disk Connected");
-//         msc_host_device_info_t info;
-//         ESP_ERROR_CHECK_WITHOUT_ABORT(msc_host_get_device_info(msc_devices[slot]->msc_device, &info));
-//         print_device_info(&info);
-//         // show_list_files_all_devices();
-//         USER_PRINTLN("ImageCache started");
-//         ImageCacheManager::getInstance().startPreload("/usb0");
-//       } else {
-//         USER_PRINTLN("USB operation failed. Try replugging?");
-//       }
-//       break;
-//     }
-
-//     case 2: {
-//       USER_PRINTLN("USB Device Disconnected");
-
-//       int slot = find_slot_by_handle(msg.data.device_handle);
-//       if (slot >= 0) {
-//         free_msc_device(slot);
-//       }
-//       break;
-//     }
-
-//     default:
-//       USER_PRINTF("Unknown USB Error message ID: %d\n", msg.id);
-//       break;
-//     }
-//   }
-// #endif // SOC_USB_OTG_SUPPORTED
+  #endif        // WLED_DEBUG_HEAP
 
   toki.resetTick();
 
-#if WLED_WATCHDOG_TIMEOUT > 0
-  // we finished our mainloop, reset the watchdog timer
-  // if (!strip.isUpdating())
-    esp_task_wdt_reset();
-#endif
-    vTaskDelay(1);
-}
+  #if WLED_WATCHDOG_TIMEOUT > 0
+  esp_task_wdt_reset();
+  #endif
+
+  vTaskDelay(1);
+
+} // end main loop
   
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLEDMM_FASTPATH)
 #undef yield  // WLEDMM restore yield()
@@ -1583,24 +1259,12 @@ void WLED::setup() {
     // #endif
   }
 
-  #ifdef WLED_ENABLE_ADALIGHT
-  //Serial RX (Adalight, Improv, Serial JSON) only possible if GPIO3 unused
-  //Serial TX (Debug, Improv, Serial JSON) only possible if GPIO1 unused
-  if (!pinManager.isPinAllocated(hardwareRX) && !pinManager.isPinAllocated(hardwareTX)) {
-    if (Serial) Serial.println(F("\nAda"));
-  }
-  #endif
-
   // fill in unique mdns default
   sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
 
 #ifndef WLED_DISABLE_MQTT
   if (mqttDeviceTopic[0] == 0) sprintf_P(mqttDeviceTopic, PSTR("wled/%*s"), 6, escapedMac.c_str() + 6);
   if (mqttClientID[0] == 0)    sprintf_P(mqttClientID, PSTR("WLED-%*s"), 6, escapedMac.c_str() + 6);
-#endif
-
-#ifdef WLED_ENABLE_ADALIGHT
-  if (Serial && (Serial.available() > 0) && (Serial.peek() == 'I')) handleImprovPacket();
 #endif
 
 #ifndef WLED_DISABLE_OTA
@@ -1622,10 +1286,6 @@ void WLED::setup() {
 #endif
 #ifdef WLED_ENABLE_DMX_INPUT
   dmxInput.init(dmxInputReceivePin, dmxInputTransmitPin, dmxInputEnablePin, dmxInputPort);
-#endif
-
-#ifdef WLED_ENABLE_ADALIGHT
-  if (Serial && (Serial.available() > 0) && (Serial.peek() == 'I')) handleImprovPacket();
 #endif
 
   // HTTP server page init
@@ -1716,12 +1376,6 @@ void WLED::setup() {
 
   delay(50);
   
-  #ifdef WLED_ENABLE_ADALIGHT // repeat Ada prompt
-  if (!pinManager.isPinAllocated(hardwareRX) && !pinManager.isPinAllocated(hardwareTX)) {
-    if (Serial) Serial.println(F("\nAda"));
-  }
-  #endif
-
   xSemaphoreGive(busMutex);
 
   xTaskCreatePinnedToCore(
