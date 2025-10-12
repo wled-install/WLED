@@ -295,7 +295,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32
       } else if (i <= outputs) {
         if (parlio_config.data_gpio_nums[i] == -1) status = "[missing]";
       }
-      USER_PRINTF("Parallel IO Output %u = GPIO %d %s\n",
+      DEBUG_PRINTF("Parallel IO Output %u = GPIO %d %s\n",
                   (unsigned int)(i + 1),
                   parlio_config.data_gpio_nums[i],
                   status);

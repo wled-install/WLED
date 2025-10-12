@@ -180,7 +180,6 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
       uint8_t i = 0;
       for (int p : pinArr) {
         pins[i++] = p;
-        USER_PRINTF("Setting pin %d to %d\n",i,p);
         if (i>16) break;
       }
 
@@ -827,7 +826,7 @@ void serializeConfig() {
     uint8_t nPins = bus->getPins(pins);
     for (uint8_t i = 0; i < nPins; i++) {
       ins_pin.add(pins[i]);
-      USER_PRINTF("Adding ins_pin pin[%d] with value %d\n", i, pins[i]);
+      // USER_PRINTF("Adding ins_pin pin[%d] with value %d\n", i, pins[i]);
     }
     ins[F("order")] = bus->getColorOrder();
     ins["rev"] = bus->reversed;
