@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: ${{ fromJSON(needs.get_default_envs.outputs.environments) }}
+        environment: esp32p4_8MB_troyhacks_personal # ${{ fromJSON(needs.get_default_envs.outputs.environments) }}
     steps:
     - uses: actions/checkout@v4
     - name: Cache pip
@@ -63,7 +63,7 @@ jobs:
     - name: Install dependencies
       run: |
         uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.18.zip
-        pio pkg install --global --platform file://.
+        pio pkg install --global --environment ${{ matrix.environment }}
     - name: Build firmware
       env:
         WLED_RELEASE: True
