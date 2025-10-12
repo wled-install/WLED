@@ -7,7 +7,7 @@
 #include "freertos/semphr.h"
 #include "PSRAM_Allocator.h"
 #ifndef IMAGECACHE_BG_PRIORITY
-  #define IMAGECACHE_BG_PRIORITY = 5
+  #define IMAGECACHE_BG_PRIORITY 5
 #endif
 
 // The state of the caching process
