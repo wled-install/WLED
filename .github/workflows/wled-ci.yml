@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: esp32p4_8MB_troyhacks_personal # ${{ fromJSON(needs.get_default_envs.outputs.environments) }}
+        environment: "esp32p4_8MB_troyhacks_personal" # ${{ fromJSON(needs.get_default_envs.outputs.environments) }}
     steps:
     - uses: actions/checkout@v4
     - name: Cache pip
