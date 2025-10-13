@@ -439,9 +439,6 @@ void initServer()
     }
 
     if(handleSet(request, request->url())) return;
-    #ifndef WLED_DISABLE_ALEXA
-    if(espalexa.handleAlexaApiCall(request)) return;
-    #endif
     if(handleFileRead(request, request->url())) return;
     AsyncWebServerResponse *response = request->beginResponse_P(404, "text/html", PAGE_404, PAGE_404_length);
     response->addHeader(FPSTR(s_content_enc),"gzip");

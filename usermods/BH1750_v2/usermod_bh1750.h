@@ -197,22 +197,6 @@ public:
     {
       lastLux = lux;
       lastSend = millis();
-#ifndef WLED_DISABLE_MQTT
-      if (WLED_MQTT_CONNECTED)
-      {
-        if (!mqttInitialized)
-          {
-            _mqttInitialize();
-            mqttInitialized = true;
-          }
-        mqtt->publish(mqttLuminanceTopic.c_str(), 0, true, String(lux).c_str());
-        DEBUG_PRINTLN(String("Brightness: ") + String(lux) + String("lx"));  // WLEDMM fix compilation warning
-      }
-      else
-      {
-        DEBUG_PRINTLN(F("Missing MQTT connection. Not publishing data"));
-      }
-#endif
     }
   }
 

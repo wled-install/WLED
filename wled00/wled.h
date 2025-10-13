@@ -52,12 +52,6 @@
 //#define WLED_DISABLE_OTA         // saves 14kb
 
 // You can choose some of these features to disable:
-//#define WLED_DISABLE_ALEXA       // saves 11kb
-//#define WLED_DISABLE_HUESYNC     // saves 4kb
-//#define WLED_DISABLE_INFRARED    // saves 12kb, there is no pin left for this on ESP8266-01
-#ifndef WLED_DISABLE_MQTT
-  #define WLED_ENABLE_MQTT         // saves 12kb
-#endif
 //#define WLED_ENABLE_DMX          // uses 3.5kb (use LEDPIN other than 2)
 //#define WLED_ENABLE_DMX_INPUT      // Listen for DMX over Serial
 //#define WLED_ENABLE_JSONLIVE     // peek LED output via /json/live (WS binary peek is always enabled)
@@ -174,15 +168,6 @@
 #include "src/dependencies/timezone/Timezone.h"
 #include "src/dependencies/toki/Toki.h"
 
-#ifndef WLED_DISABLE_ALEXA
-  #define ESPALEXA_ASYNC
-  #define ESPALEXA_NO_SUBPAGE
-  #define ESPALEXA_MAXDEVICES 10
-  // #define ESPALEXA_DEBUG
-  #include "src/dependencies/espalexa/Espalexa.h"
-  #include "src/dependencies/espalexa/EspalexaDevice.h"
-#endif
-
 #ifdef WLED_ENABLE_DMX
  #ifdef ESP8266
   #include "src/dependencies/dmx/ESPDMX.h"
@@ -196,9 +181,6 @@
 #endif
 
 #include "src/dependencies/e131/ESPAsyncE131.h"
-#ifdef WLED_ENABLE_MQTT
-#include "src/dependencies/async-mqtt-client/AsyncMqttClient.h"
-#endif
 
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include "src/dependencies/json/AsyncJson-v6.h"
@@ -281,12 +263,6 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator<char>>;
   #error You are not using the Aircoookie fork of the ESPAsyncWebserver library.\
   Using upstream puts your WiFi password at risk of being served by the filesystem.\
   Comment out this error message to build regardless.
-#endif
-
-#ifndef WLED_DISABLE_INFRARED
-  #include <IRremoteESP8266.h>
-  #include <IRrecv.h>
-  #include <IRutils.h>
 #endif
 
 //Filesystem to use for preset and config files. SPIFFS or LittleFS on ESP8266, SPIFFS only on ESP32 (now using LITTLEFS port by lorol)
@@ -542,33 +518,6 @@ WLED_GLOBAL uint16_t pollReplyCount _INIT(0);                     // count numbe
 
 // mqtt
 WLED_GLOBAL unsigned long lastMqttReconnectAttempt _INIT(0);  // used for other periodic tasks too
-#ifndef WLED_DISABLE_MQTT
-WLED_GLOBAL AsyncMqttClient *mqtt _INIT(NULL);
-WLED_GLOBAL bool mqttEnabled _INIT(false);
-WLED_GLOBAL char mqttStatusTopic[40] _INIT("");            // this must be global because of async handlers
-WLED_GLOBAL char mqttDeviceTopic[33] _INIT("");            // main MQTT topic (individual per device, default is wled/mac)
-WLED_GLOBAL char mqttGroupTopic[33] _INIT("wled/all");     // second MQTT topic (for example to group devices)
-WLED_GLOBAL char mqttServer[33] _INIT("");                 // both domains and IPs should work (no SSL)
-WLED_GLOBAL char mqttUser[41] _INIT("");                   // optional: username for MQTT auth
-WLED_GLOBAL char mqttPass[65] _INIT("");                   // optional: password for MQTT auth
-WLED_GLOBAL char mqttClientID[41] _INIT("");               // override the client ID
-WLED_GLOBAL uint16_t mqttPort _INIT(1883);
-WLED_GLOBAL bool retainMqttMsg _INIT(false);               // retain brightness and color
-#define WLED_MQTT_CONNECTED (mqtt != nullptr && mqtt->connected())
-#else
-#define WLED_MQTT_CONNECTED false
-#endif
-
-#ifndef WLED_DISABLE_HUESYNC
-WLED_GLOBAL bool huePollingEnabled _INIT(false);           // poll hue bridge for light state
-WLED_GLOBAL uint16_t huePollIntervalMs _INIT(2500);        // low values (< 1sec) may cause lag but offer quicker response
-WLED_GLOBAL char hueApiKey[47] _INIT("api");               // key token will be obtained from bridge
-WLED_GLOBAL byte huePollLightId _INIT(1);                  // ID of hue lamp to sync to. Find the ID in the hue app ("about" section)
-WLED_GLOBAL IPAddress hueIP _INIT_N(((0, 0, 0, 0))); // IP address of the bridge
-WLED_GLOBAL bool hueApplyOnOff _INIT(true);
-WLED_GLOBAL bool hueApplyBri _INIT(true);
-WLED_GLOBAL bool hueApplyColor _INIT(true);
-#endif
 
 WLED_GLOBAL uint16_t serialBaud _INIT(1152); // serial baud rate, multiply by 100
 
@@ -748,10 +697,6 @@ WLED_GLOBAL byte interfaceUpdateCallMode _INIT(CALL_MODE_INIT);
 
 // alexa udp
 WLED_GLOBAL String escapedMac;
-#ifndef WLED_DISABLE_ALEXA
-  WLED_GLOBAL Espalexa espalexa;
-  WLED_GLOBAL EspalexaDevice* espalexaDevice;
-#endif
 
 // dns server
 WLED_GLOBAL DNSServer dnsServer;

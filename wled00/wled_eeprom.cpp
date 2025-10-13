@@ -166,23 +166,7 @@ void loadSettingsFromEEPROM()
   receiveNotifications = (receiveNotificationBrightness || receiveNotificationColor || receiveNotificationEffects);
 
   if (lastEEPROMversion > 4) {
-    #ifndef WLED_DISABLE_HUESYNC
-    huePollingEnabled = EEPROM.read(2048);
-    //hueUpdatingEnabled = EEPROM.read(2049);
-    for (int i = 2050; i < 2054; ++i)
-    {
-      hueIP[i-2050] = EEPROM.read(i);
-    }
 
-    readStringFromEEPROM(2054, hueApiKey, 46);
-
-    huePollIntervalMs = EEPROM.read(2100) + ((EEPROM.read(2101) << 8) & 0xFF00);
-    notifyHue = EEPROM.read(2102);
-    hueApplyOnOff = EEPROM.read(2103);
-    hueApplyBri = EEPROM.read(2104);
-    hueApplyColor = EEPROM.read(2105);
-    huePollLightId = EEPROM.read(2106);
-    #endif
   }
   if (lastEEPROMversion > 5) {
     overlayMin = EEPROM.read(2150);

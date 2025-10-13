@@ -219,39 +219,6 @@ class BobLightUsermod : public Usermod {
 
     void enable(bool en) { enabled = en; }
     
-#ifndef WLED_DISABLE_MQTT
-    /**
-     * handling of MQTT message
-     * topic only contains stripped topic (part after /wled/MAC)
-     * topic should look like: /swipe with amessage of [up|down]
-     */
-    bool onMqttMessage(char* topic, char* payload) {
-      //if (strlen(topic) == 6 && strncmp_P(topic, PSTR("/subtopic"), 6) == 0) {
-      //  String action = payload;
-      //  if (action == "on") {
-      //    enable(true);
-      //    return true;
-      //  } else if (action == "off") {
-      //    enable(false);
-      //    return true;
-      //  }
-      //}
-      return false;
-    }
-
-    /**
-     * subscribe to MQTT topic for controlling usermod
-     */
-    void onMqttConnect(bool sessionPresent) {
-      //char subuf[64];
-      //if (mqttDeviceTopic[0] != 0) {
-      //  strcpy(subuf, mqttDeviceTopic);
-      //  strcat_P(subuf, PSTR("/subtopic"));
-      //  mqtt->subscribe(subuf, 0);
-      //}
-    }
-#endif
-
     void addToJsonInfo(JsonObject& root)
     {
       JsonObject user = root["u"];

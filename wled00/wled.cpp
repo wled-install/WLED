@@ -418,8 +418,9 @@ void WLED::reset()
 #define yield() {}  // WLEDMM yield() is completely unnecessary on esp32. See https://github.com/espressif/arduino-esp32/issues/1385
 #endif
 
-void background_loop(void* pvParameters) {
-  while (true) {
+void background_loop_blocking(void* pvParameters) {
+  for (;;) {
+
     #ifdef WLED_DEBUG
     // esp_log_level_set("*",ESP_LOG_VERBOSE);
     static unsigned long maxUsermodMillis = 0;
@@ -427,33 +428,7 @@ void background_loop(void* pvParameters) {
     static unsigned long maxStripMillis = 0;
     static uint16_t avgStripMillis = 0;
     #endif
-    handleTime();
-    #ifndef WLED_DISABLE_INFRARED
-    handleIR();        // 2nd call to function needed for ESP32 to return valid results -- should be good for ESP8266, too
-    #endif
-    WLED::handleConnection();
-    #ifndef WLED_DISABLE_ESPNOW
-    handleRemote();
-    #endif
-    handleSerial();
-    #ifndef WLED_DISABLE_IMPROV_WIFISCAN
-    handleImprovWifiScan();
-    #endif
 
-    handleNotifications();
-    handleTransitions();
-
-    #ifdef WLED_ENABLE_DMX
-    handleDMXOutput();
-    #endif
-    #ifdef WLED_ENABLE_DMX_INPUT
-    dmxInput.update();
-    #endif
-    userLoop();
-
-    #ifdef WLED_DEBUG
-    unsigned long usermodMillis = millis();
-    #endif
 
     if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
       usermods.loop();
@@ -465,8 +440,6 @@ void background_loop(void* pvParameters) {
     avgUsermodMillis += usermodMillis;
     if (usermodMillis > maxUsermodMillis) maxUsermodMillis = usermodMillis;
     #endif
-
-    handleIO();
 
     if (doCloseFile) {
       if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
@@ -520,13 +493,63 @@ void background_loop(void* pvParameters) {
       xSemaphoreGive(busMutex);
     }
 
-    #ifndef WLED_DISABLE_INFRARED
-    handleIR();
+    if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
+
+      if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+        handlePlaylist();
+        handlePresets();
+        usermods.loop2();
+        xSemaphoreGive(busMutex);
+      }
+
+    }
+
+    vTaskDelay(1);
+
+  }
+}
+
+void background_loop_nonblocking(void* pvParameters) {
+  for (;;) {
+    #ifdef WLED_DEBUG
+    // esp_log_level_set("*",ESP_LOG_VERBOSE);
+    static unsigned long maxUsermodMillis = 0;
+    static uint16_t avgUsermodMillis = 0;
+    static unsigned long maxStripMillis = 0;
+    static uint16_t avgStripMillis = 0;
+    #endif
+    handleTime();
+    WLED::handleConnection();
+    #ifndef WLED_DISABLE_ESPNOW
+    handleRemote();
+    #endif
+    handleSerial();
+    #ifndef WLED_DISABLE_IMPROV_WIFISCAN
+    handleImprovWifiScan();
     #endif
 
-    #ifndef WLED_DISABLE_ALEXA
-    handleAlexa();
+    handleNotifications();
+    handleTransitions();
+
+    #ifdef WLED_ENABLE_DMX
+    handleDMXOutput();
     #endif
+    #ifdef WLED_ENABLE_DMX_INPUT
+    dmxInput.update();
+    #endif
+    userLoop();
+
+    #ifdef WLED_DEBUG
+    unsigned long usermodMillis = millis();
+    #endif
+
+    #ifdef WLED_DEBUG
+    usermodMillis = millis() - usermodMillis;
+    avgUsermodMillis += usermodMillis;
+    if (usermodMillis > maxUsermodMillis) maxUsermodMillis = usermodMillis;
+    #endif
+
+    handleIO();
 
     if (doReboot && !doInitBusses) { // if busses have to be inited & saved, wait until next iteration
       WLED::reset();
@@ -541,17 +564,6 @@ void background_loop(void* pvParameters) {
       #endif
 
       handleNightlight();
-      
-      #ifndef WLED_DISABLE_HUESYNC
-      handleHue();
-      #endif
-
-      if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-        handlePlaylist();
-        handlePresets();
-        usermods.loop2();
-        xSemaphoreGive(busMutex);
-      }
 
     }
 
@@ -564,11 +576,6 @@ void background_loop(void* pvParameters) {
 
     if (millis() - lastMqttReconnectAttempt > 30000 || lastMqttReconnectAttempt == 0) { // lastMqttReconnectAttempt==0 forces immediate broadcast
       lastMqttReconnectAttempt = millis();
-
-      #ifndef WLED_DISABLE_MQTT
-      initMqtt();
-      #endif
-
       refreshNodeList(); // refresh WLED nodes list
       if (nodeBroadcastEnabled) sendSysInfoUDP();
     }
@@ -1262,11 +1269,6 @@ void WLED::setup() {
   // fill in unique mdns default
   sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
 
-#ifndef WLED_DISABLE_MQTT
-  if (mqttDeviceTopic[0] == 0) sprintf_P(mqttDeviceTopic, PSTR("wled/%*s"), 6, escapedMac.c_str() + 6);
-  if (mqttClientID[0] == 0)    sprintf_P(mqttClientID, PSTR("WLED-%*s"), 6, escapedMac.c_str() + 6);
-#endif
-
 #ifndef WLED_DISABLE_OTA
   if (aOtaEnabled) {
     ArduinoOTA.onStart([]() {
@@ -1379,7 +1381,17 @@ void WLED::setup() {
   xSemaphoreGive(busMutex);
 
   xTaskCreatePinnedToCore(
-    background_loop,  // Task function
+    background_loop_blocking,  // Task function
+    "BG_Blocking",     // Name
+    24000,            // Stack size in words
+    NULL,             // Parameters
+    1,                // Priority
+    NULL,             // Task handle (optional)
+    0                 // Core ID (0 or 1)
+  );
+
+  xTaskCreatePinnedToCore(
+    background_loop_nonblocking,  // Task function
     "Background",     // Name
     24000,            // Stack size in words
     NULL,             // Parameters
@@ -1693,43 +1705,7 @@ void WLED::initInterfaces()
 {
   DEBUG_PRINTLN(F("Init STA interfaces"));
 
-#ifndef WLED_DISABLE_HUESYNC
-  IPAddress ipAddress = Network.localIP();
-  if (hueIP[0] == 0) {
-    hueIP[0] = ipAddress[0];
-    hueIP[1] = ipAddress[1];
-    hueIP[2] = ipAddress[2];
-  }
-#endif
-
 // aOtaEnabled=false; strcpy(cmDNS, ""); // WLEDMM use this to disable OTA and mDNS
-
-//WLEDMM: add netdebug variables
-#ifdef WLED_DEBUG_HOST
-  if (netDebugPrintIP[0] == 0) {
-    //WLEDMM: this code moved from net_debug.cpp as we store IP as IPAddress type
-    if (!netDebugPrintIP && !netDebugPrintIP.fromString(WLED_DEBUG_HOST)) {
-      Network.hostByName(WLED_DEBUG_HOST, netDebugPrintIP);
-    } else {
-      IPAddress ndIpAddress = Network.localIP();
-      netDebugPrintIP[0] = ndIpAddress[0];
-      netDebugPrintIP[1] = ndIpAddress[1];
-      netDebugPrintIP[2] = ndIpAddress[2];
-    }
-  }
-  if (netDebugPrintPort == 0) 
-    #ifdef WLED_DEBUG_PORT
-      netDebugPrintPort = WLED_DEBUG_PORT;
-    #else
-      netDebugPrintPort = 7868; //Default value
-    #endif
-#endif
-
-#ifndef WLED_DISABLE_ALEXA
-  // init Alexa hue emulation
-  if (alexaEnabled)
-    alexaInit();
-#endif
 
 #ifndef WLED_DISABLE_OTA
   if (aOtaEnabled)
@@ -1769,12 +1745,6 @@ void WLED::initInterfaces()
 
   e131.begin(e131Multicast, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
   ddp.begin(false, DDP_DEFAULT_PORT);
-#ifndef WLED_DISABLE_HUESYNC
-  reconnectHue();
-#endif
-#ifndef WLED_DISABLE_MQTT
-  initMqtt();
-#endif
   interfacesInited = true;
   wasConnected = true;
 }

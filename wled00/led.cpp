@@ -173,12 +173,6 @@ void updateInterfaces(uint8_t callMode)
 
   if (callMode == CALL_MODE_WS_SEND) return;
 
-  #ifndef WLED_DISABLE_ALEXA
-  if (espalexaDevice != nullptr && callMode != CALL_MODE_ALEXA) {
-    espalexaDevice->setValue(bri);
-    espalexaDevice->setColor(col[0], col[1], col[2]);
-  }
-  #endif
   doPublishMqtt = true;
 }
 
@@ -187,9 +181,6 @@ void handleTransitions()
 {
   //handle still pending interface update
   updateInterfaces(interfaceUpdateCallMode);
-#ifndef WLED_DISABLE_MQTT
-  if (doPublishMqtt) publishMqtt();
-#endif
 
   if (transitionActive && transitionDelayTemp > 0)
   {

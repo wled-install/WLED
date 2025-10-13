@@ -101,23 +101,6 @@ void userLoop() {
   if (temptimer - lastMeasure > 60000) 
   {
     lastMeasure = temptimer;    
-#ifndef WLED_DISABLE_MQTT
-//Check if MQTT Connected, otherwise it will crash the 8266
-    if (mqtt != nullptr)
-    {
-//      Serial.println(Dallas(DALLAS_PIN,0));
-//Gets preferred temperature scale based on selection in definitions section
-        #ifdef Celsius
-        int16_t board_temperature = Dallas(DALLAS_PIN,0);
-        #else
-        int16_t board_temperature = (Dallas(DALLAS_PIN,0)* 1.8 + 32);
-        #endif
-//Create character string populated with user defined device topic from the UI, and the read temperature. Then publish to MQTT server.
-        String t = String(mqttDeviceTopic);
-        t += "/temperature";
-        mqtt->publish(t.c_str(), 0, true, String(board_temperature).c_str());
-    }
-  #endif
   }
 
   // Check if we time interval for redrawing passes.

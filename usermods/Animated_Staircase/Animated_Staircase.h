@@ -92,14 +92,7 @@ class Animated_Staircase : public Usermod {
     static const char _bottomEchoCm[];
     
     void publishMqtt(bool bottom, const char* state) {
-#ifndef WLED_DISABLE_MQTT
-      //Check if MQTT Connected, otherwise it will crash the 8266
-      if (WLED_MQTT_CONNECTED){
-        char subuf[64];
-        sprintf_P(subuf, PSTR("%s/motion/%d"), mqttDeviceTopic, (int)bottom);
-        mqtt->publish(subuf, 0, false, state);
-      }
-#endif
+
     }
 
     void updateSegments() {
@@ -180,18 +173,12 @@ class Animated_Staircase : public Usermod {
         if (bottomSensorRead != bottomSensorState) {
           bottomSensorState = bottomSensorRead; // change previous state
           sensorChanged = true;
-          #ifndef WLED_DISABLE_MQTT
-            publishMqtt(true, bottomSensorState ? "on" : "off");
-          #endif
           DEBUG_PRINTLN(F("Bottom sensor changed."));
         }
 
         if (topSensorRead != topSensorState) {
           topSensorState = topSensorRead; // change previous state
           sensorChanged = true;
-          #ifndef WLED_DISABLE_MQTT
-            publishMqtt(false, topSensorState ? "on" : "off");
-          #endif
           DEBUG_PRINTLN(F("Top sensor changed."));
         }
 
@@ -361,46 +348,6 @@ class Animated_Staircase : public Usermod {
     }
 
     uint16_t getId() { return USERMOD_ID_ANIMATED_STAIRCASE; }
-
-#ifndef WLED_DISABLE_MQTT
-    /**
-     * handling of MQTT message
-     * topic only contains stripped topic (part after /wled/MAC)
-     * topic should look like: /swipe with amessage of [up|down]
-     */
-    bool onMqttMessage(char* topic, char* payload) {
-      if (strlen(topic) == 6 && strncmp_P(topic, PSTR("/swipe"), 6) == 0) {
-        String action = payload;
-        if (action == "up") {
-          bottomSensorWrite = true;
-          return true;
-        } else if (action == "down") {
-          topSensorWrite = true;
-          return true;
-        } else if (action == "on") {
-          enable(true);
-          return true;
-        } else if (action == "off") {
-          enable(false);
-          return true;
-        }
-      }
-      return false;
-    }
-
-    /**
-     * subscribe to MQTT topic for controlling usermod
-     */
-    void onMqttConnect(bool sessionPresent) {
-      //(re)subscribe to required topics
-      char subuf[64];
-      if (mqttDeviceTopic[0] != 0) {
-        strcpy(subuf, mqttDeviceTopic);
-        strcat_P(subuf, PSTR("/swipe"));
-        mqtt->subscribe(subuf, 0);
-      }
-    }
-#endif
 
     void addToJsonState(JsonObject& root) {
       JsonObject staircase = root[FPSTR(_name)];

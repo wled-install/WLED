@@ -45,16 +45,6 @@ public:
     float newmcutemp = roundf(temperatureRead() * 10) / 10;
     if (abs(newmcutemp - 53.3f) > 0.05f) mcutemp = (mcutemp + 2.0f * newmcutemp) / 3.0f;  // skip error value (128 => 53.3deg), apply some filtering
 #endif
-
-#ifndef WLED_DISABLE_MQTT
-    if (millis() - lastMQQTTime > 15000)
-    {
-      char array[10];
-      snprintf(array, sizeof(array), "%3.1f", mcutemp);
-      publishMqtt(array);
-      lastMQQTTime = millis();
-    }
-#endif
     lastTime = millis();
   }
   /*
@@ -120,14 +110,4 @@ public:
 
 void mcuTemp::publishMqtt(const char *state, bool retain)
 {
-#ifndef WLED_DISABLE_MQTT
-  // Check if MQTT Connected, otherwise it will crash the 8266
-  if (WLED_MQTT_CONNECTED)
-  {
-    char subuf[64];
-    strcpy(subuf, mqttDeviceTopic);
-    strcat_P(subuf, PSTR("/mcutemp"));
-    mqtt->publish(subuf, 0, retain, state);
-  }
-#endif
 }

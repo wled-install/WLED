@@ -56,9 +56,6 @@ class UsermodTemperature : public Usermod {
     void requestTemperatures();
     void readTemperature();
     bool findSensor();
-#ifndef WLED_DISABLE_MQTT
-    void publishHomeAssistantAutodiscovery();
-#endif
 
   public:
 
@@ -75,9 +72,6 @@ class UsermodTemperature : public Usermod {
     void setup();
     void loop();
     //void connected();
-#ifndef WLED_DISABLE_MQTT
-    void onMqttConnect(bool sessionPresent);
-#endif
     //void onUpdateBegin(bool init);
 
     //bool handleButton(uint8_t b);
@@ -174,30 +168,6 @@ bool UsermodTemperature::findSensor() {
   return false;
 }
 
-#ifndef WLED_DISABLE_MQTT
-void UsermodTemperature::publishHomeAssistantAutodiscovery() {
-  if (!WLED_MQTT_CONNECTED) return;
-
-  char json_str[1024], buf[128];
-  size_t payload_size;
-  StaticJsonDocument<1024> json;
-
-  sprintf_P(buf, PSTR("%s Temperature"), serverDescription);
-  json[F("name")] = buf;
-  strcpy(buf, mqttDeviceTopic);
-  strcat_P(buf, PSTR("/temperature"));
-  json[F("state_topic")] = buf;
-  json[F("device_class")] = F("temperature");
-  json[F("unique_id")] = escapedMac.c_str();
-  json[F("unit_of_measurement")] = F("°C");
-  payload_size = serializeJson(json, json_str);
-
-  sprintf_P(buf, PSTR("homeassistant/sensor/%s/config"), escapedMac.c_str());
-  mqtt->publish(buf, 0, true, json_str, payload_size);
-  HApublished = true;
-}
-#endif
-
 void UsermodTemperature::setup() {
   int retries = 10;
   sensorFound = 0;
@@ -257,24 +227,6 @@ void UsermodTemperature::loop() {
       return;
     }
     errorCount = 0;
-
-#ifndef WLED_DISABLE_MQTT
-    if (WLED_MQTT_CONNECTED) {
-      char subuf[64];
-      strcpy(subuf, mqttDeviceTopic);
-      if (temperature > -100.0f) {
-        // dont publish super low temperature as the graph will get messed up
-        // the DallasTemperature library returns -127C or -196.6F when problem
-        // reading the sensor
-        strcat_P(subuf, PSTR("/temperature"));
-        mqtt->publish(subuf, 0, false, String(getTemperatureC()).c_str());
-        strcat_P(subuf, PSTR("_f"));
-        mqtt->publish(subuf, 0, false, String(getTemperatureF()).c_str());
-      } else {
-        // publish something else to indicate status?
-      }
-    }
-#endif
   }
 }
 
@@ -283,19 +235,6 @@ void UsermodTemperature::loop() {
  * Use it to initialize network interfaces
  */
 //void UsermodTemperature::connected() {}
-
-#ifndef WLED_DISABLE_MQTT
-/**
- * subscribe to MQTT topic if needed
- */
-void UsermodTemperature::onMqttConnect(bool sessionPresent) {
-  //(re)subscribe to required topics
-  //char subuf[64];
-  if (mqttDeviceTopic[0] != 0) {
-    publishHomeAssistantAutodiscovery();
-  }
-}
-#endif
 
 /*
   * addToJsonInfo() can be used to add custom entries to the /json/info part of the JSON API.

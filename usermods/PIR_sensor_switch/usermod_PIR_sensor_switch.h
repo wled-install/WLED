@@ -156,51 +156,11 @@ private:
 
   void publishMqtt(const char* state)
   {
-  #ifndef WLED_DISABLE_MQTT
-    //Check if MQTT Connected, otherwise it will crash the 8266
-    if (WLED_MQTT_CONNECTED) {
-      char subuf[64];
-      strcpy(subuf, mqttDeviceTopic);
-      strcat_P(subuf, PSTR("/motion"));
-      mqtt->publish(subuf, 0, false, state);
-    }
-  #endif
   }
 
   // Create an MQTT Binary Sensor for Home Assistant Discovery purposes, this includes a pointer to the topic that is published to in the Loop.
   void publishHomeAssistantAutodiscovery()
   {
-  #ifndef WLED_DISABLE_MQTT
-    if (WLED_MQTT_CONNECTED) {
-      StaticJsonDocument<600> doc;
-      char uid[24], json_str[1024], buf[128];
-
-      sprintf_P(buf, PSTR("%s Motion"), serverDescription); //max length: 33 + 7 = 40
-      doc[F("name")] = buf;
-      sprintf_P(buf, PSTR("%s/motion"), mqttDeviceTopic);   //max length: 33 + 7 = 40
-      doc[F("stat_t")] = buf;
-      doc[F("pl_on")]  = "on";
-      doc[F("pl_off")] = "off";
-      sprintf_P(uid, PSTR("%s_motion"), escapedMac.c_str());
-      doc[F("uniq_id")] = uid;
-      doc[F("dev_cla")] = F("motion");
-      doc[F("exp_aft")] = 1800;
-
-      JsonObject device = doc.createNestedObject(F("device")); // attach the sensor to the same device
-      device[F("name")] = serverDescription;
-      device[F("ids")]  = String(F("wled-sensor-")) + mqttClientID;
-      device[F("mf")] = F(WLED_BRAND); //WLEDMM + Moustachauve/Wled-Native
-      device[F("mdl")] = F(WLED_PRODUCT_NAME); //WLEDMM + Moustachauve/Wled-Native
-      device[F("sw")]   = versionString;
-      
-      sprintf_P(buf, PSTR("homeassistant/binary_sensor/%s/config"), uid);
-      DEBUG_PRINTLN(buf);
-      size_t payload_size = serializeJson(doc, json_str);
-      DEBUG_PRINTLN(json_str);
-
-      mqtt->publish(buf, 0, true, json_str, payload_size); // do we really need to retain?
-    }
-  #endif
   }
 
   /**

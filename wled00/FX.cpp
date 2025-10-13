@@ -9030,9 +9030,12 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   uint16_t box_start_y = SEGMENT.startY;
   uint16_t box_stop_x = SEGMENT.stop;
   uint16_t box_stop_y = SEGMENT.stopY;
+  uint16_t box_mirror_x = SEGMENT.mirror;
+  uint16_t box_mirror_y = SEGMENT.mirror_y;
+  
+   if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
 
-  if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
-
+  if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed  if (!SEGENV.allocateData(4)) return mode_static();
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
   }
@@ -9097,18 +9100,77 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   um_data_t* um_data = getAudioData();
   uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
 
+  uint8_t scaler = SEGMENT.check2 ? 2 : 1;
+
   for (int i = 0; i < 16; i++) {
-    fill_config.out.block_offset_x = i*(width/16);
-    int bar_height = map8(fftResult[i],0,height);
-    if (bar_height == 0) continue;
-    fill_config.out.block_offset_y = height-bar_height;
-    fill_config.fill_block_w =  width/16;
-    fill_config.fill_block_h = bar_height;
-    fill_config.fill_argb_color.r = beatsin8(60, 0, 255, i * 32, 0); // B
-    fill_config.fill_argb_color.g = beatsin8(60, 0, 255, i * 32, 85); // R
-    fill_config.fill_argb_color.b = beatsin8(60, 0, 255, i * 32, 170); // G
+
+    int x_start = (i * width) / (16 * scaler);
+    int x_end = ((i + 1) * width) / (16 * scaler);
+    int bar_width = x_end - x_start;
+
+    int unscaled_bar_height = map8(fftResult[i], 0, height);
+    int scaled_bar_height = unscaled_bar_height / scaler;
+
+    if (bar_width == 0 || scaled_bar_height == 0) {
+      continue;
+    }
+
+    fill_config.out.block_offset_x = x_start;
+    fill_config.fill_block_w = bar_width;
+
+    fill_config.out.block_offset_y = (height / scaler) - scaled_bar_height;
+    fill_config.fill_block_h = scaled_bar_height;
+
+    fill_config.fill_argb_color.r = beatsin8(60, 0, 255, i * 32, 0);
+    fill_config.fill_argb_color.g = beatsin8(60, 0, 255, i * 32, 85);
+    fill_config.fill_argb_color.b = beatsin8(60, 0, 255, i * 32, 170);
     fill_config.fill_argb_color.a = SEGMENT.intensity;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));  
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+  }
+
+  if (SEGMENT.check2) {
+
+    ppa_srm_oper_config_t srm_config = {};
+    srm_config.in.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
+    srm_config.out.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+    srm_config.in.block_offset_x = 0;
+    srm_config.in.block_offset_y = 0;
+    srm_config.in.buffer = fill_config.out.buffer;
+    srm_config.out.buffer = fill_config.out.buffer;
+    srm_config.out.buffer_size = fill_config.out.buffer_size;
+    srm_config.in.pic_w = width;
+    srm_config.in.pic_h = height;
+    srm_config.out.pic_w = width;
+    srm_config.out.pic_h = height;
+    srm_config.out.block_offset_x = 0;
+    srm_config.out.block_offset_y = 0;
+    srm_config.scale_x = 1;
+    srm_config.scale_y = 1;
+    srm_config.mirror_x = false;
+    srm_config.mirror_y = false;
+    srm_config.rgb_swap = 0;
+    srm_config.byte_swap = 0;
+    srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    srm_config.in.block_w = width / scaler;
+    srm_config.in.block_h = height / scaler;
+
+    srm_config.out.block_offset_x = width / scaler;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+    srm_config.mirror_y = true;
+    srm_config.out.block_offset_y = height / scaler;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+    srm_config.in.block_offset_y = 0;
+    srm_config.in.block_offset_x = width / scaler;
+    srm_config.in.block_h = height;
+    srm_config.mirror_x = true;
+    srm_config.out.block_offset_x = 0;
+    srm_config.out.block_offset_y = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
   }
 
   if (SEGMENT.check1 && SEGMENT.intensity != 255) {
@@ -9149,11 +9211,14 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
 
+    if (width != SEGMENT.maxWidth || height != SEGMENT.maxHeight)
+    ppa_srm_oper_config_t srm_config = {};
+
   }
   #endif
   return FRAMETIME;
 } // mode_GEQPPA()
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Check 2,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Ewowi Style,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
 
 #include <algorithm>
 #include <dirent.h>

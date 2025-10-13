@@ -601,76 +601,13 @@ void getSettingsJS(AsyncWebServerRequest* request, byte subPage, char* dest) //W
     sappend('c',SET_F("FB"),arlsForceMaxBri);
     sappend('c',SET_F("RG"),arlsDisableGammaCorrection);
     sappend('v',SET_F("WO"),arlsOffset);
-    sappend('c',SET_F("AL"),alexaEnabled);
-    sappends('s',SET_F("AI"),alexaInvocationName);
-    sappend('c',SET_F("SA"),notifyAlexa);
-    sappend('v',SET_F("AP"),alexaNumPresets);
-    #ifdef WLED_DISABLE_ALEXA
-    oappend(SET_F("toggle('Alexa');"));  // hide Alexa settings
-    #endif
 
-    #ifdef WLED_ENABLE_MQTT
-    sappend('c',SET_F("MQ"),mqttEnabled);
-    sappends('s',SET_F("MS"),mqttServer);
-    sappend('v',SET_F("MQPORT"),mqttPort);
-    sappends('s',SET_F("MQUSER"),mqttUser);
-    byte l = strlen(mqttPass);
-    char fpass[l+1]; //fill password field with ***
-    fpass[l] = 0;
-    memset(fpass,'*',l);
-    sappends('s',SET_F("MQPASS"),fpass);
-    sappends('s',SET_F("MQCID"),mqttClientID);
-    sappends('s',"MD",mqttDeviceTopic);
-    sappends('s',SET_F("MG"),mqttGroupTopic);
-    sappend('c',SET_F("BM"),buttonPublishMqtt);
-    sappend('c',SET_F("RT"),retainMqttMsg);
-    #else
+
     oappend(SET_F("toggle('MQTT');"));    // hide MQTT settings
-    #endif
-
-    #ifndef WLED_DISABLE_HUESYNC
-    sappend('v',SET_F("H0"),hueIP[0]);
-    sappend('v',SET_F("H1"),hueIP[1]);
-    sappend('v',SET_F("H2"),hueIP[2]);
-    sappend('v',SET_F("H3"),hueIP[3]);
-    sappend('v',SET_F("HL"),huePollLightId);
-    sappend('v',SET_F("HI"),huePollIntervalMs);
-    sappend('c',SET_F("HP"),huePollingEnabled);
-    sappend('c',SET_F("HO"),hueApplyOnOff);
-    sappend('c',SET_F("HB"),hueApplyBri);
-    sappend('c',SET_F("HC"),hueApplyColor);
-    char hueErrorString[25];
-    switch (hueError)
-    {
-      case HUE_ERROR_INACTIVE     : strcpy_P(hueErrorString,PSTR("Inactive"));                break;
-      case HUE_ERROR_ACTIVE       : strcpy_P(hueErrorString,PSTR("Active"));                  break;
-      case HUE_ERROR_UNAUTHORIZED : strcpy_P(hueErrorString,PSTR("Unauthorized"));            break;
-      case HUE_ERROR_LIGHTID      : strcpy_P(hueErrorString,PSTR("Invalid light ID"));        break;
-      case HUE_ERROR_PUSHLINK     : strcpy_P(hueErrorString,PSTR("Link button not pressed")); break;
-      case HUE_ERROR_JSON_PARSING : strcpy_P(hueErrorString,PSTR("JSON parsing error"));      break;
-      case HUE_ERROR_TIMEOUT      : strcpy_P(hueErrorString,PSTR("Timeout"));                 break;
-      default: sprintf_P(hueErrorString,PSTR("Bridge Error %i"),hueError);
-    }
-
-    sappends('m',SET_F("(\"sip\")[0]"),hueErrorString);
-    #else
+    oappend(SET_F("toggle('Alexa');"));  // hide Alexa settings
     oappend(SET_F("toggle('Hue');"));    // hide Hue Sync settings
-    #endif
-
-    //WLEDMM: add netdebug variables
-    #ifdef WLED_DEBUG_HOST
-      sappend('v',SET_F("N0"),netDebugPrintIP[0]);
-      sappend('v',SET_F("N1"),netDebugPrintIP[1]);
-      sappend('v',SET_F("N2"),netDebugPrintIP[2]);
-      sappend('v',SET_F("N3"),netDebugPrintIP[3]);
-      sappend('v',SET_F("NP"),netDebugPrintPort);
-    #endif
-    
+    oappend(SET_F("toggle('NetDebug');"));    // hide Hue Sync settings
     sappend('v',SET_F("BD"),serialBaud);
-
-#ifdef WLED_ENABLE_LOXONE
-    oappend(SET_F("hideNoLOX();"));  // WLEDMM hide "not compiled in" message    
-#endif
 
   }
 

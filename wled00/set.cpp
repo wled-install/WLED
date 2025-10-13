@@ -396,40 +396,6 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     t = request->arg(F("AP")).toInt();
     if (t >= 0 && t <= 9) alexaNumPresets = t;
 
-    #ifdef WLED_ENABLE_MQTT
-    mqttEnabled = request->hasArg(F("MQ"));
-    strlcpy(mqttServer, request->arg(F("MS")).c_str(), 33);
-    t = request->arg(F("MQPORT")).toInt();
-    if (t > 0) mqttPort = t;
-    strlcpy(mqttUser, request->arg(F("MQUSER")).c_str(), 41);
-    if (!isAsterisksOnly(request->arg(F("MQPASS")).c_str(), 41)) strlcpy(mqttPass, request->arg(F("MQPASS")).c_str(), 65);
-    strlcpy(mqttClientID, request->arg(F("MQCID")).c_str(), 41);
-    strlcpy(mqttDeviceTopic, request->arg(F("MD")).c_str(), 33);
-    strlcpy(mqttGroupTopic, request->arg(F("MG")).c_str(), 33);
-    buttonPublishMqtt = request->hasArg(F("BM"));
-    retainMqttMsg = request->hasArg(F("RT"));
-    #endif
-
-    #ifndef WLED_DISABLE_HUESYNC
-    for (int i=0;i<4;i++){
-      String a = "H"+String(i);
-      hueIP[i] = request->arg(a).toInt();
-    }
-
-    t = request->arg(F("HL")).toInt();
-    if (t > 0) huePollLightId = t;
-
-    t = request->arg(F("HI")).toInt();
-    if (t > 50) huePollIntervalMs = t;
-
-    hueApplyOnOff = request->hasArg(F("HO"));
-    hueApplyBri = request->hasArg(F("HB"));
-    hueApplyColor = request->hasArg(F("HC"));
-    huePollingEnabled = request->hasArg(F("HP"));
-    hueStoreAllowed = true;
-    reconnectHue();
-    #endif
-
     //WLEDMM: add netdebug variables
     #ifdef WLED_DEBUG_HOST
       for (int i=0;i<4;i++){
@@ -821,9 +787,6 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
 
   lastEditTime = millis();
   if (subPage != 2 && !doReboot) doSerializeConfig = true; //serializeConfig(); //do not save if factory reset or LED settings (which are saved after LED re-init)
-  #ifndef WLED_DISABLE_ALEXA
-  if (subPage == 4) alexaInit();
-  #endif
 }
 
 
@@ -965,28 +928,6 @@ bool handleSet(AsyncWebServerRequest *request, const String& req, bool apply)
   col1Changed |= updateVal(req.c_str(), "G2=", &colInSec[1]);
   col1Changed |= updateVal(req.c_str(), "B2=", &colInSec[2]);
   col1Changed |= updateVal(req.c_str(), "W2=", &colInSec[3]);
-
-  #ifdef WLED_ENABLE_LOXONE
-  //lox parser
-  pos = req.indexOf(F("LX=")); // Lox primary color
-  if (pos > 0) {
-    int lxValue = getNumVal(&req, pos);
-    if (parseLx(lxValue, colIn)) {
-      bri = 255;
-      nightlightActive = false; //always disable nightlight when toggling
-      col0Changed = true;
-    }
-  }
-  pos = req.indexOf(F("LY=")); // Lox secondary color
-  if (pos > 0) {
-    int lxValue = getNumVal(&req, pos);
-    if(parseLx(lxValue, colInSec)) {
-      bri = 255;
-      nightlightActive = false; //always disable nightlight when toggling
-      col1Changed = true;
-    }
-  }
-  #endif
 
   //set hue
   pos = req.indexOf(F("HU="));

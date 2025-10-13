@@ -10,14 +10,6 @@
   #include <FastLED.h>
 #endif
 
-//alexa.cpp
-#ifndef WLED_DISABLE_ALEXA
-void onAlexaChange(EspalexaDevice* dev);
-void alexaInit();
-void handleAlexa();
-void onAlexaChange(EspalexaDevice* dev);
-#endif
-
 //button.cpp
 void shortPressAction(uint8_t b=0);
 void longPressAction(uint8_t b=0);
@@ -192,12 +184,6 @@ void handleNightlight();
 
 #if !defined(ARDUINO_ARCH_ESP32) || !defined(WLEDMM_FASTPATH) || defined(WLEDMM_SAVE_FLASH)  // WLEDMM: color utils moved into colorTools.hpp, so comiler can inline calls (up to 12% faster)
 byte __attribute__((pure)) scaledBri(byte in);                     // WLEDMM: added attribute pure
-#endif
-
-#ifdef WLED_ENABLE_LOXONE
-//lx_parser.cpp
-bool parseLx(int lxValue, byte* rgbw);
-void parseLxJson(int lxValue, byte segId, bool secondary);
 #endif
 
 //mqtt.cpp

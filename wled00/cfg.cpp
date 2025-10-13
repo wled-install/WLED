@@ -485,43 +485,10 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
 
   CJSON(alexaNumPresets, interfaces["va"]["p"]);
 
-#ifdef WLED_ENABLE_MQTT
-  JsonObject if_mqtt = interfaces["mqtt"];
-  CJSON(mqttEnabled, if_mqtt["en"]);
-  getStringFromJson(mqttServer, if_mqtt[F("broker")], 33);
-  CJSON(mqttPort, if_mqtt["port"]); // 1883
-  getStringFromJson(mqttUser, if_mqtt[F("user")], 41);
-  getStringFromJson(mqttPass, if_mqtt["psk"], 65); //normally not present due to security
-  getStringFromJson(mqttClientID, if_mqtt[F("cid")], 41);
-
-  getStringFromJson(mqttDeviceTopic, if_mqtt[F("topics")][F("device")], 33); // "wled/test"
-  getStringFromJson(mqttGroupTopic, if_mqtt[F("topics")][F("group")], 33); // ""
-  CJSON(retainMqttMsg, if_mqtt[F("rtn")]);
-#endif
-
 #ifndef WLED_DISABLE_ESPNOW
   JsonObject remote = doc["remote"];
   CJSON(enable_espnow_remote, remote[F("remote_enabled")]);
   getStringFromJson(linked_remote, remote[F("linked_remote")], 13);
-#endif
-
-
-#ifndef WLED_DISABLE_HUESYNC
-  JsonObject if_hue = interfaces["hue"];
-  CJSON(huePollingEnabled, if_hue["en"]);
-  CJSON(huePollLightId, if_hue["id"]);
-  tdd = if_hue[F("iv")] | -1;
-  if (tdd >= 2) huePollIntervalMs = tdd * 100;
-
-  JsonObject if_hue_recv = if_hue["recv"];
-  CJSON(hueApplyOnOff, if_hue_recv["on"]);
-  CJSON(hueApplyBri, if_hue_recv["bri"]);
-  CJSON(hueApplyColor, if_hue_recv["col"]);
-
-  JsonArray if_hue_ip = if_hue["ip"];
-
-  for (byte i = 0; i < 4; i++)
-    CJSON(hueIP[i], if_hue_ip[i]);
 #endif
 
 //WLEDMM: add netdebug variables
@@ -985,55 +952,10 @@ void serializeConfig() {
 
   if_va["p"] = alexaNumPresets;
 
-#ifdef WLED_ENABLE_MQTT
-  JsonObject if_mqtt = interfaces.createNestedObject("mqtt");
-  if_mqtt["en"] = mqttEnabled;
-  if_mqtt[F("broker")] = mqttServer;
-  if_mqtt["port"] = mqttPort;
-  if_mqtt[F("user")] = mqttUser;
-  if_mqtt[F("pskl")] = strlen(mqttPass);
-  if_mqtt[F("cid")] = mqttClientID;
-  if_mqtt[F("rtn")] = retainMqttMsg;
-
-  JsonObject if_mqtt_topics = if_mqtt.createNestedObject(F("topics"));
-  if_mqtt_topics[F("device")] = mqttDeviceTopic;
-  if_mqtt_topics[F("group")] = mqttGroupTopic;
-#endif
-
 #ifndef WLED_DISABLE_ESPNOW
   JsonObject remote = doc.createNestedObject(F("remote"));
   remote[F("remote_enabled")] = enable_espnow_remote;
   remote[F("linked_remote")] = linked_remote;
-#endif
-
-
-#ifndef WLED_DISABLE_HUESYNC
-  JsonObject if_hue = interfaces.createNestedObject("hue");
-  if_hue["en"] = huePollingEnabled;
-  if_hue["id"] = huePollLightId;
-  if_hue[F("iv")] = huePollIntervalMs / 100;
-
-  JsonObject if_hue_recv = if_hue.createNestedObject("recv");
-  if_hue_recv["on"] = hueApplyOnOff;
-  if_hue_recv["bri"] = hueApplyBri;
-  if_hue_recv["col"] = hueApplyColor;
-
-  JsonArray if_hue_ip = if_hue.createNestedArray("ip");
-  for (byte i = 0; i < 4; i++) {
-    if_hue_ip.add(hueIP[i]);
-  }
-#endif
-
-//WLEDMM: add netdebug variables
-#ifdef WLED_DEBUG_HOST
-  JsonObject if_ndb = interfaces.createNestedObject("ndb");
-  JsonArray if_ndb_ip = if_ndb.createNestedArray("ip");
-  for (byte i = 0; i < 4; i++) {
-    if_ndb_ip.add(netDebugPrintIP[i]);
-  }
-  if_ndb["port"] = netDebugPrintPort;
-  if_ndb["enabled"] = netDebugEnabled;
-  // USER_PRINTF("serializeConfig %d\n", netDebugEnabled);
 #endif
 
   JsonObject if_ntp = interfaces.createNestedObject("ntp");
@@ -1136,19 +1058,6 @@ bool deserializeConfigSec() {
   JsonObject ap = doc["ap"];
   getStringFromJson(apPass, ap["psk"] , 65);
 
-#if defined(WLED_ENABLE_MQTT) || !defined(WLED_DISABLE_HUESYNC)
-  JsonObject interfaces = doc["if"];
-#endif
-
-#ifdef WLED_ENABLE_MQTT
-  JsonObject if_mqtt = interfaces["mqtt"];
-  getStringFromJson(mqttPass, if_mqtt["psk"], 65);
-#endif
-
-#ifndef WLED_DISABLE_HUESYNC
-  getStringFromJson(hueApiKey, interfaces["hue"][F("key")], 47);
-#endif
-
   getStringFromJson(settingsPIN, doc["pin"], 5);
   correctPIN = !strlen(settingsPIN);
 
@@ -1176,19 +1085,6 @@ void serializeConfigSec() {
 
   JsonObject ap = doc.createNestedObject("ap");
   ap["psk"] = apPass;
-
-#if defined(WLED_ENABLE_MQTT) || !defined(WLED_DISABLE_HUESYNC)
-  JsonObject interfaces = doc.createNestedObject("if");
-#endif
-
-#ifdef WLED_ENABLE_MQTT
-  JsonObject if_mqtt = interfaces.createNestedObject("mqtt");
-  if_mqtt["psk"] = mqttPass;
-#endif
-#ifndef WLED_DISABLE_HUESYNC
-  JsonObject if_hue = interfaces.createNestedObject("hue");
-  if_hue[F("key")] = hueApiKey;
-#endif
 
   doc["pin"] = settingsPIN;
 

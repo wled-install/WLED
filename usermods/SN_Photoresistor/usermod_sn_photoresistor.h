@@ -108,21 +108,6 @@ public:
     if (checkBoundSensor(currentLDRValue, lastLDRValue, offset))
     {
       lastLDRValue = currentLDRValue;
-
-#ifndef WLED_DISABLE_MQTT
-      if (WLED_MQTT_CONNECTED)
-      {
-        char subuf[45];
-        strcpy(subuf, mqttDeviceTopic);
-        strcat_P(subuf, PSTR("/luminance"));
-        mqtt->publish(subuf, 0, true, String(lastLDRValue).c_str());
-      }
-      else
-      {
-        DEBUG_PRINTLN("Missing MQTT connection. Not publishing data");
-      }
-    }
-#endif
   }
 
   uint16_t getLastLDRValue()

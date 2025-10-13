@@ -102,28 +102,6 @@ void userLoop() {
   if (tempTimer - lastMeasure > 60000) 
   {
     lastMeasure = tempTimer;    
-
-#ifndef WLED_DISABLE_MQTT
-// Check if MQTT Connected, otherwise it will crash the 8266
-    if (mqtt != nullptr)
-    {
-      UpdateBME280Data();
-      float board_temperature = SensorTemperature;
-      float board_pressure = SensorPressure;
-      float board_humidity = SensorHumidity;
-
-// Create string populated with user defined device topic from the UI, and the read temperature, humidity and pressure. Then publish to MQTT server.
-      String t = String(mqttDeviceTopic);
-      t += "/temperature";
-      mqtt->publish(t.c_str(), 0, true, String(board_temperature).c_str());
-      String p = String(mqttDeviceTopic);
-      p += "/pressure";
-      mqtt->publish(p.c_str(), 0, true, String(board_pressure).c_str());
-      String h = String(mqttDeviceTopic);
-      h += "/humidity";
-      mqtt->publish(h.c_str(), 0, true, String(board_humidity).c_str());
-    }
-  #endif
   }
 
   // Check if we time interval for redrawing passes.
