@@ -748,6 +748,13 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
     } break;
     case 2: //Art-Net
     {
+      uint32_t total_leds_configured = (uint32_t)outputs * leds_per_output;
+      if (total_leds_configured > length) {
+        // The user has configured more Art-Net LEDs than physically exist.
+        // To prevent a crash from reading past the end of the pixel buffer,
+        // we will simply stop the broadcast for this frame.
+        return 0; // Exit safely
+      }
       static unsigned long artnetlimiter = micros()+(1000000/fps_limit);
       while (artnetlimiter > micros()) {
         if (ArtNetSkipFrame) {
