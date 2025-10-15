@@ -482,6 +482,10 @@ void background_loop_blocking(void* pvParameters) {
         serializeConfig();
         xSemaphoreGive(busMutex);
       }
+      if (e131Port == ARTNET_DEFAULT_PORT) {
+        artnet.stop();
+        artnet.begin(e131Universe, ARTNET_PRIORITY);
+      }
     }
 
     if (loadLedmap) {
@@ -650,6 +654,20 @@ void WLED::loop() {
   static uint16_t avgStripMillis = 0;
   #endif
 
+  if (e131Port == ARTNET_DEFAULT_PORT) {
+    artnet.processNewFrame();
+
+    if (realtimeMode == REALTIME_MODE_ARTNET && newArtNetData) {
+      if (!offMode || strip.isOffRefreshRequired()) {
+        if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+          strip.show();
+          xSemaphoreGive(busMutex);
+        }
+      }
+      newArtNetData = false;
+    }
+  }
+  
   if (!interfacesInited || strip.getBrightness() == 0) delay(10); // TroyHacks: burn some loop in case there's nothing else to do.
 
   if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
@@ -1503,15 +1521,20 @@ void WLED::initAP(bool resetAP)
     if (udpPort > 0 && udpPort != ntpLocalPort) {
       udpConnected = notifierUdp.begin(udpPort);
     }
-    if (udpRgbPort > 0 && udpRgbPort != ntpLocalPort && udpRgbPort != udpPort) {
-      udpRgbConnected = rgbUdp.begin(udpRgbPort);
-    }
     if (udpPort2 > 0 && udpPort2 != ntpLocalPort && udpPort2 != udpPort && udpPort2 != udpRgbPort) {
       udp2Connected = notifier2Udp.begin(udpPort2);
     }
-    e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
-    ddp.begin(false, DDP_DEFAULT_PORT);
-
+    if (e131Port == ARTNET_DEFAULT_PORT) {
+      artnet.stop();
+      artnet.begin(e131Universe, ARTNET_PRIORITY);
+    } else {
+      artnet.stop();
+      e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
+      ddp.begin(false, DDP_DEFAULT_PORT);
+      if (udpRgbPort > 0 && udpRgbPort != ntpLocalPort && udpRgbPort != udpPort) {
+        udpRgbConnected = rgbUdp.begin(udpRgbPort);
+      }
+    }
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(53, "*", WiFi.softAPIP());
   }
@@ -1735,16 +1758,20 @@ void WLED::initInterfaces()
 
   if (udpPort > 0 && udpPort != ntpLocalPort) {
     udpConnected = notifierUdp.begin(udpPort);
-    if (udpConnected && udpRgbPort != udpPort)
-      udpRgbConnected = rgbUdp.begin(udpRgbPort);
-    if (udpConnected && udpPort2 != udpPort && udpPort2 != udpRgbPort)
-      udp2Connected = notifier2Udp.begin(udpPort2);
+    if (udpConnected && udpPort2 != udpPort && udpPort2 != udpRgbPort) udp2Connected = notifier2Udp.begin(udpPort2);
   }
-  if (ntpEnabled)
+  if (ntpEnabled) {
     ntpConnected = ntpUdp.begin(ntpLocalPort);
-
-  e131.begin(e131Multicast, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
-  ddp.begin(false, DDP_DEFAULT_PORT);
+  }
+  if (e131Port == ARTNET_DEFAULT_PORT) {
+    artnet.stop();
+    artnet.begin(e131Universe, ARTNET_PRIORITY);
+  } else {
+    artnet.stop();
+    e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
+    ddp.begin(false, DDP_DEFAULT_PORT);
+    if (udpConnected && udpRgbPort != udpPort) udpRgbConnected = rgbUdp.begin(udpRgbPort);
+  }
   interfacesInited = true;
   wasConnected = true;
 }

@@ -1,7 +1,8 @@
-// Prevent definition of min and max macros (common issue with ESP32/Arduino headers)
+// The #include order is very specific to work with Arduino.h
+// and avoid some specific conflicts/bugs.
+//
 #define NOMINMAX
 
-// --- STEP 1: Include system networking headers first ---
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
@@ -9,7 +10,6 @@
 
 #include "ArtNetReceiver.h"
 
-// --- STEP 2: The Fix - Undefine conflicting macros ---
 #ifdef INADDR_NONE
 #undef INADDR_NONE
 #endif
@@ -17,14 +17,13 @@
 #undef IPADDR_NONE
 #endif
 
-// --- STEP 3: Now, include the project-specific headers ---
 #include "pin_manager.h"
-#include "bus_manager.h"      // This includes Arduino.h -> IPAddress.h
+#include "bus_manager.h"
 #include "wled.h"
 
-#include <algorithm>          // For std::min
-#include <string.h>           // For memset/memcpy
-#include "esp_heap_caps.h"    // For PSRAM allocation
+#include <algorithm>
+#include <string.h>
+#include "esp_heap_caps.h"
 
 const char* ArtNetReceiver::TAG = "ArtNetReceiver";
 
@@ -49,41 +48,44 @@ void ArtNetReceiver::_reset_frame_state() {
   _received_count = 0;
 }
 
-bool ArtNetReceiver::begin(UBaseType_t task_priority, BaseType_t core_id) {
+bool ArtNetReceiver::begin(uint16_t _init_start_universe, UBaseType_t task_priority, BaseType_t core_id) {
   if (_is_running) {
     USER_PRINTLN("ArtNetReceiver: Receiver is already running.");
     return true;
   }
 
-  _start_universe = 0;
+  _start_universe = _init_start_universe;
   _current_frame_sequence = 0;
   _previous_frame_sequence = 0;
-  uint32_t busLedCount;
 
-  // Calculate total universes based on the bus configuration
-  if (_totalUniverses == 0) {
-    Bus* bus = busses.getBus(0);
-    if (bus) {
-      busLedCount = bus->getLength();
+  Bus* bus = busses.getBus(0);
+  uint32_t busLedCount = 0;
+
+  if (bus) {
+    busLedCount = bus->getLength();
+    if (_totalUniverses == 0) {
       _totalUniverses = (busLedCount + (LEDS_PER_UNIVERSE - 1)) / LEDS_PER_UNIVERSE;
     }
+  } else {
+    _totalUniverses = 0;
   }
+  
   if (_totalUniverses > ARTNET_MAX_UNIVERSES) _totalUniverses = ARTNET_MAX_UNIVERSES;
 
   if (_totalUniverses == 0) {
-    USER_PRINTLN("ArtNetReceiver: No universes to listen for. Bus 0 might have 0 length.");
+    USER_PRINTLN("ArtNetReceiver: No universes to listen for. Bus 0 might have 0 length. Exiting.");
     return true;
   }
 
-  USER_PRINTF("ArtNetReceiver: Configured to listen for %u universes for %lu LEDs.\n", _totalUniverses, busLedCount);
+  USER_PRINTF("ArtNetReceiver: Configured to listen for %u universes for %u LEDs.\n", _totalUniverses, busLedCount);
+  if (_start_universe > 0) USER_PRINTF("ArtNetReceiver: Starting listening at %u\n", _start_universe);
 
   if (!_dmx_buffers[0] || !_dmx_buffers[1]) {
-    USER_PRINTLN("Allocating DMX buffer in PSRAM...");
     _dmx_buffers[0] = (uint8_t(*)[DMX_UNIVERSE_SIZE])heap_caps_malloc(ARTNET_MAX_UNIVERSES * DMX_UNIVERSE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
     _dmx_buffers[1] = (uint8_t(*)[DMX_UNIVERSE_SIZE])heap_caps_malloc(ARTNET_MAX_UNIVERSES * DMX_UNIVERSE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
 
     if (!_dmx_buffers[0] || !_dmx_buffers[1]) {
-      USER_PRINTLN("ArtNetReceiver: Failed to allocate DMX buffer in PSRAM!");
+      USER_PRINTLN("ArtNetReceiver: Failed to allocate DMX buffer in PSRAM. Exiting.");
       return false;
     }
   }
@@ -93,12 +95,12 @@ bool ArtNetReceiver::begin(UBaseType_t task_priority, BaseType_t core_id) {
   BaseType_t result = xTaskCreatePinnedToCore(_network_task_entry, "artnet_in", 4096, this, task_priority, &_task_handle, core_id);
 
   if (result != pdPASS) {
-    USER_PRINTLN("ArtNetReceiver: Failed to create network task.");
+    USER_PRINTLN("ArtNetReceiver: Failed to create network task. Exiting.");
     _is_running = false;
     return false;
   }
 
-  USER_PRINTF("ArtNetReceiver: Art-Net receiver task started on core %d.\n", core_id);
+  USER_PRINTF("ArtNetReceiver: Art-Net receiver task started on core %d with priority %d.\n", core_id, task_priority);
   return true;
 }
 
@@ -111,7 +113,7 @@ void ArtNetReceiver::stop() {
     _sock = -1;
   }
   _task_handle = nullptr;
-  USER_PRINTLN("ArtNetReceiver: Art-Net receiver stopped.");
+  USER_PRINTLN("ArtNetReceiver: Art-Net receiver stopped. Exiting.");
 }
 
 void ArtNetReceiver::_network_task_entry(void* arg) {
@@ -120,13 +122,12 @@ void ArtNetReceiver::_network_task_entry(void* arg) {
 }
 
 void ArtNetReceiver::processNewFrame() {
-  // Only proceed if the network task has signaled a new frame is ready
+
   if (!_new_frame_ready.load()) {
     return;
   }
-  _new_frame_ready = false; // "Consume" the flag
+  _new_frame_ready = false;
 
-  // This is the original logic from _process_frame()
   _process_frame_internal();
 }
 
@@ -139,7 +140,6 @@ void ArtNetReceiver::_process_frame_internal() {
 
   realtimeLock(realtimeTimeoutMs, REALTIME_MODE_ARTNET);
   newArtNetData = false;
-  // e131NewData = false;
   if (xSemaphoreTake(busMutex, portMAX_DELAY) == pdTRUE) {
     Bus* bus = busses.getBus(0);
     if (bus) {
@@ -155,19 +155,16 @@ void ArtNetReceiver::_process_frame_internal() {
       }
     }
     newArtNetData = true;
-    // e131NewData = true;
     xSemaphoreGive(busMutex);
   } else {
-    USER_PRINTLN("ArtNetReceiver: Failed to take bus mutex.");
+    USER_PRINTLN("ArtNetReceiver: Failed to take bus mutex. This should never happen.");
   }
-  // _reset_frame_state();
-  // _current_frame_sequence = 0;
 }
 
 void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
   _sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (_sock < 0) {
-    USER_PRINTF("ArtNetReceiver: Failed to create socket: errno %d\n", errno);
+    USER_PRINTF("ArtNetReceiver: Failed to create socket: errno %d. Exiting.\n", errno);
     _is_running = false; return;
   }
 
@@ -177,10 +174,9 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
   dest_addr.sin_port = htons(ARTNET_PORT);
 
   if (bind(_sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
-    USER_PRINTF("ArtNetReceiver: Socket unable to bind: errno %d\n", errno);
+    USER_PRINTF("ArtNetReceiver: Socket unable to bind: errno %d. Exiting.\n", errno);
     close(_sock); _sock = -1; _is_running = false; return;
   }
-  USER_PRINTF("ArtNetReceiver: Socket bound to port %d\n", ARTNET_PORT);
 
   const size_t rx_buffer_size = sizeof(ArtNetDmxPacket);
 
@@ -218,15 +214,12 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
     uint16_t actual_dmx_length = len - ARTNET_MIN_HEADER_SIZE;
 
     if (actual_dmx_length < declared_dmx_length) {
-      USER_PRINTF("ArtNetReceiver: Packet size mismatch U %u S %u - Skipping.\n", packet->universe, packet->sequence);
+      USER_PRINTF("ArtNetReceiver: Packet size mismatch U %u S %u. Skipping.\n", packet->universe, packet->sequence);
       continue;
     }
 
     if (_current_frame_sequence == 0 || packet->sequence != _current_frame_sequence) {
       _current_frame_sequence = packet->sequence;
-      // if (_received_count != _totalUniverses) {
-      //    USER_PRINTF("ArtNetReceiver: Now seq  %u - resetting after %u universes received.\n", _current_frame_sequence, _received_count);
-      // }
       _reset_frame_state();
     }
 
@@ -240,21 +233,13 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
 
       realtimeLock(realtimeTimeoutMs, REALTIME_MODE_ARTNET);
 
-      // if (universe_index == 0) {
-      //   if (_received_count > 0) {
-      //     // USER_PRINTF("* ArtNetReceiver: Got Universe 0 but only %d/%d universes. Processing sequence %u.\n", _received_count, _totalUniverses, _current_frame_sequence);
-      //     _active_buffer_idx.store(write_buffer_idx);
-      //     _new_frame_ready = true;
-      //   }
-      // }
-
       if (!_received_universes[universe_index]) {
         _received_universes[universe_index] = true;
         _received_count++;
       }
 
       uint16_t data_len = ntohs(packet->length);
-      // memcpy(_dmx_data[universe_index], packet->data, std::min(data_len, (uint16_t)DMX_UNIVERSE_SIZE));
+
       memcpy(_dmx_buffers[write_buffer_idx][universe_index], packet->data, data_len);
 
       if (_received_count >= _totalUniverses) {
@@ -263,8 +248,6 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
 
         _previous_frame_sequence = _current_frame_sequence;
         // USER_PRINTF("\nArtNetReceiver: Got %d/%d universes. Last universe was %u - processing sequence %u.\n", _received_count, _totalUniverses, received_universe+1, _current_frame_sequence);
-      } else {
-        // USER_PRINTF("%d, ", received_universe+1);
       }
     } else {
       uint16_t universe_index = received_universe - _start_universe;
@@ -277,5 +260,5 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
     _sock = -1;
   }
   _is_running = false;
-  USER_PRINTLN("Network task finished.");
+  USER_PRINTLN("ArtNetReceiver: Network task finished.");
 }

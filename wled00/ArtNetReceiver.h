@@ -6,14 +6,13 @@
 #include <atomic>
 
 #define ARTNET_PORT 6454
-#define ARTNET_MAX_UNIVERSES 64 // Increased for 8192 pixels
+#ifndef ARTNET_MAX_UNIVERSES
+  #define ARTNET_MAX_UNIVERSES 64 // Increased for 8192 pixels
+#endif
 #define DMX_UNIVERSE_SIZE 512
 #define ARTNET_MIN_HEADER_SIZE 18
 #define LEDS_PER_UNIVERSE (DMX_UNIVERSE_SIZE / 3) // 170 LEDs
 #define BYTES_PER_UNIVERSE (LEDS_PER_UNIVERSE * 3) // 510 bytes
-
-// NEW: Timeout in ms to wait for a full frame. 40ms = 25 FPS.
-#define ARTNET_FRAME_TIMEOUT 40 
 
 typedef struct __attribute__((packed)) {
   uint8_t  id[8];
@@ -31,7 +30,7 @@ public:
   ArtNetReceiver();
   ~ArtNetReceiver();
 
-  bool begin(UBaseType_t task_priority = 5, BaseType_t core_id = 0);
+  bool begin(uint16_t _start_universe = 0, UBaseType_t task_priority = 5, BaseType_t core_id = 0);
   void stop();
   void processNewFrame();
 

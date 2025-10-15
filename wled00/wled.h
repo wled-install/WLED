@@ -735,6 +735,16 @@ WLED_GLOBAL bool ArtNetSkipFrame _INIT(true);
 WLED_GLOBAL bool ArtNetSkipFrame _INIT(false);
 #endif
 
+#ifndef ARTNET_PRIORITY
+  #define ARTNET_PRIORITY (configMAX_PRIORITIES - 5)
+#elif (ARTNET_PRIORITY >= configMAX_PRIORITIES)
+  #undef ARTNET_PRIORITY
+  #define ARTNET_PRIORITY (configMAX_PRIORITIES - 2)
+#elif (ARTNET_PRIORITY < 1)
+  #undef ARTNET_PRIORITY
+  #define ARTNET_PRIORITY 1
+#endif
+
 // presets
 WLED_GLOBAL byte currentPreset _INIT(0);
 
