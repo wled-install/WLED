@@ -154,14 +154,15 @@ void ArtNetReceiver::_process_frame_internal() {
       uint32_t busLedCount = bus->getLength();
       uint32_t bus_len_bytes = busLedCount * 3;
 
-      // if ((bus_len_bytes & 0x0F) == 0) { // do we have a buffer even with 16?
-      uint32_t groupsOf16 = bus_len_bytes >> 4;
-      uint8_t* flat = (uint8_t*)_dmx_buffers[read_buffer_idx];
+      #if defined(CONFIG_IDF_TARGET_ESP32P4)
+      // This might bite you. Make sure your random buffers are +15 bytes
+      // ...or don't be fancy and just the memcpy version.
+      uint32_t groupsOf16 = (bus_len_bytes >> 4) + (bus_len_bytes & 0x0F) ? 0 : 1; 
       uint8_t fakebri = 255;
-      p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]); // this should be safe even if we're not on even 16s
-      // } else {
-      //   memcpy(busPixelData, _dmx_buffers[read_buffer_idx], bus_len_bytes);
-      // }
+      p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]);
+      #else
+      memcpy(busPixelData, _dmx_buffers[read_buffer_idx], bus_len_bytes); // tried and true
+      #endif
     }
     newArtNetData = true;
     xSemaphoreGive(busMutex);
