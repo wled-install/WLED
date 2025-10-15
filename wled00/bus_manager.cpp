@@ -626,12 +626,12 @@ BusParallelIO::BusParallelIO(BusConfig& bc, const ColorOrderMap& com) : Bus(bc.t
   memcpy(_pins, bc.pins, sizeof(_pins));
   _outputs = bc.outputs;
   _leds_per_output = bc.leds_per_output;
-  for (uint8_t i = 0; i < sizeof(_pins); i++) {
+  for (uint8_t i = 0; i < _outputs; i++) {
     if (!pinManager.allocatePin(_pins[i], true, PinOwner::Parallel_IO)){
       USER_PRINTF("Error owning GPIO %d\n", _pins[i]);
     }
     USER_PRINT(bc.pins[i]);
-    if (i != sizeof(_pins)-1) USER_PRINT(",");
+    if (i != _outputs-1) USER_PRINT(",");
   }
   USER_PRINTLN("]");
 }
@@ -719,7 +719,7 @@ uint8_t BusParallelIO::getPins(uint8_t* pinArray) const {
 }
 
 void BusParallelIO::cleanup() {
-  for (uint8_t i = 0; i < sizeof(_pins); i++) {
+  for (uint8_t i = 0; i < _outputs; i++) {
     if (!pinManager.deallocatePin(_pins[i], PinOwner::Parallel_IO)) {
       USER_PRINTF("Error owning GPIO %d\n", _pins[i]);
     }

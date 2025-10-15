@@ -145,11 +145,11 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
         char lp[7];
         snprintf(lp, sizeof(lp), "L%u%u", i, s);
         if (!request->hasArg(lp)) {
-          USER_PRINT(F("No data for "));
-          USER_PRINTLN(lp);
+          DEBUG_PRINT(F("No data for "));
+          DEBUG_PRINTLN(lp);
           break;
         }
-        USER_PRINTF("Saving pin arg %s to pin[%d] with value %d\n", lp, i, (request->arg(lp).length() > 0) ? request->arg(lp).toInt() : 255);
+        DEBUG_PRINTF("Saving pin arg %s to pin[%d] with value %d\n", lp, i, (request->arg(lp).length() > 0) ? request->arg(lp).toInt() : 255);
         pins[i] = (request->arg(lp).length() > 0) ? request->arg(lp).toInt() : 255;
       }
       type = request->arg(lt).toInt();

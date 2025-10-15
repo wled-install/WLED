@@ -252,7 +252,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32
     parlio_config.valid_gpio_num = gpio_num_t(-1);
     parlio_config.clk_out_gpio_num = gpio_num_t(-1);
     for (int i = 0; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
-      parlio_config.data_gpio_nums[i] = gpio_num_t(parallelPins[i]);
+      parlio_config.data_gpio_nums[i] = (i < outputs) ? gpio_num_t(parallelPins[i]) : gpio_num_t(-1);
     }
     #ifdef PARLIO_AUTO_OVERCLOCK // This has caused minor annoying glitching.
     if (leds_per_output <= 256) {
