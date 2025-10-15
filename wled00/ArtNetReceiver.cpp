@@ -156,7 +156,7 @@ void ArtNetReceiver::_process_frame_internal() {
 
       #if defined(CONFIG_IDF_TARGET_ESP32P4)
       // This might bite you. Make sure your random buffers are +15 bytes
-      // ...or don't be fancy and just the memcpy version.
+      // ...or don't be fancy and just use the memcpy version.
       uint32_t groupsOf16 = (bus_len_bytes >> 4) + (bus_len_bytes & 0x0F) ? 0 : 1; 
       uint8_t fakebri = 255;
       p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]);
