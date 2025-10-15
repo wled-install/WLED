@@ -323,7 +323,10 @@
 					gId("rf"+n).onclick = (t == 31) ? (()=>{return false}) : (()=>{});  // prevent change for TM1814
 					gRGBW |= isRGBW = ((t > 17 && t < 22) || (t > 28 && t < 32) || (t > 40 && t < 46 && t != 43) || t == 83 || t == 88 || t == 91); // RGBW checkbox, TYPE_xxxx values from const.h
           t = d.getElementsByName("LT" + n)[0].value; // user might have changed the type selector.
-					gId("co"+n).style.display = ((t >= 84 && t < 96) || (t >= 40 && t < 48)||(t >= 100 && t < 110)) ? "none":"inline";  // hide color order for PWM
+					gId("co" + n).style.display = (
+            ((t >= 84 && t < 96) || (t >= 40 && t < 48) || (t >= 100 && t < 110)) &&
+            (t === 90 || t === 91)
+          ) ? "none" : "inline";
           gId("pbr4_" + n).style.display = ((t == 90 || t == 91) && loopmax > 4) ? "inline" : "none";
           gId("pbr8_" + n).style.display = ((t == 90 || t == 91) && loopmax > 8) ? "inline" : "none";
           gId("pbr12_" + n).style.display = ((t == 90 || t == 91) && loopmax > 12) ? "inline" : "none";
