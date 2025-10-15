@@ -222,7 +222,7 @@ parlio_transmit_config_t transmit_config = {
 
 static portMUX_TYPE parlio_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
-uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order) {
+uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order, bool reconfigure) {
 
   if (length != outputs * leds_per_output) {
     delay(100);
@@ -240,7 +240,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32
   
   outputs = outputs > SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH ? SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH : outputs;
 
-  if (!parlio_setup_done || outputs != last_outputs || leds_per_output != last_leds_per_output) {
+  if (!parlio_setup_done || outputs != last_outputs || leds_per_output != last_leds_per_output || reconfigure == true) {
 
     parlio_config.clk_src = PARLIO_CLK_SRC_DEFAULT;
     if (outputs <= 1)       parlio_config.data_width =  1;

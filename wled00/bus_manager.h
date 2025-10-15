@@ -453,6 +453,7 @@ private:
   uint8_t             _channels;
   bool                _rgbw;
   bool                _broadcastLock;
+  bool                _reconfigure;
   byte* _data;
   uint8_t             _colorOrder = COL_ORDER_RGB;
   uint8_t             _outputs;
