@@ -181,6 +181,7 @@
 #endif
 
 #include "src/dependencies/e131/ESPAsyncE131.h"
+#include "ArtNetReceiver.h"
 
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include "src/dependencies/json/AsyncJson-v6.h"
@@ -515,7 +516,8 @@ WLED_GLOBAL uint16_t DMXSegmentSpacing _INIT(0);                  // Number of v
 WLED_GLOBAL bool e131Multicast _INIT(false);                      // multicast or unicast
 WLED_GLOBAL bool e131SkipOutOfSequence _INIT(false);              // freeze instead of flickering
 WLED_GLOBAL uint16_t pollReplyCount _INIT(0);                     // count number of replies for ArtPoll node report
-
+WLED_GLOBAL ArtNetReceiver artnet;
+WLED_GLOBAL BusManager artnetbusManager;
 // mqtt
 WLED_GLOBAL unsigned long lastMqttReconnectAttempt _INIT(0);  // used for other periodic tasks too
 
@@ -766,6 +768,7 @@ WLED_GLOBAL WiFiUDP ntpUdp;
 WLED_GLOBAL ESPAsyncE131 e131 _INIT_N(((handleE131Packet)));
 WLED_GLOBAL ESPAsyncE131 ddp  _INIT_N(((handleE131Packet)));
 WLED_GLOBAL bool e131NewData _INIT(false);
+WLED_GLOBAL bool newArtNetData _INIT(false);
 
 // led fx library object
 WLED_GLOBAL BusManager busses _INIT(BusManager());
