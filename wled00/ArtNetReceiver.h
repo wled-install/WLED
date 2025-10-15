@@ -53,9 +53,7 @@ private:
   uint8_t _current_frame_sequence;
   uint8_t _previous_frame_sequence;
   
-  // PSRAM buffer for DMX data
-  // uint8_t(*_dmx_data)[DMX_UNIVERSE_SIZE] = nullptr;
-  uint8_t(*_dmx_buffers[2])[DMX_UNIVERSE_SIZE]; // An array holding two buffer pointers
+  uint8_t* _dmx_buffers[2] = { nullptr, nullptr };
   std::atomic<int> _active_buffer_idx;          // The buffer the MAIN loop should READ
   std::atomic<bool> _new_frame_ready;           // Flag to signal the main loop
   void _process_frame_internal();

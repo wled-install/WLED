@@ -81,8 +81,9 @@ bool ArtNetReceiver::begin(uint16_t _init_start_universe, UBaseType_t task_prior
   if (_start_universe > 0) USER_PRINTF("ArtNetReceiver: Starting listening at %u\n", _start_universe);
 
   if (!_dmx_buffers[0] || !_dmx_buffers[1]) {
-    _dmx_buffers[0] = (uint8_t(*)[DMX_UNIVERSE_SIZE])heap_caps_malloc(ARTNET_MAX_UNIVERSES * DMX_UNIVERSE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
-    _dmx_buffers[1] = (uint8_t(*)[DMX_UNIVERSE_SIZE])heap_caps_malloc(ARTNET_MAX_UNIVERSES * DMX_UNIVERSE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
+
+    _dmx_buffers[0] = (uint8_t*)heap_caps_malloc(_totalUniverses * BYTES_PER_UNIVERSE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
+    _dmx_buffers[1] = (uint8_t*)heap_caps_malloc(_totalUniverses * BYTES_PER_UNIVERSE, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT | MALLOC_CAP_SIMD);
 
     if (!_dmx_buffers[0] || !_dmx_buffers[1]) {
       USER_PRINTLN("ArtNetReceiver: Failed to allocate DMX buffer in PSRAM. Exiting.");
@@ -121,6 +122,12 @@ void ArtNetReceiver::_network_task_entry(void* arg) {
   vTaskDelete(NULL);
 }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+extern "C" {
+  int IRAM_ATTR p4_mul16x16(uint8_t* outpacket, uint8_t* brightness, uint16_t num_loops, uint8_t* pixelbuffer);
+}
+#endif
+
 void ArtNetReceiver::processNewFrame() {
 
   if (!_new_frame_ready.load()) {
@@ -147,12 +154,14 @@ void ArtNetReceiver::_process_frame_internal() {
       uint32_t busLedCount = bus->getLength();
       uint32_t bus_len_bytes = busLedCount * 3;
 
-      for (int i = 0; i < _totalUniverses; ++i) {
-        uint32_t offset = i * BYTES_PER_UNIVERSE;
-        if (offset >= bus_len_bytes) break;
-        uint16_t bytes_to_copy = std::min((uint32_t)BYTES_PER_UNIVERSE, bus_len_bytes - offset);
-        memcpy(busPixelData + offset, _dmx_buffers[read_buffer_idx][i], bytes_to_copy);
-      }
+      // if ((bus_len_bytes & 0x0F) == 0) { // do we have a buffer even with 16?
+      uint32_t groupsOf16 = bus_len_bytes >> 4;
+      uint8_t* flat = (uint8_t*)_dmx_buffers[read_buffer_idx];
+      uint8_t fakebri = 255;
+      p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]); // this should be safe even if we're not on even 16s
+      // } else {
+      //   memcpy(busPixelData, _dmx_buffers[read_buffer_idx], bus_len_bytes);
+      // }
     }
     newArtNetData = true;
     xSemaphoreGive(busMutex);
@@ -239,8 +248,14 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
       }
 
       uint16_t data_len = ntohs(packet->length);
+      uint32_t offset = universe_index * BYTES_PER_UNIVERSE;
+      uint32_t total_buffer_size = _totalUniverses * BYTES_PER_UNIVERSE;
 
-      memcpy(_dmx_buffers[write_buffer_idx][universe_index], packet->data, data_len);
+      if (offset < total_buffer_size) {
+        uint16_t bytes_to_copy = std::min((uint32_t)data_len, total_buffer_size - offset);
+        uint8_t* target_ptr = _dmx_buffers[write_buffer_idx] + offset;
+        memcpy(target_ptr, packet->data, bytes_to_copy);
+      }
 
       if (_received_count >= _totalUniverses) {
         _active_buffer_idx.store(write_buffer_idx);
