@@ -155,10 +155,11 @@ void ArtNetReceiver::_process_frame_internal() {
       uint32_t bus_len_bytes = busLedCount * 3;
 
       #if defined(CONFIG_IDF_TARGET_ESP32P4)
+      // You will need p4_mul16x16.S for this to work.
       // This might bite you. Make sure your random buffers are +15 bytes
       // ...or don't be fancy and just use the memcpy version.
       uint32_t groupsOf16 = (bus_len_bytes >> 4) + (bus_len_bytes & 0x0F) ? 0 : 1; 
-      uint8_t fakebri = 255;
+      uint8_t fakebri = 255; // 255 is fast memcpy, 0 = zero the entire thing, anything else is scaled like brightness.
       p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]);
       #else
       memcpy(busPixelData, _dmx_buffers[read_buffer_idx], bus_len_bytes); // tried and true
