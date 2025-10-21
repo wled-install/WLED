@@ -249,7 +249,7 @@ void refreshNodeList();
 void sendSysInfoUDP();
 
 // parlio.cpp
-uint8_t show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order, bool reconfigure = false);
+uint8_t show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order, bool reconfigure = false, bool gammacorrect = true);
 
 //network.cpp
 int getSignalQuality(int rssi) __attribute__((const));

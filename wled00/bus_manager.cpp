@@ -627,6 +627,7 @@ BusParallelIO::BusParallelIO(BusConfig& bc, const ColorOrderMap& com) : Bus(bc.t
   memcpy(_pins, bc.pins, sizeof(_pins));
   _outputs = bc.outputs;
   _leds_per_output = bc.leds_per_output;
+  _gammacorrect = true;
   for (uint8_t i = 0; i < _outputs; i++) {
     if (!pinManager.allocatePin(_pins[i], true, PinOwner::Parallel_IO)){
       USER_PRINTF("Error owning GPIO %d\n", _pins[i]);
@@ -704,7 +705,8 @@ uint32_t IRAM_ATTR_YN BusParallelIO::getPixelColor(uint32_t pix) const {
 void IRAM_ATTR BusParallelIO::show() {
   if (!_valid || !canShow()) return;
   _broadcastLock = true;
-  show_parlio(_pins, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _colorOrder, _reconfigure);
+  bool _showgammacorrect = (!arlsDisableGammaCorrection && realtimeMode > REALTIME_MODE_INACTIVE && realtimeOverride == REALTIME_OVERRIDE_NONE) ? false : _gammacorrect;
+  show_parlio(_pins, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _colorOrder, _reconfigure, _showgammacorrect);
   _reconfigure = false;
   _broadcastLock = false;
 }

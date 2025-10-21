@@ -841,9 +841,9 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
             uint32_t sourceOffset = mappedIdx * my_bytes_per_pixel;
             uint32_t destOffset = 18 + (i * my_bytes_per_pixel);
 
-            uint8_t r = (bri == 255) ? gamma8(buffer_in[sourceOffset]) : (gamma8(buffer_in[sourceOffset]) * bri) >> 8;
-            uint8_t g = (bri == 255) ? gamma8(buffer_in[sourceOffset + 1]) : (gamma8(buffer_in[sourceOffset + 1]) * bri) >> 8;
-            uint8_t b = (bri == 255) ? gamma8(buffer_in[sourceOffset + 2]) : (gamma8(buffer_in[sourceOffset + 2]) * bri) >> 8;
+            uint8_t r = (bri == 255) ? (buffer_in[sourceOffset]) : ((buffer_in[sourceOffset]) * bri) >> 8;
+            uint8_t g = (bri == 255) ? (buffer_in[sourceOffset + 1]) : ((buffer_in[sourceOffset + 1]) * bri) >> 8;
+            uint8_t b = (bri == 255) ? (buffer_in[sourceOffset + 2]) : ((buffer_in[sourceOffset + 2]) * bri) >> 8;
 
             switch (color_order) {
             case COL_ORDER_GRB: packet_buffer[destOffset] = g; packet_buffer[destOffset + 1] = r; packet_buffer[destOffset + 2] = b; break;
@@ -854,7 +854,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
             case COL_ORDER_GBR: packet_buffer[destOffset] = g; packet_buffer[destOffset + 1] = b; packet_buffer[destOffset + 2] = r; break;
             }
             if (isRGBW) {
-              packet_buffer[destOffset + 3] = (bri == 255) ? gamma8(buffer_in[sourceOffset + 3]) : (gamma8(buffer_in[sourceOffset + 3]) * bri) >> 8;
+              packet_buffer[destOffset + 3] = (bri == 255) ? (buffer_in[sourceOffset + 3]) : ((buffer_in[sourceOffset + 3]) * bri) >> 8;
             }
           }
           #else
@@ -892,7 +892,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
       // seconds at least, should keep Art-Net nodes in synchronous mode.
 
       // This is very much untested and generally not needed unless you 
-      // have several Art-Net devices being broadcast to, and should only
+      // have several Art-Net devices being broadcast t  , and should only
       // be called in that situation. 
       
       #ifdef ARTNET_SYNC_ENABLED

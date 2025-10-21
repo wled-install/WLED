@@ -158,7 +158,8 @@ void ArtNetReceiver::_process_frame_internal() {
       // You will need p4_mul16x16.S for this to work.
       // This might bite you. Make sure your random buffers are +15 bytes
       // ...or don't be fancy and just use the memcpy version.
-      uint32_t groupsOf16 = (bus_len_bytes >> 4) + (bus_len_bytes & 0x0F) ? 0 : 1; 
+      uint32_t groupsOf16 = (bus_len_bytes + 15) >> 4;
+
       uint8_t fakebri = 255; // 255 is fast memcpy, 0 = zero the entire thing, anything else is scaled like brightness.
       p4_mul16x16(busPixelData, &fakebri, groupsOf16, _dmx_buffers[read_buffer_idx]);
       #else
@@ -206,41 +207,40 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
       break;
     }
 
-    if (len < ARTNET_MIN_HEADER_SIZE+3) {
-      USER_PRINTF("ArtNetReceiver: Length mismatch %u < %u Skipping.\n", len, ARTNET_MIN_HEADER_SIZE + 3);
-      continue;
-    }
+    // if (len < ARTNET_MIN_HEADER_SIZE+3) {
+    //   USER_PRINTF("ArtNetReceiver: Length mismatch %u < %u Skipping.\n", len, ARTNET_MIN_HEADER_SIZE + 3);
+    //   continue;
+    // }
 
     ArtNetDmxPacket* packet = (ArtNetDmxPacket*)rx_buffer;
 
-    if (memcmp(packet->id, ARTNET_ID, sizeof(ARTNET_ID)) != 0 || packet->opCode != 0x5000) {
-      USER_PRINTF("ArtNetReceiver: Not an Art-Net packet\n");
-      continue;
-    }
+    // if (memcmp(packet->id, ARTNET_ID, sizeof(ARTNET_ID)) != 0 || packet->opCode != 0x5000) {
+    //   USER_PRINTF("ArtNetReceiver: Not an Art-Net packet\n");
+    //   continue;
+    // }
 
     uint16_t received_universe = packet->universe;
     uint16_t universe_index = received_universe - _start_universe;
 
-    uint16_t declared_dmx_length = ntohs(packet->length);
-    uint16_t actual_dmx_length = len - ARTNET_MIN_HEADER_SIZE;
+    // uint16_t declared_dmx_length = ntohs(packet->length);
+    // uint16_t actual_dmx_length = len - ARTNET_MIN_HEADER_SIZE;
 
-    if (actual_dmx_length < declared_dmx_length) {
-      USER_PRINTF("ArtNetReceiver: Packet size mismatch U %u S %u. Skipping.\n", packet->universe, packet->sequence);
-      continue;
-    }
-
-    if (_current_frame_sequence == 0 || packet->sequence != _current_frame_sequence) {
-      _current_frame_sequence = packet->sequence;
-      _reset_frame_state();
-    }
-
-    if (packet->sequence != _current_frame_sequence) {
-      USER_PRINTF("\nArtNetReceiver: Unexpected sequence %d. Skipping.\n", packet->sequence);
-      continue;
-    }
+    // if (actual_dmx_length < declared_dmx_length) {
+    //   USER_PRINTF("ArtNetReceiver: Packet size mismatch U %u S %u. Skipping.\n", packet->universe, packet->sequence);
+    //   continue;
+    // }
 
     if (received_universe >= _start_universe && received_universe < (_start_universe + _totalUniverses)) {
-      uint16_t universe_index = received_universe - _start_universe;
+
+      if (_current_frame_sequence == 0 || packet->sequence != _current_frame_sequence) {
+        _current_frame_sequence = packet->sequence;
+        _reset_frame_state();
+      }
+
+      if (packet->sequence != _current_frame_sequence) {
+        USER_PRINTF("\nArtNetReceiver: Unexpected sequence %d. Skipping.\n", packet->sequence);
+        continue;
+      }
 
       realtimeLock(realtimeTimeoutMs, REALTIME_MODE_ARTNET);
 
@@ -267,8 +267,7 @@ void IRAM_ATTR ArtNetReceiver::_network_task_loop() {
         // USER_PRINTF("\nArtNetReceiver: Got %d/%d universes. Last universe was %u - processing sequence %u.\n", _received_count, _totalUniverses, received_universe+1, _current_frame_sequence);
       }
     } else {
-      uint16_t universe_index = received_universe - _start_universe;
-      USER_PRINTF("ArtNetReceiver: Failed U %d from U %d to U %d mapped to U %u\n", received_universe, _start_universe, (_start_universe + _totalUniverses), universe_index);
+      continue;
     }
   }
 

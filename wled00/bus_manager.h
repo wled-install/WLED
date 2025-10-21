@@ -454,6 +454,7 @@ private:
   bool                _rgbw;
   bool                _broadcastLock;
   bool                _reconfigure;
+  bool                _gammacorrect;
   byte* _data;
   uint8_t             _colorOrder = COL_ORDER_RGB;
   uint8_t             _outputs;

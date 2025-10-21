@@ -128,11 +128,13 @@ void create_transposed_led_output_optimized(
   const uint32_t num_active_pins,
   const bool is_rgbw,
   const uint8_t bri,
-  const uint8_t color_order) 
+  const uint8_t color_order,
+  const bool gammacorrect) 
 {
   static uint32_t waveform_cache[256];
   static uint8_t brightness_cache[256];
   static uint8_t last_bri = 0;
+  static uint8_t last_gammacorrect = 0;
 
   static const uint16_t bitpatterns[16] = {
       0b1000100010001000, 0b1000100010001110, 0b1000100011101000, 0b1000100011101110,
@@ -141,9 +143,9 @@ void create_transposed_led_output_optimized(
       0b1110111010001000, 0b1110111010001110, 0b1110111011101000, 0b1110111011101110,
   };
 
-  if (bri != last_bri) {
+  if (bri != last_bri || gammacorrect != last_gammacorrect) {
     for (int i = 0; i < 256; ++i) {
-      brightness_cache[i] = (gamma8(i) * bri) >> 8;
+      brightness_cache[i] = gammacorrect ? (gamma8(i) * bri) >> 8 : (i * bri) >> 8;
     }
     for (int i = 0; i < 256; ++i) {
       const uint16_t p1 = bitpatterns[i >> 4];
@@ -151,6 +153,7 @@ void create_transposed_led_output_optimized(
       waveform_cache[i] = (uint32_t(p2) << 16) | p1;
     }
     last_bri = bri;
+    last_gammacorrect = gammacorrect;
   }
 
   const uint32_t COMPONENTS_PER_PIXEL = is_rgbw ? 4 : 3;
@@ -222,7 +225,7 @@ parlio_transmit_config_t transmit_config = {
 
 static portMUX_TYPE parlio_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
-uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order, bool reconfigure) {
+uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t color_order, bool reconfigure, bool gammacorrect) {
 
   if (length != outputs * leds_per_output) {
     delay(100);
@@ -340,7 +343,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32
   color_order = COL_ORDER_RGB; // This isn't actually changing the color order - we're already there from the BusNetwork doing the right thing pixel-by-pixel.
 #endif
 
-  create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri, color_order);
+  create_transposed_led_output_optimized(parallel_buffer_remapped, parallel_buffer_repacked, leds_per_output, outputs, isRGBW, bri, color_order, gammacorrect);
 
   // Calculate the exact size of ONE PIXEL's data in bits and bytes.
   const uint32_t symbols_per_pixel = isRGBW ? 128 : 96;

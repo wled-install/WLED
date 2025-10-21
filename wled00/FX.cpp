@@ -9033,7 +9033,7 @@ uint16_t IRAM_ATTR mode_GEQPPA() {
   uint16_t box_mirror_x = SEGMENT.mirror;
   uint16_t box_mirror_y = SEGMENT.mirror_y;
   
-   if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
+  //  if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed  if (!SEGENV.allocateData(4)) return mode_static();
   if (SEGENV.call == 0) {
