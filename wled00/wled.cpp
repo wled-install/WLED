@@ -977,7 +977,7 @@ void WLED::setup() {
       esp_hosted_coprocessor_fwver_t c6_fw_version;
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
       USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
-      if (c6_fw_version.major1 > 1) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
+      if (c6_fw_version.major1 < 2) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
       esp_err_t check = ota_littlefs_perform(true);
       if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
         esp_err_t ret = esp_hosted_slave_ota_activate();
