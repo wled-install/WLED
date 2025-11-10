@@ -109,7 +109,11 @@
       #include <esp_eth.h>
     #endif
     #ifdef CONFIG_IDF_TARGET_ESP32P4
+      #include "nvs_flash.h"
       #include <esp_hosted.h>
+      #include "esp_hosted_ota.h"
+      #include "esp_hosted_api_types.h"
+      #include "ota_littlefs.h"
     #else
       #include <esp_wifi.h>
     #endif
@@ -389,6 +393,10 @@ WLED_GLOBAL bool noWifiSleep _INIT(true);                          // disabling 
 WLED_GLOBAL bool noWifiSleep _INIT(false);
 #endif
 WLED_GLOBAL bool force802_3g _INIT(false);
+WLED_GLOBAL bool hosted_needs_update _INIT(false);
+WLED_GLOBAL esp_netif_t* sta_netif _INIT(NULL);
+WLED_GLOBAL esp_netif_t* ap_netif _INIT(NULL);
+WLED_GLOBAL unsigned long staDisconnectTime _INIT(0);
 
 #ifdef WLED_USE_ETHERNET
   #ifdef WLED_ETH_DEFAULT                                          // default ethernet board type if specified
@@ -972,7 +980,14 @@ public:
     static WLED instance;
     return instance;
   }
-
+  enum WiFiConnectionState {
+    WIFI_STATE_BOOTING,
+    WIFI_STATE_STA_CONNECTING,  // Trying to connect to configured WiFi
+    WIFI_STATE_STA_CONNECTED,   // Successfully connected to WiFi
+    WIFI_STATE_AP_FALLBACK,     // Failed STA, running as AP
+    WIFI_STATE_AP_ALWAYS_ON,    // Running in STA+AP hybrid mode
+    WIFI_STATE_ETHERNET         // Ethernet is connected
+  };
   // boot starts here
   void setup() __attribute__((used));
 
@@ -980,7 +995,7 @@ public:
   static void reset();
 
   void beginStrip();
-  static void handleConnection();
+  void handleConnection();
   static bool initEthernet(); // result is informational
   static void initAP(bool resetAP = false);
   static void initConnection();
@@ -988,5 +1003,11 @@ public:
   static void handleStatusLED();
   void enableWatchdog();
   void disableWatchdog();
+  WiFiConnectionState wifiState = WIFI_STATE_BOOTING;
+  uint8_t staRetryCount = 0;
+  unsigned long lastStateTransitionTime = 0;
+
+  // This new function will replace initConnection() and initAP()
+  void setWiFiMode(WiFiConnectionState newState);
 };
 #endif        // WLED_H

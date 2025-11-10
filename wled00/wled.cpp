@@ -278,29 +278,28 @@ static const char *TAG = "WLED";
       vTaskDelete(NULL);
   }
 
-  static inline void show_list_files_all_devices(void)
-  {
-      // USER_PRINTF("ls command output for all connected devices:\n");
-      for (int i = 0; i < MAX_MSC_DEVICES; i++) {
-          if (msc_devices[i]) {
-              char mount_path[16];
-              snprintf(mount_path, sizeof(mount_path), MNT_PATH "%d", i);
+  // static inline void show_list_files_all_devices(void) {
+  //   // USER_PRINTF("ls command output for all connected devices:\n");
+  //   for (int i = 0; i < MAX_MSC_DEVICES; i++) {
+  //     if (msc_devices[i]) {
+  //       char mount_path[16];
+  //       snprintf(mount_path, sizeof(mount_path), MNT_PATH "%d", i);
 
-              USER_PRINTF("Listing contents of %s:\n", mount_path);
-              struct dirent *d;
-              DIR *dh = opendir(mount_path);
-              if (!dh) {
-                  USER_PRINTF("Failed to open directory: %s", mount_path);
-                  continue;
-              }
+  //       USER_PRINTF("Listing contents of %s:\n", mount_path);
+  //       struct dirent* d;
+  //       DIR* dh = opendir(mount_path);
+  //       if (!dh) {
+  //         USER_PRINTF("Failed to open directory: %s", mount_path);
+  //         continue;
+  //       }
 
-              while ((d = readdir(dh)) != NULL) {
-                  USER_PRINTF("%s/%s\n", mount_path, d->d_name);
-              }
-              closedir(dh);
-          }
-      }
-  }
+  //       while ((d = readdir(dh)) != NULL) {
+  //         USER_PRINTF("%s/%s\n", mount_path, d->d_name);
+  //       }
+  //       closedir(dh);
+  //     }
+  //   }
+  // }
 
   #define APP_QUEUE_SIZE 5
 
@@ -523,7 +522,7 @@ void background_loop_nonblocking(void* pvParameters) {
     static uint16_t avgStripMillis = 0;
     #endif
     handleTime();
-    WLED::handleConnection();
+    WLED::instance().handleConnection();
     #ifndef WLED_DISABLE_ESPNOW
     handleRemote();
     #endif
@@ -885,68 +884,6 @@ void WLED::setup() {
   // esp_log_level_set("*",ESP_LOG_VERBOSE);
   #endif 
 
-  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
-    #if !defined(WLED_USE_ETHERNET_ONLY)
-      #if defined(CONFIG_IDF_TARGET_ESP32P4)
-        esp_hosted_init();
-      #endif
-      esp_netif_init();
-      esp_event_loop_create_default();
-      // esp_netif_create_default_wifi_sta();
-      wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
-      esp_wifi_init(&wifi_initiation); 
-      esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
-      esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
-      uint8_t wifi_protocols;
-      if (CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT) {
-        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX);
-      } else {
-        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
-      }
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
-    #endif
-
-    #ifdef WLED_USE_ETHERNET
-      // Initialize TCP/IP network interface
-
-      #if defined(WLED_USE_ETHERNET_ONLY)
-      // With coexistence you don't need these again (can crash!)
-      ESP_ERROR_CHECK(esp_netif_init());
-      ESP_ERROR_CHECK(esp_event_loop_create_default());
-      #endif
-
-      // Create default Ethernet interface
-      esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
-      esp_netif_t *eth_netif = esp_netif_new(&cfg);
-      assert(eth_netif);
-
-      // Initialize Ethernet driver
-      eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-      esp32_emac_config.smi_gpio.mdc_num = 31;
-      esp32_emac_config.smi_gpio.mdio_num = 52;
-      eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-      eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-      phy_config.phy_addr = 1; // Set PHY address
-      phy_config.reset_gpio_num = 51; // Set PHY reset GPIO number
-
-      esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
-      esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
-
-      esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
-      
-      ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
-      ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
-
-      // Start Ethernet driver
-      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
-
-      // Register event handler for Ethernet events
-      ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
-      ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-    #endif
-  #endif
-
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_DISABLE_BROWNOUT_DET)
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detection
   #endif
@@ -995,6 +932,108 @@ void WLED::setup() {
   #endif
   #else  // 8266
   if (Serial) Serial.setTimeout(50);  // WLEDMM - only when serial is initialized
+  #endif
+
+  bool fsinit = false;
+  USER_PRINTLN(F("Mounting FS ..."));
+  #ifdef ARDUINO_ARCH_ESP32
+  fsinit = WLED_FS.begin(true);
+  #else
+  fsinit = WLED_FS.begin();
+  #endif
+  if (!fsinit) {
+    USER_PRINTLN(F("Mount FS failed!"));  // WLEDMM
+    errorFlag = ERR_FS_BEGIN;
+  } else {
+    USER_PRINTLN(F("Mount FS succeeded.")); // WLEDMM
+  }
+  esp_log_level_set("i2c", ESP_LOG_NONE);
+
+  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
+    #if !defined(WLED_USE_ETHERNET_ONLY)
+      esp_err_t ret = nvs_flash_init();
+      if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS is corrupt or full. This is unrecoverable.
+        USER_PRINTLN("NVS partition corrupt! Erasing and restarting...");
+        ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());
+        esp_restart();
+      }
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ret); // Check for other errors
+      USER_PRINTLN("NVS flash initialized.");
+
+      #if defined(CONFIG_IDF_TARGET_ESP32P4)
+        esp_hosted_init();
+      #endif
+      esp_netif_init();
+      esp_event_loop_create_default();
+      // esp_netif_create_default_wifi_sta();
+      wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
+      esp_wifi_init(&wifi_initiation);
+      esp_err_t check = ota_littlefs_perform(true);
+      if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
+        esp_err_t ret = esp_hosted_slave_ota_activate();
+        if (ret == ESP_OK) {
+          USER_PRINTLN("Slave will reboot with new firmware");
+          USER_PRINTLN("********* Restarting host to avoid sync issues *********");
+          vTaskDelay(pdMS_TO_TICKS(2000));
+          esp_restart();
+        } else {
+          USER_PRINTF("Failed to activate OTA: %s\n", esp_err_to_name(ret));
+        }
+      } else if (check == ESP_HOSTED_SLAVE_OTA_NOT_REQUIRED) {
+        USER_PRINTLN("WiFi CoProcessor doesn't need upgrading!");
+      }
+      esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
+      esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
+      uint8_t wifi_protocols;
+      if (CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT) {
+        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX);
+      } else {
+        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
+      }
+      // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
+      esp_wifi_set_mode(WIFI_MODE_APSTA);
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    #endif
+
+    #ifdef WLED_USE_ETHERNET
+      // Initialize TCP/IP network interface
+
+      #if defined(WLED_USE_ETHERNET_ONLY)
+      // With coexistence you don't need these again (can crash!)
+      ESP_ERROR_CHECK(esp_netif_init());
+      ESP_ERROR_CHECK(esp_event_loop_create_default());
+      #endif
+
+      // Create default Ethernet interface
+      esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
+      esp_netif_t *eth_netif = esp_netif_new(&cfg);
+      assert(eth_netif);
+
+      // Initialize Ethernet driver
+      eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+      esp32_emac_config.smi_gpio.mdc_num = 31;
+      esp32_emac_config.smi_gpio.mdio_num = 52;
+      eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+      eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+      phy_config.phy_addr = 1; // Set PHY address
+      phy_config.reset_gpio_num = 51; // Set PHY reset GPIO number
+
+      esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
+      esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
+
+      esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+      
+      ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+      ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+
+      // Start Ethernet driver
+      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+
+      // Register event handler for Ethernet events
+      ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+      ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+    #endif
   #endif
 
   //Serial0.setDebugOutput(false);
@@ -1254,19 +1293,6 @@ void WLED::setup() {
 
   for (uint8_t i=1; i<WLED_MAX_BUTTONS; i++) btnPin[i] = -1;
 
-  bool fsinit = false;
-  USER_PRINTLN(F("Mounting FS ..."));
-#ifdef ARDUINO_ARCH_ESP32
-  fsinit = WLED_FS.begin(true);
-#else
-  fsinit = WLED_FS.begin();
-#endif
-  if (!fsinit) {
-    USER_PRINTLN(F("Mount FS failed!"));  // WLEDMM
-    errorFlag = ERR_FS_BEGIN;
-  } else {
-      USER_PRINTLN(F("Mount FS succeeded.")); // WLEDMM
-  }
 #ifdef WLED_ADD_EEPROM_SUPPORT
   else deEEP();
 #else
@@ -1445,7 +1471,7 @@ void WLED::setup() {
 
   //#endif
   // WLEDMM end
-}
+} // endsetup
 
 void WLED::beginStrip() {
   // Initialize NeoPixel Strip and button
