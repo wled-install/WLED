@@ -65,7 +65,7 @@ static esp_err_t parse_image_header_from_file_littlefs(File& file, size_t* firmw
     return ESP_ERR_INVALID_ARG;
   }
 
-  USER_PRINTF("Image header: magic=0x%" PRIx8 ", segment_count=%" PRIu8 ", hash_appended=%" PRIu8, "\n", image_header.magic, image_header.segment_count, image_header.hash_appended);
+  USER_PRINTF("Image header: magic=0x%" PRIx8 ", segment_count=%" PRIu8 ", hash_appended=%" PRIu8 "\n", image_header.magic, image_header.segment_count, image_header.hash_appended);
 
   /* Calculate total size by reading all segments */
   offset = sizeof(image_header);
@@ -79,7 +79,7 @@ static esp_err_t parse_image_header_from_file_littlefs(File& file, size_t* firmw
       return ESP_FAIL;
     }
 
-    USER_PRINTF("Segment %d: data_len=%" PRIu32 ", load_addr=0x%" PRIx32, "\n", i, segment_header.data_len, segment_header.load_addr);
+    USER_PRINTF("Segment %d: data_len=%" PRIu32 ", load_addr=0x%" PRIx32 "\n", i, segment_header.data_len, segment_header.load_addr);
 
     /* Add segment header size + data size */
     total_size += sizeof(segment_header) + segment_header.data_len;
@@ -93,7 +93,7 @@ static esp_err_t parse_image_header_from_file_littlefs(File& file, size_t* firmw
 
         strncpy(app_version_str, app_desc.version, version_str_len - 1);
         app_version_str[version_str_len - 1] = '\0'; // Ensure null termination
-        USER_PRINTF("Found app description: version='%s', project_name='%s'", app_desc.version, app_desc.project_name);
+        USER_PRINTF("Found app description: version='%s', project_name='%s'\n", app_desc.version, app_desc.project_name);
       } else {
         USER_PRINTLN("Failed to read app description");
         strncpy(app_version_str, "unknown", version_str_len - 1);
@@ -123,7 +123,7 @@ static esp_err_t parse_image_header_from_file_littlefs(File& file, size_t* firmw
   }
 
   *firmware_size = total_size;
-  USER_PRINTF("Total image size: %u bytes", (unsigned int)*firmware_size);
+  USER_PRINTF("Total image size: %u bytes\n", (unsigned int)*firmware_size);
 
   return ESP_OK;
 }
@@ -176,7 +176,7 @@ esp_err_t ota_littlefs_perform(bool delete_after_use) {
   String latest_filename;
   String firmware_path;
   File firmware_file;
-  uint8_t* chunk = (uint8_t*)malloc(CHUNK_SIZE); // Use heap for chunk buffer
+  uint8_t* chunk = (uint8_t*)heap_caps_malloc_prefer(CHUNK_SIZE, 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_DMA, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL); // Use heap for chunk buffer
   size_t bytes_read;
   esp_err_t ret = ESP_OK;
 
@@ -185,7 +185,7 @@ esp_err_t ota_littlefs_perform(bool delete_after_use) {
     return ESP_ERR_NO_MEM;
   }
 
-  USER_PRINTLN("Starting WiFi OTA process...");
+  USER_PRINTLN("Starting WiFi CoProcessor OTA process...");
 
   /* Find the latest firmware file */
   USER_PRINTLN("Searching for firmware files in LittleFS");
@@ -212,16 +212,16 @@ esp_err_t ota_littlefs_perform(bool delete_after_use) {
   size_t firmware_size;
   char new_app_version[32];
   ret = parse_image_header_from_file_littlefs(firmware_file, &firmware_size, new_app_version, sizeof(new_app_version));
+  firmware_file.close();
   if (ret != ESP_OK) {
     USER_PRINTF("Failed to parse image header: %s\n", esp_err_to_name(ret));
-    firmware_file.close();
     free(chunk);
     return ESP_HOSTED_SLAVE_OTA_FAILED;
   }
 
   USER_PRINTF("Firmware verified - Size: %u bytes, Version: %s\n", (unsigned int)firmware_size, new_app_version);
 
-  #ifndef CONFIG_OTA_VERSION_FORCE_SLAVEFW_SLAVE
+  #ifndef CONFIG_OTA_VERSION_FORCE_SLAVEFW
   /* Get current running slave firmware version */
   esp_hosted_coprocessor_fwver_t current_slave_version = { 0 };
   esp_err_t version_ret = esp_hosted_get_coprocessor_fwversion(&current_slave_version);
@@ -259,18 +259,27 @@ esp_err_t ota_littlefs_perform(bool delete_after_use) {
     return ESP_HOSTED_SLAVE_OTA_FAILED;
   }
 
-  /* Rewind file to the beginning to send it for OTA */
-  firmware_file.seek(0, SeekSet);
+  firmware_file = LittleFS.open(firmware_path, "r");
+  if (!firmware_file) {
+    USER_PRINTF("Failed to re-open firmware file for writing: %s\n", firmware_path.c_str());
+    free(chunk);
+    return ESP_FAIL;
+  }
 
   /* Write firmware in chunks */
+  uint32_t chunk_num = 1;
   while ((bytes_read = firmware_file.read(chunk, CHUNK_SIZE)) > 0) {
     ret = esp_hosted_slave_ota_write(chunk, bytes_read);
     if (ret != ESP_OK) {
-      USER_PRINTF("Failed to write OTA chunk: %s\n", esp_err_to_name(ret));
+      USER_PRINTF("Failed to write OTA chunk %d: %s\n", chunk_num, esp_err_to_name(ret));
       firmware_file.close();
       free(chunk);
       return ESP_HOSTED_SLAVE_OTA_FAILED;
+    } else {
+      USER_PRINTF("Wrote OTA chunk %d (%d bytes)\n", chunk_num, bytes_read);
     }
+    chunk_num++;
+    vTaskDelay(100/portTICK_PERIOD_MS);
   }
 
   // File is now fully read, close it

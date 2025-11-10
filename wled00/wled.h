@@ -397,6 +397,10 @@ WLED_GLOBAL bool hosted_needs_update _INIT(false);
 WLED_GLOBAL esp_netif_t* sta_netif _INIT(NULL);
 WLED_GLOBAL esp_netif_t* ap_netif _INIT(NULL);
 WLED_GLOBAL unsigned long staDisconnectTime _INIT(0);
+WLED_GLOBAL EventGroupHandle_t s_wifi_event_group;
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+WLED_GLOBAL int s_retry_num _INIT(0);
 
 #ifdef WLED_USE_ETHERNET
   #ifdef WLED_ETH_DEFAULT                                          // default ethernet board type if specified
@@ -996,7 +1000,7 @@ public:
 
   void beginStrip();
   void handleConnection();
-  static bool initEthernet(); // result is informational
+  // static bool initEthernet(); // result is informational
   static void initAP(bool resetAP = false);
   static void initConnection();
   static void initInterfaces();

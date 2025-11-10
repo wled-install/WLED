@@ -800,6 +800,7 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
 
     if (event_id == WIFI_EVENT_STA_START) {
       USER_PRINTLN("Event: WiFi Started");
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
       interfacesInited = false;
       wifi_is_connected = false;
     } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
@@ -810,11 +811,14 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       USER_PRINTLN("Event: WiFi Lost Connection");
       interfacesInited = false;
       wifi_is_connected = false;
-      if (retry_num < 5 && !apActive) {
-        esp_wifi_connect();
-        retry_num++;
-        USER_PRINTLN("Retrying to Connect...\n");
+      if (s_retry_num < 5) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+        s_retry_num++;
+        USER_PRINTF("Event Action: Retry to connect to the AP %d\n", s_retry_num);
+      } else {
+        xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
       }
+      ESP_LOGI(TAG, "connect to the AP fail");
     } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE) {
       // USER_PRINTLN("Event: WiFi HOME CHANNEL CHANGED");
     } else if (event_id == WIFI_EVENT_STA_STOP) {
@@ -823,6 +827,7 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       wifi_is_connected = false;
     } else if (event_id == WIFI_EVENT_AP_START) {
       USER_PRINTLN("Event: SoftAP Started");
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
       interfacesInited = false;
       wifi_is_connected = false;
       g_ap_client_count = 0; // Reset count when AP starts
@@ -851,6 +856,9 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       USER_PRINTLN("Event: WiFi Got IP");
       interfacesInited = false;
       wifi_is_connected = true;
+      ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
+      s_retry_num = 0;
+      xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
   }
 }
@@ -961,14 +969,15 @@ void WLED::setup() {
       ESP_ERROR_CHECK_WITHOUT_ABORT(ret); // Check for other errors
       USER_PRINTLN("NVS flash initialized.");
 
+      ESP_ERROR_CHECK(esp_event_loop_create_default());
       #if defined(CONFIG_IDF_TARGET_ESP32P4)
-        esp_hosted_init();
+        ESP_ERROR_CHECK(esp_hosted_init());
       #endif
-      esp_netif_init();
-      esp_event_loop_create_default();
-      // esp_netif_create_default_wifi_sta();
-      wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
-      esp_wifi_init(&wifi_initiation);
+      ESP_ERROR_CHECK(esp_hosted_connect_to_slave());
+      esp_hosted_coprocessor_fwver_t c6_fw_version;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
+      USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
+      if (c6_fw_version.major1 > 1) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
       esp_err_t check = ota_littlefs_perform(true);
       if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
         esp_err_t ret = esp_hosted_slave_ota_activate();
@@ -983,6 +992,17 @@ void WLED::setup() {
       } else if (check == ESP_HOSTED_SLAVE_OTA_NOT_REQUIRED) {
         USER_PRINTLN("WiFi CoProcessor doesn't need upgrading!");
       }
+      esp_netif_init();
+      
+      sta_netif = esp_netif_create_default_wifi_sta();
+      ap_netif = esp_netif_create_default_wifi_ap();
+
+      wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
+      esp_wifi_init(&wifi_initiation);
+      s_wifi_event_group = xEventGroupCreate();
+      if (s_wifi_event_group == NULL) {
+        USER_PRINTLN("FATAL: Failed to create WiFi event group!");
+      }
       esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
       esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
       uint8_t wifi_protocols;
@@ -991,9 +1011,9 @@ void WLED::setup() {
       } else {
         wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
       }
-      // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
-      esp_wifi_set_mode(WIFI_MODE_APSTA);
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
+      // esp_wifi_set_mode(WIFI_MODE_APSTA);
+      // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
     #endif
 
     #ifdef WLED_USE_ETHERNET
@@ -1520,8 +1540,6 @@ void WLED::initAP(bool resetAP)
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_stop());
 
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_init(&cfg));
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
 
   wifi_config_t wifi_ap_config = {};
@@ -1529,8 +1547,8 @@ void WLED::initAP(bool resetAP)
   strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.password), apPass, sizeof(wifi_ap_config.sta.password));
   wifi_ap_config.ap.ssid_len = strlen(apSSID);
   wifi_ap_config.ap.channel = apChannel;
-  wifi_ap_config.ap.max_connection = 255;
-  wifi_ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  wifi_ap_config.ap.max_connection = 100;
+  wifi_ap_config.ap.authmode = WIFI_AUTH_WPA_PSK;
   wifi_ap_config.ap.pmf_cfg.required = false;
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
@@ -1545,26 +1563,18 @@ void WLED::initAP(bool resetAP)
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
 
-  esp_netif_t* esp_netif_ap = esp_netif_create_default_wifi_ap();
-  esp_netif_t* esp_netif_sta = esp_netif_create_default_wifi_sta();
-
+  ESP_ERROR_CHECK(esp_wifi_set_country_code("CA", true));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
   
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
 
   // esp_netif_dns_info_t dns;
-  // esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns);
+  // esp_netif_get_dns_info(sta_netif, ESP_NETIF_DNS_MAIN, &dns);
   // uint8_t dhcps_offer_option = 0x02;
-  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(esp_netif_ap));
-  // ESP_ERROR_CHECK(esp_netif_dhcps_option(esp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
-  // ESP_ERROR_CHECK(esp_netif_set_dns_info(esp_netif_ap, ESP_NETIF_DNS_MAIN, &dns));
-  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(esp_netif_ap));
-
-  // WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
-  // WiFi.softAP(apSSID, apPass, apChannel, apHide, 8); // WLED-MM allow up to 8 clients for ad-hoc "in the field" syncing.
-#if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4))
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  #endif
+  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(ap_netif));
+  // ESP_ERROR_CHECK(esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
+  // ESP_ERROR_CHECK(esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns));
+  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(ap_netif));
 
   if (!apActive) // start captive portal if AP active
   {
@@ -1593,110 +1603,6 @@ void WLED::initAP(bool resetAP)
   apActive = true;
 }
 
-bool WLED::initEthernet() {
-#if defined(WLED_USE_ETHERNET)
-  static bool successfullyConfiguredEthernet = false;
-
-  if (successfullyConfiguredEthernet) {
-    // DEBUG_PRINTLN(F("initE: ETH already successfully configured, ignoring"));
-    return false;
-  }
-  if (ethernetType == WLED_ETH_NONE) {
-    return false;
-  }
-  if (ethernetType >= WLED_NUM_ETH_TYPES) {
-    DEBUG_PRINT(F("initE: Ignoring attempt for invalid ethernetType ")); DEBUG_PRINTLN(ethernetType);
-    return false;
-  }
-
-  DEBUG_PRINT(F("initE: Attempting ETH config: ")); DEBUG_PRINTLN(ethernetType);
-
-  // Ethernet initialization should only succeed once -- else reboot required
-  ethernet_settings es = ethernetBoards[ethernetType];
-  managed_pin_type pinsToAllocate[10] = {
-    // first six pins are non-configurable
-    esp32_nonconfigurable_ethernet_pins[0],
-    esp32_nonconfigurable_ethernet_pins[1],
-    esp32_nonconfigurable_ethernet_pins[2],
-    esp32_nonconfigurable_ethernet_pins[3],
-    esp32_nonconfigurable_ethernet_pins[4],
-    esp32_nonconfigurable_ethernet_pins[5],
-    { (int8_t)es.eth_mdc,   true },  // [6] = MDC  is output and mandatory
-    { (int8_t)es.eth_mdio,  true },  // [7] = MDIO is bidirectional and mandatory
-    { (int8_t)es.eth_power, true },  // [8] = optional pin, not all boards use
-    { ((int8_t)0xFE),       false }, // [9] = replaced with eth_clk_mode, mandatory
-  };
-#if defined(WLED_USE_ETHERNET) && !defined(CONFIG_IDF_TARGET_ESP32P4)
-  // update the clock pin....
-  if (es.eth_clk_mode == ETH_CLOCK_GPIO0_IN) {
-    pinsToAllocate[9].pin = 0;
-    pinsToAllocate[9].isOutput = false;
-  } else if (es.eth_clk_mode == ETH_CLOCK_GPIO0_OUT) {
-    pinsToAllocate[9].pin = 0;
-    pinsToAllocate[9].isOutput = true;
-  } else if (es.eth_clk_mode == ETH_CLOCK_GPIO16_OUT) {
-    pinsToAllocate[9].pin = 16;
-    pinsToAllocate[9].isOutput = true;
-  } else if (es.eth_clk_mode == ETH_CLOCK_GPIO17_OUT) {
-    pinsToAllocate[9].pin = 17;
-    pinsToAllocate[9].isOutput = true;
-  } else {
-    DEBUG_PRINT(F("initE: Failing due to invalid eth_clk_mode ("));
-    DEBUG_PRINT(es.eth_clk_mode);
-    DEBUG_PRINTLN(")");
-    return false;
-  }
-
-  if (!pinManager.allocateMultiplePins(pinsToAllocate, 10, PinOwner::Ethernet)) {
-    DEBUG_PRINTLN(F("initE: Failed to allocate ethernet pins"));
-    return false;
-  }
-#endif
-
-  /*
-  For LAN8720 the most correct way is to perform clean reset each time before init
-  applying LOW to power or nRST pin for at least 100 us (please refer to datasheet, page 59)
-  ESP_IDF > V4 implements it (150 us, lan87xx_reset_hw(esp_eth_phy_t *phy) function in
-  /components/esp_eth/src/esp_eth_phy_lan87xx.c, line 280)
-  but ESP_IDF < V4 does not. Lets do it:
-  [not always needed, might be relevant in some EMI situations at startup and for hot resets]
-  */
-#if ESP_IDF_VERSION_MAJOR==3
-  if (es.eth_power > 0 && es.eth_type == ETH_PHY_LAN8720) {
-    pinMode(es.eth_power, OUTPUT);
-    digitalWrite(es.eth_power, 0);
-    delayMicroseconds(150);
-    digitalWrite(es.eth_power, 1);
-    delayMicroseconds(10);
-  }
-#endif
-
-  // if (!ETH.begin(
-  //               (uint8_t) es.eth_address,
-  //               (int)     es.eth_power,
-  //               (int)     es.eth_mdc,
-  //               (int)     es.eth_mdio,
-  //               (eth_phy_type_t)   es.eth_type,
-  //               (eth_clock_mode_t) es.eth_clk_mode
-  //               )) {
-  if (!ETH.begin()) {
-    DEBUG_PRINTLN(F("initC: ETH.begin() failed"));
-    // de-allocate the allocated pins
-    for (managed_pin_type mpt : pinsToAllocate) {
-      pinManager.deallocatePin(mpt.pin, PinOwner::Ethernet);
-    }
-    return false;
-  }
-
-  successfullyConfiguredEthernet = true;
-  USER_PRINTLN(F("initC: *** Ethernet successfully configured! ***"));  // WLEDMM
-  return true;
-#else
-  return false; // Ethernet not enabled for build
-#endif
-
-}
-
 void WLED::initConnection() {
   USER_PRINTLN("initConnection");
 
@@ -1720,43 +1626,56 @@ void WLED::initConnection() {
   busses.removeAll(); // TROYHACKS FAILSAFE IN CASE BUSSES ARE CAUSING CRASHES
 #endif
 
+  // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
+  char hostname[25];
+  prepareHostname(hostname);
+  
 #ifndef WLED_USE_ETHERNET_ONLY 
   if (!WLED_WIFI_CONFIGURED) {
     USER_PRINTLN(F("No WiFi connection configured."));  // WLEDMM
     if (!apActive) initAP();        // instantly go to ap mode
+    showWelcomePage = true;
     return;
   } else if (!apActive) {
     if (apBehavior == AP_BEHAVIOR_ALWAYS) {
       DEBUG_PRINTLN(F("Access point ALWAYS enabled."));
       initAP();
-    } else {
-      DEBUG_PRINTLN(F("Access point disabled (init)."));
-      wifi_mode_t mode;
-      esp_wifi_get_mode(&mode);
-      if (mode == WIFI_MODE_APSTA) {
-        esp_wifi_stop();
-        USER_PRINTLN("initConnection WIFI_MODE_APSTA forcing reconnect");
-        forceReconnect = true;
-      }
+      showWelcomePage = false;
     }
   }
-  showWelcomePage = false;
+  
 #endif
-  // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
-  char hostname[25];
-  prepareHostname(hostname);
 
 #ifndef WLED_USE_ETHERNET_ONLY
-  USER_PRINT("Connecting to WiFi: ");
-  USER_PRINTLN(clientSSID);
-  wifi_config_t wifi_configuration = {};
-  strncpy(reinterpret_cast<char*>(wifi_configuration.sta.ssid), clientSSID, sizeof(wifi_configuration.sta.ssid));
-  strncpy(reinterpret_cast<char*>(wifi_configuration.sta.password), clientPass, sizeof(wifi_configuration.sta.password));
-  wifi_configuration.sta.ssid[sizeof(wifi_configuration.sta.ssid) - 1] = '\0';
-  wifi_configuration.sta.password[sizeof(wifi_configuration.sta.password) - 1] = '\0';
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config((wifi_interface_t)ESP_IF_WIFI_STA, &wifi_configuration));
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+  if (WLED_WIFI_CONFIGURED && apBehavior != AP_BEHAVIOR_ALWAYS) {
+    wifi_config_t wifi_sta_config = {};
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
+    wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_sta_config.sta.failure_retry_cnt = 5;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+    wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    USER_PRINTF("Connecting to WiFi Station: \"%s\" with password \"%s\"\n", wifi_sta_config.sta.ssid, "********");
+  }
+
+//   EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+//     WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+//     pdFALSE,
+//     pdFALSE,
+//     portMAX_DELAY);
+
+//   /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+//   * happened. */
+//   if (bits & WIFI_CONNECTED_BIT) {
+//     USER_PRINTF("Connected to AP SSID:%s password:%s\n", clientSSID, clientPass);
+//   } else if (bits & WIFI_FAIL_BIT) {
+//     USER_PRINTF("Failed to connect to SSID:%s, password:%s\n", clientSSID, clientPass);
+//   } else {
+//     ESP_LOGE(TAG, "UNEXPECTED EVENT");
+//   }
 #endif
 
 #ifdef WLED_USE_ETHERNET
@@ -1765,13 +1684,8 @@ void WLED::initConnection() {
   USER_PRINTF("Network.isEthernet = %d\n", Network.isEthernet());
 #endif
 
-  // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-  // wifi_init_sta();
+  // esp_wifi_set_max_tx_power(84);
 
-#if defined(LOLIN_WIFI_FIX) && (defined(ARDUINO_ARCH_ESP32C3) || defined(ARDUINO_ARCH_ESP32C6) || defined(ARDUINO_ARCH_ESP32S2) || defined(ARDUINO_ARCH_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4))
-// WiFi.setTxPower(WIFI_POWER_8_5dBm);
-#endif
-// WiFi.setSleep(!noWifiSleep);
   Network.setHostname(hostname);
   USER_PRINTLN("end initConnection");
 }
@@ -1881,19 +1795,19 @@ void WLED::handleConnection() {
       initConnection();
       return; // CRITICAL: Return immediately after state change
     }
-    //send improv failed 6 seconds after second init attempt (24 sec. after provisioning)
+    // send improv failed 6 seconds after second init attempt (24 sec. after provisioning)
     if (improvActive > 2 && now - lastReconnectAttempt > 6000) {
       sendImprovStateResponse(0x03, true);
       improvActive = 2;
     }
     if (now - lastReconnectAttempt > ((stac) ? 300000 : 18000) && WLED_WIFI_CONFIGURED) {
       if (improvActive == 2) improvActive = 3;
-      DEBUG_PRINTLN(F("Last reconnect too old."));
+      USER_PRINTLN(F("Last reconnect too old."));
       initConnection();
       return; // CRITICAL: Return immediately after state change
     }
     if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
-      DEBUG_PRINTLN(F("Not connected AP."));
+      USER_PRINTLN(F("Not connected starting AP."));
       initAP();
     }
   }

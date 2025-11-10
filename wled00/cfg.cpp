@@ -33,7 +33,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   JsonObject ethernet = doc[F("eth")];
   CJSON(ethernetType, ethernet["type"]);
   // NOTE: Ethernet configuration takes priority over other use of pins
-  WLED::instance().initEthernet();
+  // WLED::instance().initEthernet();
   #endif
 
   JsonObject id = doc["id"];
@@ -639,7 +639,7 @@ void deserializeConfigFromFS() {
     serializeConfig();
     // init Ethernet (in case default type is set at compile time)
     #ifdef WLED_USE_ETHERNET
-    WLED::instance().initEthernet();
+    // WLED::instance().initEthernet();
     #endif
     return;
   }

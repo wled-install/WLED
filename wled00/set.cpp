@@ -59,7 +59,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
 
     #ifdef WLED_USE_ETHERNET
     ethernetType = request->arg(F("ETH")).toInt();
-    WLED::instance().initEthernet();
+    // WLED::instance().initEthernet();
     #endif
 
     char k[3]; k[2] = 0;
