@@ -396,6 +396,7 @@ WLED_GLOBAL bool force802_3g _INIT(false);
 WLED_GLOBAL bool hosted_needs_update _INIT(false);
 WLED_GLOBAL esp_netif_t* sta_netif _INIT(NULL);
 WLED_GLOBAL esp_netif_t* ap_netif _INIT(NULL);
+WLED_GLOBAL esp_netif_t* eth_netif _INIT(NULL);
 WLED_GLOBAL unsigned long staDisconnectTime _INIT(0);
 WLED_GLOBAL EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0

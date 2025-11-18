@@ -968,30 +968,30 @@ void WLED::setup() {
       }
       ESP_ERROR_CHECK_WITHOUT_ABORT(ret); // Check for other errors
       USER_PRINTLN("NVS flash initialized.");
-
       ESP_ERROR_CHECK(esp_event_loop_create_default());
       #if defined(CONFIG_IDF_TARGET_ESP32P4)
         ESP_ERROR_CHECK(esp_hosted_init());
-      #endif
-      ESP_ERROR_CHECK(esp_hosted_connect_to_slave());
-      esp_hosted_coprocessor_fwver_t c6_fw_version;
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
-      USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
-      if (c6_fw_version.major1 < 2) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
-      esp_err_t check = ota_littlefs_perform(true);
-      if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
-        esp_err_t ret = esp_hosted_slave_ota_activate();
-        if (ret == ESP_OK) {
-          USER_PRINTLN("Slave will reboot with new firmware");
-          USER_PRINTLN("********* Restarting host to avoid sync issues *********");
-          vTaskDelay(pdMS_TO_TICKS(2000));
-          esp_restart();
-        } else {
-          USER_PRINTF("Failed to activate OTA: %s\n", esp_err_to_name(ret));
+        ESP_ERROR_CHECK(esp_hosted_connect_to_slave());
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_restore());
+        esp_hosted_coprocessor_fwver_t c6_fw_version;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
+        USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
+        if (c6_fw_version.major1 < 2) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
+        esp_err_t check = ota_littlefs_perform(true);
+        if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
+          esp_err_t ret = esp_hosted_slave_ota_activate();
+          if (ret == ESP_OK) {
+            USER_PRINTLN("Slave will reboot with new firmware");
+            USER_PRINTLN("********* Restarting host to avoid sync issues *********");
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            esp_restart();
+          } else {
+            USER_PRINTF("Failed to activate OTA: %s\n", esp_err_to_name(ret));
+          }
+        } else if (check == ESP_HOSTED_SLAVE_OTA_NOT_REQUIRED) {
+          USER_PRINTLN("WiFi CoProcessor doesn't need upgrading!");
         }
-      } else if (check == ESP_HOSTED_SLAVE_OTA_NOT_REQUIRED) {
-        USER_PRINTLN("WiFi CoProcessor doesn't need upgrading!");
-      }
+      #endif
       esp_netif_init();
       
       sta_netif = esp_netif_create_default_wifi_sta();
@@ -1026,8 +1026,15 @@ void WLED::setup() {
       #endif
 
       // Create default Ethernet interface
+      // esp_netif_inherent_config_t my_eth_base = _g_esp_netif_inherent_eth_config;
+      // my_eth_base.route_prio = 200;
+      // esp_netif_config_t cfg = {
+      //   .base = &my_eth_base,
+      //   .driver = NULL,
+      //   .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
+      // };
       esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
-      esp_netif_t *eth_netif = esp_netif_new(&cfg);
+      eth_netif = esp_netif_new(&cfg);
       assert(eth_netif);
 
       // Initialize Ethernet driver
