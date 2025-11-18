@@ -863,6 +863,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
             }
           }
           #else
+          uint8_t* buffer = buffer_in;
           #if defined(CONFIG_IDF_TARGET_ESP32P4)
           p4_mul16x16(packet_buffer + 18, &bri, (packetSize >> 4) + 1, buffer + bufferOffset);
           #else
