@@ -153,6 +153,10 @@
 #include "../usermods/ADS1115_v2/usermod_ads1115.h"
 #endif
 
+#ifdef USERMOD_PIONEER_PROLINK
+#include "../usermods/usermod_v2_pioneer_prolink/usermod_v2_pioneer_prolink.h"
+#endif
+
 #ifdef USERMOD_KLIPPER_PERCENTAGE
   #include "../usermods/usermod_v2_klipper_percentage/usermod_v2_klipper_percentage.h"
 #endif
@@ -349,6 +353,10 @@ void registerUsermods()
 
 #ifdef USERMOD_ADS1115
   usermods.add(new ADS1115Usermod());
+#endif
+
+#ifdef USERMOD_PIONEER_PROLINK
+  usermods.add(new ProLinkUsermod());
 #endif
 
 #ifdef USERMOD_KLIPPER_PERCENTAGE

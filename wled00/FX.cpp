@@ -6729,109 +6729,184 @@ static const char _data_FX_MODE_2DBLOBS[] PROGMEM = "Blobs@!,# blobs,Blur;!;!;2;
 
 
 ////////////////////////////
-//     2D Scrolling text  //
+//    2D Scrolling text   //
 ////////////////////////////
 uint16_t mode_2Dscrollingtext(void) {
   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
 
+  // --- LINK TO PRO DJ LINK ---
+  #ifdef USERMOD_PIONEER_PROLINK
+  extern volatile float prolink_bpm_public;
+  extern volatile uint8_t prolink_beat_public;
+  extern volatile uint16_t prolink_beats_elapsed_public;
+  extern volatile uint8_t prolink_bars_elapsed_public;
+  extern volatile uint8_t prolink_bars_remaining_public;
+  extern volatile uint32_t prolink_beat_number_public;
+  extern volatile float prolink_beat_progress_public;
+  extern volatile uint32_t prolink_track_id_public;
+  #endif
+
   const uint16_t cols = SEGMENT.virtualWidth();
   const uint16_t rows = SEGMENT.virtualHeight();
   if (SEGENV.call == 0) {
-    SEGMENT.setUpLeds(); // WLEDMM use lossless getPixelColor()
+    SEGMENT.setUpLeds();
     SEGMENT.fill(BLACK);
   }
 
   int letterWidth;
   int letterHeight;
   switch (map(SEGMENT.custom2, 0, 255, 1, 5)) {
-    default:
-    case 1: letterWidth = 4; letterHeight =  6; break;
-    case 2: letterWidth = 5; letterHeight =  8; break;
-    case 3: letterWidth = 6; letterHeight =  8; break;
-    case 4: letterWidth = 7; letterHeight =  9; break;
-    case 5: letterWidth = 5; letterHeight = 12; break;
+  default:
+  case 1: letterWidth = 4; letterHeight = 6; break;
+  case 2: letterWidth = 5; letterHeight = 8; break;
+  case 3: letterWidth = 6; letterHeight = 8; break;
+  case 4: letterWidth = 7; letterHeight = 9; break;
+  case 5: letterWidth = 5; letterHeight = 12; break;
   }
-  const int yoffset = map(SEGMENT.intensity, 0, 255, -rows/2, rows/2) + (rows-letterHeight)/2;
-  char text[33] = {'\0'};
-  unsigned maxLen = (SEGMENT.name) ? min(32, (int)strlen(SEGMENT.name)) : 0;  // WLEDMM make it robust against too long segment names
-  if (SEGMENT.name) for (size_t i=0,j=0; i<maxLen; i++) if (SEGMENT.name[i]>31 && SEGMENT.name[i]<128) text[j++] = SEGMENT.name[i];
+  const int yoffset = map(SEGMENT.intensity, 0, 255, -rows / 2, rows / 2) + (rows - letterHeight) / 2;
+  char text[64] = { '\0' };  // Increased to 64 for longer combined strings
+  unsigned maxLen = (SEGMENT.name) ? min(63, (int)strlen(SEGMENT.name)) : 0;
+  if (SEGMENT.name) for (size_t i = 0, j = 0; i < maxLen; i++) if (SEGMENT.name[i] > 31 && SEGMENT.name[i] < 128) text[j++] = SEGMENT.name[i];
   const bool zero = strchr(text, '0') != nullptr;
-  bool drawShadow = (SEGMENT.check2); // "shadow" is only needed for overlays to improve readability
+  bool drawShadow = (SEGMENT.check2);
 
   // #ERR = show last error code
-  if ((strlen(text) > 3) && (strncmp_P(text,PSTR("#ERR"),4) == 0)) {
-    // read wled error code, and keep it for 30sec max
-    static byte lastErr = ERR_NONE;        // errorFlag cache - we can use a static (global) variable here because the error code is global, too
-    static unsigned long lastErrTime = 0;  // time when lastErr was updated
-    if ((errorFlag != ERR_NONE) && (lastErr != errorFlag)) { // new error code arrived
+  if ((strlen(text) > 3) && (strncmp_P(text, PSTR("#ERR"), 4) == 0)) {
+    static byte lastErr = ERR_NONE;
+    static unsigned long lastErrTime = 0;
+    if ((errorFlag != ERR_NONE) && (lastErr != errorFlag)) {
       lastErr = errorFlag;
       lastErrTime = millis();
     }
-    bool haveError = (lastErr != ERR_NONE) && (millis() - lastErrTime < 30000);   // true if we have an "active" error code
-    if (SEGENV.call < 512) haveError = true;                                      // for testing - initially show "E00"
-    if ((!haveError) && (errorFlag == ERR_NONE)) lastErr = ERR_NONE;              // reset error code
-    // print error number
+    bool haveError = (lastErr != ERR_NONE) && (millis() - lastErrTime < 30000);
+    if (SEGENV.call < 512) haveError = true;
+    if ((!haveError) && (errorFlag == ERR_NONE)) lastErr = ERR_NONE;
     if (haveError) sprintf_P(text, PSTR("E%-2.2d"), (int)lastErr);
     else sprintf_P(text, PSTR("   "));
   }
 
-  if (!strlen(text) || !strncmp_P(text,PSTR("#F"),2) || !strncmp_P(text,PSTR("#P"),2) || !strncmp_P(text,PSTR("#A"),2) || !strncmp_P(text,PSTR("#DATE"),5) || !strncmp_P(text,PSTR("#DDMM"),5) || !strncmp_P(text,PSTR("#MMDD"),5) || !strncmp_P(text,PSTR("#TIME"),5) || !strncmp_P(text,PSTR("#HH"),3) || !strncmp_P(text,PSTR("#MM"),3)) { // fallback if empty segment name: display date and time
-    if (!strncmp_P(text,PSTR("#D"),2) || !strncmp_P(text,PSTR("#MM"),3) || !strncmp_P(text,PSTR("#HH"),3)) drawShadow = false; // no seconds - no shadow needed
-    char sec[5]= {'\0'};
+  // --- MACRO CHECK ---
+  // Check if text contains any macros
+  bool hasMacro = !strlen(text) ||
+    !strncmp_P(text, PSTR("#F"), 2) || !strncmp_P(text, PSTR("#P"), 2) || !strncmp_P(text, PSTR("#A"), 2) ||
+    !strncmp_P(text, PSTR("#DATE"), 5) || !strncmp_P(text, PSTR("#DDMM"), 5) || !strncmp_P(text, PSTR("#MMDD"), 5) ||
+    !strncmp_P(text, PSTR("#TIME"), 5) || !strncmp_P(text, PSTR("#HH"), 3) || !strncmp_P(text, PSTR("#MM"), 3) ||
+    strstr(text, "#BPM") || strstr(text, "#BEATPOS") || strstr(text, "#BEAT") || strstr(text, "#BARS") ||
+    strstr(text, "#ENDING") || strstr(text, "#TRACK") || strstr(text, "#PROGRESS");
+
+  if (hasMacro) {
+    if (!strncmp_P(text, PSTR("#D"), 2) || !strncmp_P(text, PSTR("#MM"), 3) || !strncmp_P(text, PSTR("#HH"), 3)) drawShadow = false;
+
+    char sec[5] = { '\0' };
     byte AmPmHour = hour(localTime);
     boolean isitAM = true;
     if (useAMPM) {
       if (AmPmHour > 11) { AmPmHour -= 12; isitAM = false; }
-      if (AmPmHour == 0) { AmPmHour  = 12; }
+      if (AmPmHour == 0) { AmPmHour = 12; }
     }
     if (useAMPM) sprintf_P(sec, PSTR(" %2s"), (isitAM ? "AM" : "PM"));
     else         sprintf_P(sec, PSTR(":%02d"), second(localTime));
-    if      (!strncmp_P(text,PSTR("#DATE"),5)) sprintf_P(text, zero?PSTR("%02d.%02d.%04d"):PSTR("%d.%d.%d"),   day(localTime),   month(localTime),  year(localTime));
-    else if (!strncmp_P(text,PSTR("#DDMM"),5)) sprintf_P(text, zero?PSTR("%02d.%02d")     :PSTR("%d.%d"),      day(localTime),   month(localTime));
-    else if (!strncmp_P(text,PSTR("#MMDD"),5)) sprintf_P(text, zero?PSTR("%02d/%02d")     :PSTR("%d/%d"),      month(localTime), day(localTime));
-    else if (!strncmp_P(text,PSTR("#TIME"),5)) sprintf_P(text, zero?PSTR("%02d:%02d%s")   :PSTR("%2d:%02d%s"), AmPmHour,         minute(localTime), sec);
-    else if (!strncmp_P(text,PSTR("#HHMM"),5)) sprintf_P(text, zero?PSTR("%02d:%02d")     :PSTR("%d:%02d"),    AmPmHour,         minute(localTime));
-    else if (!strncmp_P(text,PSTR("#HH"),3))   sprintf_P(text, zero?PSTR("%02d")          :PSTR("%d"),         AmPmHour);
-    else if (!strncmp_P(text,PSTR("#MM"),3))   sprintf_P(text, zero?PSTR("%02d")          :PSTR("%d"),        minute(localTime));
-    else if (!strncmp_P(text,PSTR("#FPS"),4)) sprintf_P(text, PSTR("%3d"), (int) strip.getFps());                     // WLEDMM
-    else if ((!strncmp_P(text,PSTR("#AMP"),4)) || (!strncmp_P(text,PSTR("#POW"),4))) sprintf_P(text, PSTR("%3.1fA"), float(strip.currentMilliamps)/1000.0f); // WLEDMM
+
+    // --- MACRO REPLACEMENT ---
+    // For time/date macros (they're exclusive, can't combine)
+    if (!strncmp_P(text, PSTR("#DATE"), 5)) sprintf_P(text, zero ? PSTR("%02d.%02d.%04d") : PSTR("%d.%d.%d"), day(localTime), month(localTime), year(localTime));
+    else if (!strncmp_P(text, PSTR("#DDMM"), 5)) sprintf_P(text, zero ? PSTR("%02d.%02d") : PSTR("%d.%d"), day(localTime), month(localTime));
+    else if (!strncmp_P(text, PSTR("#MMDD"), 5)) sprintf_P(text, zero ? PSTR("%02d/%02d") : PSTR("%d/%d"), month(localTime), day(localTime));
+    else if (!strncmp_P(text, PSTR("#TIME"), 5)) sprintf_P(text, zero ? PSTR("%02d:%02d%s") : PSTR("%2d:%02d%s"), AmPmHour, minute(localTime), sec);
+    else if (!strncmp_P(text, PSTR("#HHMM"), 5)) sprintf_P(text, zero ? PSTR("%02d:%02d") : PSTR("%d:%02d"), AmPmHour, minute(localTime));
+    else if (!strncmp_P(text, PSTR("#HH"), 3))   sprintf_P(text, zero ? PSTR("%02d") : PSTR("%d"), AmPmHour);
+    else if (!strncmp_P(text, PSTR("#MM"), 3))   sprintf_P(text, zero ? PSTR("%02d") : PSTR("%d"), minute(localTime));
+    else if (!strncmp_P(text, PSTR("#FPS"), 4)) sprintf_P(text, PSTR("%3d"), (int)strip.getFps());
+    else if ((!strncmp_P(text, PSTR("#AMP"), 4)) || (!strncmp_P(text, PSTR("#POW"), 4))) sprintf_P(text, PSTR("%3.1fA"), float(strip.currentMilliamps) / 1000.0f);
+
+    #ifdef USERMOD_PIONEER_PROLINK
+    // --- PRO DJ LINK MACRO REPLACEMENT ---
+    // These can be combined in one string like "#BPM #BEAT #BARS"
+    else {
+      char output[64] = { '\0' };
+      char* src = text;
+      char* dst = output;
+
+      while (*src && (dst - output) < 63) {
+        if (*src == '#') {
+          // Check each macro
+          if (strncmp(src, "#BPM", 4) == 0) {
+            dst += sprintf(dst, "%.1f", prolink_bpm_public);
+            src += 4;
+          } else if (strncmp(src, "#BEATPOS", 8) == 0) {
+            dst += sprintf(dst, "%d", prolink_beats_elapsed_public);
+            src += 8;
+          } else if (strncmp(src, "#BEAT", 5) == 0) {
+            uint8_t b = (prolink_beat_public == 0) ? 1 : prolink_beat_public;
+            dst += sprintf(dst, "%d/4", b);
+            src += 5;
+          } else if (strncmp(src, "#BARS", 5) == 0) {
+            dst += sprintf(dst, "%d", prolink_bars_elapsed_public);
+            src += 5;
+          } else if (strncmp(src, "#ENDING", 7) == 0) {
+            if (prolink_bars_remaining_public < 64) {
+              dst += sprintf(dst, "%d", prolink_bars_remaining_public);
+              src += 7;
+            }
+          } else if (strncmp(src, "#TRACK", 6) == 0) {
+            dst += sprintf(dst, "%u", prolink_track_id_public);
+            src += 6;
+          } else if (strncmp(src, "#PROGRESS", 9) == 0) {
+            dst += sprintf(dst, "%1.1f%", prolink_beat_progress_public);
+            src += 9;
+          } else {
+            // Unknown macro, just copy the character
+            *dst++ = *src++;
+          }
+        } else {
+          // Regular character
+          *dst++ = *src++;
+        }
+      }
+      *dst = '\0';
+      strcpy(text, output);
+    }
+    #else
+    // No usermod, check for default case
     else sprintf_P(text, PSTR("%s %d, %d %d:%02d%s"), monthShortStr(month(localTime)), day(localTime), year(localTime), AmPmHour, minute(localTime), sec);
-  } else drawShadow = false;  // static text does not require shadow
+    #endif
+
+  } else drawShadow = false;
+
   const int numberOfLetters = strlen(text);
 
   long delayTime = long(strip.now) - long(SEGENV.step);
-  if ((delayTime >= 0) || (abs(delayTime) > 1500)) {   // WLEDMM keep on scrolling if timebase jumps (supersync, or brightness off, or wifi delay)
-    if ((numberOfLetters * letterWidth) > cols) ++SEGENV.aux0 %= (numberOfLetters * letterWidth) + cols;      // offset
-    else                                          SEGENV.aux0  = (cols + (numberOfLetters * letterWidth))/2;
-    SEGENV.aux1 = (SEGENV.aux1 + 1) & 0xFF; // color shift // WLEDMM changed to prevent overflow
-    SEGENV.step = strip.now + map2(SEGMENT.speed, 0, 255, 10*FRAMETIME_FIXED, 2*FRAMETIME_FIXED);
-    if (!SEGMENT.check2) {
-      for (int y = 0; y < rows; y++) for (int x = 0; x < cols; x++ )
-        SEGMENT.blendPixelColorXY(x, y, SEGCOLOR(1), 255 - (SEGMENT.custom1>>1));
-    }
-  } else { // WLEDMM "repaint" segment to prevent flickering
+  if ((delayTime >= 0) || (abs(delayTime) > 1500)) {
+    if ((numberOfLetters * letterWidth) > cols) ++SEGENV.aux0 %= (numberOfLetters * letterWidth) + cols;
+    else                                        SEGENV.aux0 = (cols + (numberOfLetters * letterWidth)) / 2;
+    SEGENV.aux1 = (SEGENV.aux1 + 1) & 0xFF;
+    SEGENV.step = strip.now + map2(SEGMENT.speed, 0, 255, 10 * FRAMETIME_FIXED, 2 * FRAMETIME_FIXED);
     if (!SEGMENT.check2) {
       for (int y = 0; y < rows; y++) for (int x = 0; x < cols; x++)
-        SEGMENT.blendPixelColorXY(x, y, SEGCOLOR(1), 255 - SEGMENT.custom1);  // slightly reduced "blending" to keep trails visible
+        SEGMENT.blendPixelColorXY(x, y, SEGCOLOR(1), 255 - (SEGMENT.custom1 >> 1));
+    }
+  } else {
+    if (!SEGMENT.check2) {
+      for (int y = 0; y < rows; y++) for (int x = 0; x < cols; x++)
+        SEGMENT.blendPixelColorXY(x, y, SEGCOLOR(1), 255 - SEGMENT.custom1);
     }
   }
 
-  if (SEGENV.check2 && ((numberOfLetters * letterWidth) > cols)) drawShadow = true; // scrolling overlay is easier to read with shadow
+  if (SEGENV.check2 && ((numberOfLetters * letterWidth) > cols)) drawShadow = true;
   for (int i = 0; i < numberOfLetters; i++) {
-    if (int(cols) - int(SEGENV.aux0) + letterWidth*(i+1) < 0) continue; // don't draw characters off-screen
+    if (int(cols) - int(SEGENV.aux0) + letterWidth * (i + 1) < 0) continue;
     uint32_t col1 = SEGMENT.color_from_palette(SEGENV.aux1, false, PALETTE_SOLID_WRAP, 0);
     uint32_t col2 = BLACK;
     if (SEGMENT.check1 && SEGMENT.palette == 0) {
       col1 = SEGCOLOR(0);
       col2 = SEGCOLOR(2);
     }
-    SEGMENT.drawCharacter(text[i], int(cols) - int(SEGENV.aux0) + letterWidth*i, yoffset, letterWidth, letterHeight, col1, col2, drawShadow);
+    SEGMENT.drawCharacter(text[i], int(cols) - int(SEGENV.aux0) + letterWidth * i, yoffset, letterWidth, letterHeight, col1, col2, drawShadow);
   }
 
   return FRAMETIME;
 }
 static const char _data_FX_MODE_2DSCROLLTEXT[] PROGMEM = "Scrolling Text@!,Y Offset,Trail,Font size,,Gradient,Overlay;!,!,Gradient;!;2;ix=128,c1=0,rev=0,mi=0,rY=0,mY=0";
-
 
 ////////////////////////////
 //     2D Drift Rose      //
