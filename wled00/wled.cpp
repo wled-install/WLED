@@ -1324,6 +1324,7 @@ void WLED::setup() {
   else deEEP();
 #else
   initPresetsFile();
+  buildPresetCache();
 #endif
   updateFSInfo();
 
