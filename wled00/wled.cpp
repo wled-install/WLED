@@ -507,7 +507,7 @@ void background_loop_blocking(void* pvParameters) {
 
     }
 
-    vTaskDelay(1);
+    vTaskDelay(10);
 
   }
 }
@@ -634,7 +634,7 @@ void background_loop_nonblocking(void* pvParameters) {
     }
     #endif // SOC_USB_OTG_SUPPORTED
 
-    vTaskDelay(1);
+    vTaskDelay(10);
 
   }
 }
