@@ -6801,9 +6801,9 @@ uint16_t mode_2Dscrollingtext(void) {
     !strncmp_P(text, PSTR("#F"), 2) || !strncmp_P(text, PSTR("#P"), 2) || !strncmp_P(text, PSTR("#A"), 2) ||
     !strncmp_P(text, PSTR("#DATE"), 5) || !strncmp_P(text, PSTR("#DDMM"), 5) || !strncmp_P(text, PSTR("#MMDD"), 5) ||
     !strncmp_P(text, PSTR("#TIME"), 5) || !strncmp_P(text, PSTR("#HH"), 3) || !strncmp_P(text, PSTR("#MM"), 3) ||
-    strstr(text, "#BPM") || strstr(text, "#BEATPOS") || strstr(text, "#BEAT") || strstr(text, "#BARS") ||
-    strstr(text, "#ENDING") || strstr(text, "#TRACK") || strstr(text, "#PROGRESS") ||
-    strstr(text, "#PHRASE") || strstr(text, "#PHRASEBEATS") || strstr(text, "#PHRASEPROGRESS") || strstr(text, "#MOOD");
+    strstr(text, "#BPM") || strstr(text, "#BPOS") || strstr(text, "#BEAT") || strstr(text, "#BARS") ||
+    strstr(text, "#END") || strstr(text, "#TR") || strstr(text, "#PR") ||
+    strstr(text, "#PH") || strstr(text, "#PB") || strstr(text, "#PH") || strstr(text, "#MD");
 
   if (hasMacro) {
     if (!strncmp_P(text, PSTR("#D"), 2) || !strncmp_P(text, PSTR("#MM"), 3) || !strncmp_P(text, PSTR("#HH"), 3)) drawShadow = false;
@@ -6827,34 +6827,40 @@ uint16_t mode_2Dscrollingtext(void) {
     else if (!strncmp_P(text, PSTR("#HHMM"), 5)) sprintf_P(text, zero ? PSTR("%02d:%02d") : PSTR("%d:%02d"), AmPmHour, minute(localTime));
     else if (!strncmp_P(text, PSTR("#HH"), 3))   sprintf_P(text, zero ? PSTR("%02d") : PSTR("%d"), AmPmHour);
     else if (!strncmp_P(text, PSTR("#MM"), 3))   sprintf_P(text, zero ? PSTR("%02d") : PSTR("%d"), minute(localTime));
-    else if (!strncmp_P(text, PSTR("#FPS"), 4)) sprintf_P(text, PSTR("%3d"), (int)strip.getFps());
     else if ((!strncmp_P(text, PSTR("#AMP"), 4)) || (!strncmp_P(text, PSTR("#POW"), 4))) sprintf_P(text, PSTR("%3.1fA"), float(strip.currentMilliamps) / 1000.0f);
 
     #ifdef USERMOD_PIONEER_PROLINK
     // --- PRO DJ LINK MACRO REPLACEMENT ---
     else {
-      char output[64] = { '\0' };
+      char output[128] = { '\0' };
       char* src = text;
       char* dst = output;
 
-      while (*src && (dst - output) < 63) {
+      while (*src && (dst - output) < 127) {
         if (*src == '#') {
           // Check each macro
-          if (strncmp(src, "#PHRASEPROGRESS", 15) == 0) {
-            dst += sprintf(dst, "%1.1f%%", prolink_phrase_progress_public * 100.0f);
-            src += 15;
-          } else if (strncmp(src, "#PHRASEBEATS", 12) == 0) {
+          if (strncmp(src, "#PP",3) == 0) {
+            if (prolink_phrase_progress_public * 100.0f < 100) {
+              dst += sprintf(dst, "%4.1f%%", prolink_phrase_progress_public * 100.0f);
+            }
+            src += 3;
+          } else if (strncmp(src, "#FPS", 4) == 0) {
+            dst += sprintf(dst, "%3d", (int)strip.getFps());
+            src += 4;
+          } else if (strncmp(src, "#PB", 3) == 0) {
             dst += sprintf(dst, "%d", prolink_phrase_beats_public);
-            src += 12;
-          } else if (strncmp(src, "#PHRASE", 7) == 0) {
+            src += 3;
+          } else if (strncmp(src, "#PH", 3) == 0) {
             dst += sprintf(dst, "%s", prolink_phrase_name_public.c_str());
-            src += 7;
-          } else if (strncmp(src, "#PROGRESS", 9) == 0) {
-            dst += sprintf(dst, "%1.1f%%", prolink_beat_progress_public * 100.0f);
-            src += 9;
-          } else if (strncmp(src, "#BEATPOS", 8) == 0) {
+            src += 3;
+          } else if (strncmp(src, "#PR", 3) == 0) {
+            if (prolink_beat_progress_public * 100.0f < 100) {
+            dst += sprintf(dst, "%4.1f%%", prolink_beat_progress_public * 100.0f);
+            }
+            src += 3;
+          } else if (strncmp(src, "#BPOS", 5) == 0) {
             dst += sprintf(dst, "%d", prolink_beats_elapsed_public);
-            src += 8;
+            src += 5;
           } else if (strncmp(src, "#BEAT", 5) == 0) {
             uint8_t b = (prolink_beat_public == 0) ? 1 : prolink_beat_public;
             dst += sprintf(dst, "%d/4", b);
@@ -6862,20 +6868,20 @@ uint16_t mode_2Dscrollingtext(void) {
           } else if (strncmp(src, "#BARS", 5) == 0) {
             dst += sprintf(dst, "%d", prolink_bars_elapsed_public);
             src += 5;
-          } else if (strncmp(src, "#ENDING", 7) == 0) {
+          } else if (strncmp(src, "#END", 4) == 0) {
             if (prolink_bars_remaining_public < 64) {
               dst += sprintf(dst, "%d", prolink_bars_remaining_public);
-              src += 7;
             }
-          } else if (strncmp(src, "#TRACK", 6) == 0) {
+            src += 4;
+          } else if (strncmp(src, "#TR", 3) == 0) {
             dst += sprintf(dst, "%u", prolink_track_id_public);
-            src += 6;
+            src += 3;
           } else if (strncmp(src, "#BPM", 4) == 0) {
             dst += sprintf(dst, "%.1f", prolink_bpm_public);
             src += 4;
-          } else if (strncmp(src, "#MOOD", 5) == 0) {
+          } else if (strncmp(src, "#MD", 3) == 0) {
             dst += sprintf(dst, "%s", prolink_mood_public.c_str());
-            src += 5;
+            src += 3;
           } else {
             // Unknown macro, just copy the character
             *dst++ = *src++;
