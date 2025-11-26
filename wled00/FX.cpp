@@ -6734,16 +6734,26 @@ static const char _data_FX_MODE_2DBLOBS[] PROGMEM = "Blobs@!,# blobs,Blur;!;!;2;
 uint16_t mode_2Dscrollingtext(void) {
   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
 
-  // --- LINK TO PRO DJ LINK ---
+  // --- LINK TO PRO DJ LINK (in FX.h or MyEffect.h) ---
   #ifdef USERMOD_PIONEER_PROLINK
-  extern volatile float prolink_bpm_public;
-  extern volatile uint8_t prolink_beat_public;
-  extern volatile uint16_t prolink_beats_elapsed_public;
-  extern volatile uint8_t prolink_bars_elapsed_public;
-  extern volatile uint8_t prolink_bars_remaining_public;
-  extern volatile uint32_t prolink_beat_number_public;
-  extern volatile float prolink_beat_progress_public;
-  extern volatile uint32_t prolink_track_id_public;
+  // Use 'extern' to declare that these variables are defined elsewhere
+  extern volatile float     prolink_bpm_public;
+  extern volatile uint8_t   prolink_beat_public;
+  extern volatile uint32_t  prolink_beat_number_public;
+  extern volatile float     prolink_beat_progress_public;
+  extern volatile uint32_t  prolink_track_id_public;
+
+  // Bar/Beat Counters
+  extern volatile uint16_t  prolink_beats_elapsed_public;
+  extern volatile uint8_t   prolink_bars_elapsed_public;
+  extern volatile uint8_t   prolink_bars_remaining_public;
+
+  // Phrase / Structure Public Vars
+  extern volatile int       prolink_phrase_index_public;
+  extern String             prolink_phrase_name_public;
+  extern volatile uint16_t  prolink_phrase_beats_public;
+  extern volatile float     prolink_phrase_progress_public;
+  extern String             prolink_mood_public;
   #endif
 
   const uint16_t cols = SEGMENT.virtualWidth();
@@ -6792,7 +6802,8 @@ uint16_t mode_2Dscrollingtext(void) {
     !strncmp_P(text, PSTR("#DATE"), 5) || !strncmp_P(text, PSTR("#DDMM"), 5) || !strncmp_P(text, PSTR("#MMDD"), 5) ||
     !strncmp_P(text, PSTR("#TIME"), 5) || !strncmp_P(text, PSTR("#HH"), 3) || !strncmp_P(text, PSTR("#MM"), 3) ||
     strstr(text, "#BPM") || strstr(text, "#BEATPOS") || strstr(text, "#BEAT") || strstr(text, "#BARS") ||
-    strstr(text, "#ENDING") || strstr(text, "#TRACK") || strstr(text, "#PROGRESS");
+    strstr(text, "#ENDING") || strstr(text, "#TRACK") || strstr(text, "#PROGRESS") ||
+    strstr(text, "#PHRASE") || strstr(text, "#PHRASEBEATS") || strstr(text, "#PHRASEPROGRESS") || strstr(text, "#MOOD");
 
   if (hasMacro) {
     if (!strncmp_P(text, PSTR("#D"), 2) || !strncmp_P(text, PSTR("#MM"), 3) || !strncmp_P(text, PSTR("#HH"), 3)) drawShadow = false;
@@ -6821,7 +6832,6 @@ uint16_t mode_2Dscrollingtext(void) {
 
     #ifdef USERMOD_PIONEER_PROLINK
     // --- PRO DJ LINK MACRO REPLACEMENT ---
-    // These can be combined in one string like "#BPM #BEAT #BARS"
     else {
       char output[64] = { '\0' };
       char* src = text;
@@ -6830,9 +6840,18 @@ uint16_t mode_2Dscrollingtext(void) {
       while (*src && (dst - output) < 63) {
         if (*src == '#') {
           // Check each macro
-          if (strncmp(src, "#BPM", 4) == 0) {
-            dst += sprintf(dst, "%.1f", prolink_bpm_public);
-            src += 4;
+          if (strncmp(src, "#PHRASEPROGRESS", 15) == 0) {
+            dst += sprintf(dst, "%1.1f%%", prolink_phrase_progress_public * 100.0f);
+            src += 15;
+          } else if (strncmp(src, "#PHRASEBEATS", 12) == 0) {
+            dst += sprintf(dst, "%d", prolink_phrase_beats_public);
+            src += 12;
+          } else if (strncmp(src, "#PHRASE", 7) == 0) {
+            dst += sprintf(dst, "%s", prolink_phrase_name_public.c_str());
+            src += 7;
+          } else if (strncmp(src, "#PROGRESS", 9) == 0) {
+            dst += sprintf(dst, "%1.1f%%", prolink_beat_progress_public * 100.0f);
+            src += 9;
           } else if (strncmp(src, "#BEATPOS", 8) == 0) {
             dst += sprintf(dst, "%d", prolink_beats_elapsed_public);
             src += 8;
@@ -6851,26 +6870,26 @@ uint16_t mode_2Dscrollingtext(void) {
           } else if (strncmp(src, "#TRACK", 6) == 0) {
             dst += sprintf(dst, "%u", prolink_track_id_public);
             src += 6;
-          } else if (strncmp(src, "#PROGRESS", 9) == 0) {
-            dst += sprintf(dst, "%1.1f%", prolink_beat_progress_public);
-            src += 9;
+          } else if (strncmp(src, "#BPM", 4) == 0) {
+            dst += sprintf(dst, "%.1f", prolink_bpm_public);
+            src += 4;
+          } else if (strncmp(src, "#MOOD", 5) == 0) {
+            dst += sprintf(dst, "%s", prolink_mood_public.c_str());
+            src += 5;
           } else {
             // Unknown macro, just copy the character
             *dst++ = *src++;
           }
-        } else {
+          } else {
           // Regular character
           *dst++ = *src++;
         }
-      }
+        }
       *dst = '\0';
       strcpy(text, output);
-    }
-    #else
-    // No usermod, check for default case
-    else sprintf_P(text, PSTR("%s %d, %d %d:%02d%s"), monthShortStr(month(localTime)), day(localTime), year(localTime), AmPmHour, minute(localTime), sec);
+      }
     #endif
-
+    
   } else drawShadow = false;
 
   const int numberOfLetters = strlen(text);
