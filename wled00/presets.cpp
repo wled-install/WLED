@@ -5,7 +5,7 @@
  */
 
 #ifdef ARDUINO_ARCH_ESP32
-static char *tmpRAMbuffer = nullptr;
+static char* tmpRAMbuffer = nullptr;
 #endif
 
 static volatile byte presetToApply = 0;
@@ -16,7 +16,15 @@ static char quickLoad[9];
 static char saveName[33];
 static bool includeBri = true, segBounds = true, selectedOnly = false, playlistSave = false;
 
-static const char *getFileName(bool persist = true) {
+struct PresetMetadata {
+  char name[33];   // 32 chars + null terminator
+  bool isPlaylist;
+  bool exists;     // Flag to know if the slot is used
+};
+
+static PresetMetadata* presetCache = nullptr;
+
+static const char* getFileName(bool persist = true) {
   return persist ? "/presets.json" : "/tmp.json";
 }
 
@@ -61,7 +69,7 @@ static void doSaveState() {
       DEBUG_PRINTLN();
     #endif
   */
-#if defined(ARDUINO_ARCH_ESP32)
+  #if defined(ARDUINO_ARCH_ESP32)
   if (!persist) {
     if (tmpRAMbuffer != nullptr) free(tmpRAMbuffer);
     size_t len = measureJson(*fileDoc) + 1;
@@ -74,7 +82,7 @@ static void doSaveState() {
       writeObjectToFileUsingId(filename, presetToSave, fileDoc);
     }
   } else
-  #endif
+    #endif
     writeObjectToFileUsingId(filename, presetToSave, fileDoc);
 
   if (persist) presetsModifiedTime = toki.second(); //unix time
@@ -89,12 +97,10 @@ static void doSaveState() {
   playlistSave = false;
 }
 
-bool getPresetName(byte index, String& name)
-{
+bool getPresetName(byte index, String& name) {
   if (!requestJSONBufferLock(19)) return false;
   bool presetExists = false;
-  if (readObjectFromFileUsingId(getFileName(), index, &doc))
-  {
+  if (readObjectFromFileUsingId(getFileName(), index, &doc)) {
     JsonObject fdo = doc.as<JsonObject>();
     if (fdo["n"]) {
       name = (const char*)(fdo["n"]);
@@ -105,8 +111,7 @@ bool getPresetName(byte index, String& name)
   return presetExists;
 }
 
-void initPresetsFile()
-{
+void initPresetsFile() {
   if (WLED_FS.exists(getFileName())) return;
 
   StaticJsonDocument<64> doc;
@@ -121,8 +126,7 @@ void initPresetsFile()
   f.close();
 }
 
-bool applyPreset(byte index, byte callMode)
-{
+bool applyPreset(byte index, byte callMode) {
   DEBUG_PRINT(F("Request to apply preset: "));
   DEBUG_PRINTLN(index);
   presetToApply = index;
@@ -131,16 +135,14 @@ bool applyPreset(byte index, byte callMode)
 }
 
 // apply preset or fallback to a effect and palette if it doesn't exist
-void applyPresetWithFallback(uint8_t index, uint8_t callMode, uint8_t effectID, uint8_t paletteID)
-{
+void applyPresetWithFallback(uint8_t index, uint8_t callMode, uint8_t effectID, uint8_t paletteID) {
   applyPreset(index, callMode);
   //these two will be overwritten if preset exists in handlePresets()
   effectCurrent = effectID;
   effectPalette = paletteID;
 }
 
-void handlePresets()
-{
+void handlePresets() {
   if (presetToSave) {
     doSaveState();
     return;
@@ -150,75 +152,75 @@ void handlePresets()
 
   bool changePreset = false;
   uint8_t tmpPreset = presetToApply; // store temporary since deserializeState() may call applyPreset()
-  uint8_t tmpMode   = callModeToApply;
+  uint8_t tmpMode = callModeToApply;
 
   JsonObject fdo;
-  const char *filename = getFileName(tmpPreset < 255);
+  const char* filename = getFileName(tmpPreset < 255);
 
-/*
- * The following code is no longer needed as handlePreset() is never run from
- * network callback.
- * **************************************************************************
- * 
-  //crude way to determine if this was called by a network request
-  uint8_t core = 1;
-  #ifdef ARDUINO_ARCH_ESP32
-    #if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S2)
-    // this does not make sense on single core
-    core = xPortGetCoreID();
-    // begin WLEDMM specific
-	  //      loopTask (arduino main loop) sometimes runs on core #1
-	  if ((core == 1) && (strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) == 0)) {
-		  DEBUG_PRINTF("[applyPreset] called from loopTask on core %d; forcing core = 0\n", (int)core); 
-		  core = 0;
-	  }
-	  //      async_tcp (network requests) sometimes runs on core #0
-	  if ((core == 0) && (strncmp(pcTaskGetTaskName(NULL), "async_tcp", 9) == 0)) {
-		  DEBUG_PRINTF("[applyPreset] called from async_tcp on core %d; forcing core = 1\n", (int)core); 
-		  core = 1;
-	  }
-	  // end WLEDMM specific
+  /*
+   * The following code is no longer needed as handlePreset() is never run from
+   * network callback.
+   * **************************************************************************
+   *
+    //crude way to determine if this was called by a network request
+    uint8_t core = 1;
+    #ifdef ARDUINO_ARCH_ESP32
+      #if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S2)
+      // this does not make sense on single core
+      core = xPortGetCoreID();
+      // begin WLEDMM specific
+      //      loopTask (arduino main loop) sometimes runs on core #1
+      if ((core == 1) && (strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) == 0)) {
+        DEBUG_PRINTF("[applyPreset] called from loopTask on core %d; forcing core = 0\n", (int)core);
+        core = 0;
+      }
+      //      async_tcp (network requests) sometimes runs on core #0
+      if ((core == 0) && (strncmp(pcTaskGetTaskName(NULL), "async_tcp", 9) == 0)) {
+        DEBUG_PRINTF("[applyPreset] called from async_tcp on core %d; forcing core = 1\n", (int)core);
+        core = 1;
+      }
+      // end WLEDMM specific
+      #endif
     #endif
-  #endif
-  //only allow use of fileDoc from the core responsible for network requests (AKA HTTP JSON API)
-  //do not use active network request doc from preset called by main loop (playlist, schedule, ...)
-  if (fileDoc && core && force && tmpPreset < 255) {
-    DEBUG_PRINT(F("Force applying preset: "));
-    DEBUG_PRINTLN(presetToApply);
+    //only allow use of fileDoc from the core responsible for network requests (AKA HTTP JSON API)
+    //do not use active network request doc from preset called by main loop (playlist, schedule, ...)
+    if (fileDoc && core && force && tmpPreset < 255) {
+      DEBUG_PRINT(F("Force applying preset: "));
+      DEBUG_PRINTLN(presetToApply);
 
-    presetToApply     = 0; //clear request for preset
-    callModeToApply   = 0;
+      presetToApply     = 0; //clear request for preset
+      callModeToApply   = 0;
 
-    // this will overwrite doc with preset content but applyPreset() is the last in such case and content of doc is no longer needed
-    errorFlag = readObjectFromFileUsingId(filename, tmpPreset, fileDoc) ? ERR_NONE : ERR_FS_PLOAD;
+      // this will overwrite doc with preset content but applyPreset() is the last in such case and content of doc is no longer needed
+      errorFlag = readObjectFromFileUsingId(filename, tmpPreset, fileDoc) ? ERR_NONE : ERR_FS_PLOAD;
 
-    JsonObject fdo = fileDoc->as<JsonObject>();
+      JsonObject fdo = fileDoc->as<JsonObject>();
 
-    //HTTP API commands
-    const char* httpwin = fdo["win"];
-    if (httpwin) {
-      String apireq = "win"; // reduce flash string usage
-      apireq += F("&IN&"); // internal call
-      apireq += httpwin;
-      handleSet(nullptr, apireq, false); // may call applyPreset() via PL=
-      setValuesFromFirstSelectedSeg(); // fills legacy values
-      changePreset = true;
-    } else {
-      if (!fdo["seg"].isNull()) unloadPlaylist(); // if preset contains "seg" we must unload playlist
-      if (!fdo["seg"].isNull() || !fdo["on"].isNull() || !fdo["bri"].isNull() || !fdo["ps"].isNull() || !fdo[F("playlist")].isNull()) changePreset = true;
-      fdo.remove("ps"); //remove load request for presets to prevent recursive crash
+      //HTTP API commands
+      const char* httpwin = fdo["win"];
+      if (httpwin) {
+        String apireq = "win"; // reduce flash string usage
+        apireq += F("&IN&"); // internal call
+        apireq += httpwin;
+        handleSet(nullptr, apireq, false); // may call applyPreset() via PL=
+        setValuesFromFirstSelectedSeg(); // fills legacy values
+        changePreset = true;
+      } else {
+        if (!fdo["seg"].isNull()) unloadPlaylist(); // if preset contains "seg" we must unload playlist
+        if (!fdo["seg"].isNull() || !fdo["on"].isNull() || !fdo["bri"].isNull() || !fdo["ps"].isNull() || !fdo[F("playlist")].isNull()) changePreset = true;
+        fdo.remove("ps"); //remove load request for presets to prevent recursive crash
 
-      deserializeState(fdo, tmpMode, tmpPreset);  // may call applyPreset() which will overwrite presetToApply
+        deserializeState(fdo, tmpMode, tmpPreset);  // may call applyPreset() which will overwrite presetToApply
+      }
+
+      if (!errorFlag && changePreset) presetCycCurr = currentPreset = tmpPreset;
+
+      colorUpdated(tmpMode);
+      return;
     }
 
-    if (!errorFlag && changePreset) presetCycCurr = currentPreset = tmpPreset;
-
-    colorUpdated(tmpMode);
-    return;
-  }
-
-  if (force) return; // something went wrong with force option (most likely WS request), quit and wait for async load
-*/
+    if (force) return; // something went wrong with force option (most likely WS request), quit and wait for async load
+  */
   // allocate buffer
   if (!requestJSONBufferLock(9)) return;  // will also assign fileDoc
 
@@ -244,11 +246,11 @@ void handlePresets()
   #endif
 
   #ifdef ARDUINO_ARCH_ESP32
-  if (tmpPreset==255 && tmpRAMbuffer!=nullptr) {
-    deserializeJson(*fileDoc,tmpRAMbuffer);
+  if (tmpPreset == 255 && tmpRAMbuffer != nullptr) {
+    deserializeJson(*fileDoc, tmpRAMbuffer);
     if ((errorFlag == ERR_FS_PLOAD) || (errorFlag == ERR_JSON)) errorFlag = ERR_NONE;  // WLEDMM only reset our own error
   } else
-  #endif
+    #endif
   {
     presetErrorFlag = readObjectFromFileUsingId(filename, tmpPreset, fileDoc) ? ERR_NONE : ERR_FS_PLOAD;
     if ((errorFlag == ERR_FS_PLOAD) || (errorFlag == ERR_JSON)) errorFlag = ERR_NONE;  // WLEDMM only reset our own error
@@ -268,7 +270,7 @@ void handlePresets()
     changePreset = true;
   } else {
     if (!fdo["seg"].isNull() || !fdo["on"].isNull() || !fdo["bri"].isNull() || !fdo["nl"].isNull() || !fdo["ps"].isNull() || !fdo[F("playlist")].isNull()) changePreset = true;
-    if (!(tmpMode == CALL_MODE_BUTTON_PRESET && fdo["ps"].is<const char *>() && strchr(fdo["ps"].as<const char *>(),'~') != strrchr(fdo["ps"].as<const char *>(),'~')))
+    if (!(tmpMode == CALL_MODE_BUTTON_PRESET && fdo["ps"].is<const char*>() && strchr(fdo["ps"].as<const char*>(), '~') != strrchr(fdo["ps"].as<const char*>(), '~')))
       fdo.remove("ps"); // remove load request for presets to prevent recursive crash (if not called by button and contains preset cycling string "1~5~")
     deserializeState(fdo, CALL_MODE_NO_NOTIFY, tmpPreset); // may change presetToApply by calling applyPreset()
   }
@@ -276,7 +278,7 @@ void handlePresets()
 
   #if defined(ARDUINO_ARCH_ESP32)
   //Aircoookie recommended not to delete buffer
-  if (tmpPreset==255 && tmpRAMbuffer!=nullptr) {
+  if (tmpPreset == 255 && tmpRAMbuffer != nullptr) {
     free(tmpRAMbuffer);
     tmpRAMbuffer = nullptr;
   }
@@ -289,8 +291,7 @@ void handlePresets()
 }
 
 //called from handleSet(PS=) [network callback (fileDoc==nullptr), IR (irrational), deserializeState, UDP] and deserializeState() [network callback (filedoc!=nullptr)]
-void savePreset(byte index, const char* pname, JsonObject sObj)
-{
+void savePreset(byte index, const char* pname, JsonObject sObj) {
   if (index == 0 || (index > 250 && index < 255)) return;
   if (pname) strlcpy(saveName, pname, 33);
   else {
@@ -304,11 +305,11 @@ void savePreset(byte index, const char* pname, JsonObject sObj)
   playlistSave = false;
   if (sObj[F("ql")].is<const char*>()) strlcpy(quickLoad, sObj[F("ql")].as<const char*>(), 9); // client limits QL to 2 chars, buffer for 8 bytes to allow unicode
 
-  if (sObj.size()==0 || sObj["o"].isNull()) { // no "o" means not a playlist or custom API call, saving of state is async (not immediately)
-    includeBri   = sObj["ib"].as<bool>() || sObj.size()==0 || index==255; // temporary preset needs brightness
-    segBounds    = sObj["sb"].as<bool>() || sObj.size()==0 || index==255; // temporary preset needs bounds
+  if (sObj.size() == 0 || sObj["o"].isNull()) { // no "o" means not a playlist or custom API call, saving of state is async (not immediately)
+    includeBri = sObj["ib"].as<bool>() || sObj.size() == 0 || index == 255; // temporary preset needs brightness
+    segBounds = sObj["sb"].as<bool>() || sObj.size() == 0 || index == 255; // temporary preset needs bounds
     selectedOnly = sObj[F("sc")].as<bool>();
-    saveLedmap   = sObj[F("ledmap")] | -1;
+    saveLedmap = sObj[F("ledmap")] | -1;
   } else {
     // this is a playlist or API call
     if (sObj[F("playlist")].isNull()) {
@@ -322,15 +323,22 @@ void savePreset(byte index, const char* pname, JsonObject sObj)
       sObj.remove(F("psave"));
       if (sObj["n"].isNull()) sObj["n"] = saveName;
       initPresetsFile(); // just in case if someone deleted presets.json using /edit
-      writeObjectToFileUsingId(getFileName(index<255), index, fileDoc);
+      writeObjectToFileUsingId(getFileName(index < 255), index, fileDoc);
       presetsModifiedTime = toki.second(); //unix time
       updateFSInfo();
     } else {
       // store playlist
       // WARNING: playlist will be loaded in json.cpp after this call and will have repeat counter increased by 1
-      includeBri   = true; // !sObj["on"].isNull();
+      includeBri = true; // !sObj["on"].isNull();
       playlistSave = true;
     }
+  }
+  if (presetCache != nullptr && index > 0 && index <= 250) {
+    presetCache[index].exists = true;
+    presetCache[index].isPlaylist = playlistSave; // playlistSave is set earlier
+    String safeName = strip_unicode(saveName);
+    strlcpy(presetCache[index].name, safeName.c_str(), sizeof(presetCache[index].name));
+    update_screen_background = true;
   }
 }
 
@@ -339,4 +347,102 @@ void deletePreset(byte index) {
   writeObjectToFileUsingId(getFileName(), index, &empty);
   presetsModifiedTime = toki.second(); //unix time
   updateFSInfo();
+  if (presetCache != nullptr && index > 0 && index <= 250) {
+    presetCache[index].exists = false;
+    presetCache[index].isPlaylist = false;
+    presetCache[index].name[0] = '\0';
+    update_screen_background = true;
+  }
+}
+
+bool getCachedPresetMetadata(byte index, String& name, bool& isPlaylist) {
+  if (presetCache == nullptr) {
+    return false;
+  }
+
+  if (index == 0 || index > 250) {
+    return false;
+  }
+
+  if (presetCache[index].exists) {
+    name = presetCache[index].name;
+    isPlaylist = presetCache[index].isPlaylist;
+    return true;
+  }
+
+  // Preset does not exist
+  name = "";
+  isPlaylist = false;
+  return false;
+}
+
+// IN: presets.cpp
+
+void buildPresetCache() {
+  if (presetCache == nullptr) {
+    USER_PRINTLN(F("Allocating preset cache..."));
+
+    // Use heap_caps_calloc to get zero-initialized memory from PSRAM
+    // MALLOC_CAP_SPIRAM is the flag for PSRAM
+    presetCache = (PresetMetadata*)heap_caps_calloc_prefer(251, sizeof(PresetMetadata), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT, MALLOC_CAP_DEFAULT);
+
+    // If it's *still* null, we're out of memory.
+    if (presetCache == nullptr) {
+      USER_PRINTLN(F("FATAL: Failed to allocate preset cache."));
+      return; // Can't continue
+    }
+  }
+  // --- End allocation ---
+
+  USER_PRINTLN(F("Building preset cache..."));
+  // Clear the old cache
+  memset(presetCache, 0, sizeof(presetCache));
+
+  if (!requestJSONBufferLock(20)) {
+    USER_PRINTLN(F("Preset cache build failed (lock)."));
+    return; // Failed to get lock
+  }
+
+  if (!readObjectFromFile(getFileName(), nullptr, &doc)) {
+    releaseJSONBufferLock();
+    USER_PRINTLN(F("Preset cache build failed (read)."));
+    return; // File not found or corrupt
+  }
+
+  JsonObject root = doc.as<JsonObject>();
+  for (int i = 1; i <= 250; i++) {
+    char id_str[4];
+    sprintf(id_str, "%d", i);
+
+    if (root.containsKey(id_str)) {
+      JsonObject presetObj = root[id_str];
+      presetCache[i].exists = true; // Mark as existing
+
+      presetCache[i].isPlaylist = !presetObj[F("playlist")].isNull();
+
+      if (presetObj["n"]) {
+        // sanitize the JSON string before copying
+        String safeName = strip_unicode((const char*)presetObj["n"]);
+        strlcpy(presetCache[i].name, safeName.c_str(), sizeof(presetCache[i].name));
+      }
+
+      // else: name is already blank from memset
+    }
+  }
+  releaseJSONBufferLock(); // Unlock
+  USER_PRINTLN(F("Preset cache build complete."));
+}
+
+bool getCachedPresetExists(int id) {
+  // valid range is 1..250
+  if (id < 1 || id > 250) {
+    return false;
+  }
+
+  // if cache hasn’t been allocated yet, nothing exists
+  if (presetCache == nullptr) {
+    return false;
+  }
+
+  return presetCache[id].exists;
 }
