@@ -236,7 +236,8 @@ void ImageCacheManager::_synchronizeFolder(const psram_string& folder_path, bool
       FILE* file = fopen(full_path.c_str(), "rb");
       uint8_t* buffer = nullptr;
       if (file) {
-        buffer = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+        // buffer = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+        buffer = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
         if (buffer) {
           fread(buffer, 1, size, file);
         }

@@ -12,7 +12,8 @@ struct PSRAM_Allocator {
   [[nodiscard]] T* allocate(std::size_t n) {
     if (n > std::size_t(-1) / sizeof(T)) throw std::bad_alloc();
     // if (auto p = static_cast<T*>(ps_malloc(n * sizeof(T)))) return p;
-    if (auto p = static_cast<T*>(heap_caps_malloc_prefer(n * sizeof(T), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED))) return p;
+    if (auto p = static_cast<T*>(heap_caps_malloc_prefer(n * sizeof(T), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT))) return p;
+    // if (auto p = static_cast<T*>(heap_caps_malloc_prefer(n * sizeof(T), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED))) return p;
     throw std::bad_alloc();
     }
   void deallocate(T* p, std::size_t) noexcept { heap_caps_free(p); }
