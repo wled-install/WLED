@@ -559,7 +559,7 @@ private:
 
     if (phrases.empty()) {
       // If phrase list is empty (no track loaded/analyzed), reset all.
-      prolink_phrase_name_public = "No Analysis";
+      prolink_phrase_name_public = "";
       prolink_phrase_index_public = -1;
       prolink_phrase_beats_public = 0;
       prolink_phrase_progress_public = 0.0f;
@@ -724,11 +724,11 @@ public:
     if (enabled) {
       JsonArray infoArr = user.createNestedArray("Pro DJ Link");
       String status = linkState.isMaster ? "M" + String(linkState.activePlayerID) : "Waiting";
-      status += " | " + String(linkState.bpm * 10.0, 1) + " BPM";
+      status += " | " + String(linkState.bpm, 1) + " BPM";
       infoArr.add(status);
 
       if (prolink_phrase_name_public.length() > 0) {
-        infoArr.add("<br />" + prolink_phrase_name_public + " (" + String((int)(prolink_phrase_progress_public * 100)) + "%)");
+        infoArr.add("<br />" + prolink_mood_public + " " + prolink_phrase_name_public);
       }
     }
   }
