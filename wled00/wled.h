@@ -343,6 +343,10 @@ WLED_GLOBAL bool update_screen_background _INIT(true);
 // WLED_GLOBAL i2c_master_dev_handle_t panel_i2c_handle _INIT(NULL);
 #endif
 
+#ifdef USERMOD_PIONEER_PROLINK
+WLED_GLOBAL int prolink_presetOffset _INIT(0);
+#endif
+
 // Global Variable definitions
 WLED_GLOBAL char versionString[] _INIT(TOSTRING(WLED_VERSION));
 WLED_GLOBAL char releaseString[] _INIT_PROGMEM(TOSTRING(WLED_RELEASE_NAME)); //WLEDMM: to show on update page // somehow this will not work if using "const char releaseString[]

@@ -16,13 +16,7 @@ static char quickLoad[9];
 static char saveName[33];
 static bool includeBri = true, segBounds = true, selectedOnly = false, playlistSave = false;
 
-struct PresetMetadata {
-  char name[33];   // 32 chars + null terminator
-  bool isPlaylist;
-  bool exists;     // Flag to know if the slot is used
-};
-
-static PresetMetadata* presetCache = nullptr;
+PresetMetadata* presetCache = nullptr;
 
 static const char* getFileName(bool persist = true) {
   return persist ? "/presets.json" : "/tmp.json";
@@ -376,8 +370,6 @@ bool getCachedPresetMetadata(byte index, String& name, bool& isPlaylist) {
   return false;
 }
 
-// IN: presets.cpp
-
 void buildPresetCache() {
   if (presetCache == nullptr) {
     USER_PRINTLN(F("Allocating preset cache..."));
@@ -475,4 +467,99 @@ byte getRandomPresetId() {
 
   // 6. Return the actual Preset ID
   return validCandidates[randomIndex];
+}
+
+// Return the next existing preset after `currentId`.
+// Wraps around to 1 if needed. Returns -1 if none found.
+int getNextPreset(int currentId) {
+  if (presetCache == nullptr) return -1;
+  if (currentId < 1 || currentId > 250) return -1;
+
+  for (int i = currentId + 1; i <= 250; i++) {
+    if (presetCache[i].exists) return i;
+  }
+  // wrap around to beginning
+  for (int i = 1; i < currentId; i++) {
+    if (presetCache[i].exists) return i;
+  }
+  return -1; // no presets at all
+}
+
+// Return the previous existing preset before `currentId`.
+// Wraps around to 250 if needed. Returns -1 if none found.
+int getPreviousPreset(int currentId) {
+  if (presetCache == nullptr) return -1;
+  if (currentId < 1 || currentId > 250) return -1;
+
+  for (int i = currentId - 1; i >= 1; i--) {
+    if (presetCache[i].exists) return i;
+  }
+  // wrap around to end
+  for (int i = 250; i > currentId; i--) {
+    if (presetCache[i].exists) return i;
+  }
+  return -1; // no presets at all
+}
+
+// --- Preset pool builder from presetCache ---
+std::vector<int> buildPresetPool() {
+  std::vector<int> pool;
+  if (presetCache == nullptr) return pool;
+
+  for (int i = 1; i <= 250; i++) {
+    if (presetCache[i].exists) {
+      pool.push_back(i);
+    }
+  }
+  return pool;
+}
+
+// Call this once when starting a track
+void initPresetMapping() {
+  auto pool = buildPresetPool();
+  if (!pool.empty()) {
+    prolink_presetOffset = random(pool.size()); // randomized start
+    USER_PRINTLN(F("Preset mapping initialized."));
+    for (int i = 0; i < (int)pool.size(); i++) {
+      int presetId = pool[(prolink_presetOffset + i) % pool.size()];
+      USER_PRINTF("Pool[%d] = Preset %d (%s)\n",
+        i, presetId, presetCache[presetId].name);
+    }
+  } else {
+    USER_PRINTLN(F("No presets available in cache."));
+  }
+}
+
+// --- Phrase → Preset mapping ---
+int getPresetForPhrase(int phraseIdx, const std::vector<int>& pool) {
+  if (pool.empty()) return -1;
+  int presetCount = pool.size();
+  return pool[(prolink_presetOffset + phraseIdx) % presetCount];
+}
+
+// --- No-repeat variant (avoids consecutive duplicates) ---
+int getPresetForPhraseNoRepeat(int phraseIdx, const std::vector<int>& pool) {
+  if (pool.empty()) return -1;
+  int presetCount = pool.size();
+  int preset = pool[(prolink_presetOffset + phraseIdx) % presetCount];
+
+  if (phraseIdx > 0) {
+    int prev = pool[(prolink_presetOffset + phraseIdx - 1) % presetCount];
+    if (preset == prev && presetCount > 1) {
+      preset = pool[(prolink_presetOffset + phraseIdx + 1) % presetCount];
+    }
+  }
+  return preset;
+}
+
+// --- Helper to print preset name ---
+void printPhrasePreset(int phraseIdx, const std::vector<int>& pool) {
+  int presetId = getPresetForPhraseNoRepeat(phraseIdx, pool);
+  if (presetId > 0) {
+    const char* name = presetCache[presetId].name;
+    USER_PRINTF("Phrase %d → Preset %d (%s)\n",
+      phraseIdx, presetId, name);
+  } else {
+    USER_PRINTF("Phrase %d → No preset\n", phraseIdx);
+  }
 }

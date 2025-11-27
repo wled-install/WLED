@@ -12,6 +12,7 @@
 #include <AsyncUDP.h>
 #include <WiFiClient.h>
 #include <vector>
+#include "fcn_declare.h"
 
 #define PORT_ANNOUNCE 50000 
 #define PORT_BEAT     50001 
@@ -28,6 +29,15 @@
 #define PITCH_CENTER 0x10000000  
 #define PITCH_SCALE  2684352.0f  
 
+// Retry/Timeout Configuration
+#define FETCH_TIMEOUT_MS      3000
+#define FETCH_RETRY_DELAY_MS  5000
+#define FETCH_MAX_RETRIES     3
+#define PEER_TIMEOUT_MS       5000   // Consider peer gone if no announce for 5s (they send every 1.5s)
+#define KEEPALIVE_INTERVAL_MS 1500
+#define PEER_CHECK_INTERVAL_MS 2000  // How often to check for stale peers
+#define BEAT_FLASH_DURATION_MS 80    // How long the beat flash stays bright
+
 // --- Public Variables (Exposed to FX.cpp) ---
 
 // Timing & Sync
@@ -43,19 +53,29 @@ volatile uint8_t prolink_bars_elapsed_public = 0;
 volatile uint8_t prolink_bars_remaining_public = 0;
 
 // Phrase / Structure Public Vars
-volatile int prolink_phrase_index_public = -1;       // Current phrase index
-String prolink_phrase_name_public = "";              // e.g. "Intro", "Chorus Fill"
-volatile uint16_t prolink_phrase_beats_public = 0;   // Length of current phrase in beats
-volatile float prolink_phrase_progress_public = 0.0; // 0.0-1.0 progress through phrase
-String prolink_mood_public = "";                     // "High", "Mid", "Low"
+volatile int prolink_phrase_index_public = -1;
+String prolink_phrase_name_public = "";
+volatile uint16_t prolink_phrase_beats_public = 0;
+volatile float prolink_phrase_progress_public = 0.0;
+String prolink_mood_public = "";
 volatile uint16_t prolink_total_phrases_public = 0;
+
+// Connection state (public for effects to check)
+volatile bool prolink_connected_public = false;
+
+// Beat flash state (public for overlay effect)
+volatile bool prolink_beat_flash_active = false;
+volatile uint8_t prolink_beat_flash_brightness = 0;
+
+extern std::vector<int> presetPool; // from presets.cpp
+extern int presetOffset;
 
 // --- Internal Data Structures ---
 
 struct PhraseEntry {
   uint16_t index;
-  uint32_t startBeat; // Absolute cumulative beat
-  uint32_t count;     // Duration in beats
+  uint32_t startBeat;
+  uint32_t count;
   uint16_t kind;
   bool isFill;
   String label;
@@ -71,7 +91,7 @@ struct ProLinkState {
   volatile float   effectivePitch = 0.0;
 
   // Timing
-  volatile uint32_t beatNumber = 0;      // Current absolute beat from CDJ
+  volatile uint32_t beatNumber = 0;
   volatile uint8_t  beatInMeasure = 0;
 
   // Counters
@@ -84,9 +104,10 @@ struct ProLinkState {
   volatile uint8_t  currentSlot = 0;
   IPAddress         activePlayerIP;
 
-  // Peers
+  // Peers - track both presence and last seen time
   volatile uint64_t peerMap = 0;
   IPAddress peerIPs[64];
+  unsigned long peerLastSeen[64] = { 0 };  // Timestamp of last keepalive/announce from each peer
 };
 
 enum FetchState {
@@ -99,7 +120,8 @@ enum FetchState {
   WAIT_HANDSHAKE,
   REQUEST_PHRASES,
   WAIT_PHRASES,
-  COOLDOWN
+  COOLDOWN,
+  RETRY_WAIT
 };
 
 class ProLinkUsermod : public Usermod {
@@ -108,7 +130,7 @@ private:
   AsyncUDP udpStatus;
   AsyncUDP udpBeat;
   AsyncUDP udpAnnounce;
-  WiFiClient dbClient; // TCP Client for DB Server
+  WiFiClient dbClient;
 
   ProLinkState linkState;
 
@@ -122,16 +144,25 @@ private:
   uint16_t dynamicPort = 0;
   uint32_t txId = 0;
 
+  // Retry tracking
+  uint8_t fetchRetryCount = 0;
+  uint32_t pendingFetchTrackId = 0;
+
+  // Phrase change tracking
+  int previousPhraseIdx = -1;
+
   // Settings
   bool enabled = true;
   bool enableDebug = false;
-  bool enableBeatFlash = false; // Optional visual debug
+  bool enableBeatFlash = false;
+  bool enableRandomPreset = false;  // New: random preset on phrase change
 
   // Config strings
   static const char _name[];
   static const char _enabled[];
-  static const char _beatDebug[];
-  static const char _pitchDebug[];
+  static const char _debug[];
+  static const char _beatFlash[];
+  static const char _randomPreset[];
 
   // --- Constants for PSSI Parsing ---
   const uint8_t DBSERVER_MAGIC[5] = { 0x11, 0x87, 0x23, 0x49, 0xae };
@@ -151,7 +182,9 @@ private:
 
   void sendKeepAlive() {
     if (!Network.isConnected()) return;
-    uint8_t pkg[64]; memset(pkg, 0, 64);
+
+    uint8_t pkg[64];
+    memset(pkg, 0, 64);
     memcpy(pkg, PROLINK_MAGIC, 10);
     pkg[0x0A] = TYPE_ANNOUNCE;
     snprintf((char*)&pkg[0x0C], 20, "%s", WLED_DEVICE_NAME);
@@ -162,9 +195,17 @@ private:
     memcpy(&pkg[0x2C], &ip, 4);
     pkg[0x30] = 1; pkg[0x34] = 0x01;
 
+    // Always broadcast to subnet even if no peers known yet
+    IPAddress broadcast = Network.localIP();
+    broadcast[3] = 255;
+    udpAnnounce.writeTo(pkg, 54, broadcast, PORT_ANNOUNCE);
+
+    // Also send to known peers
     for (int i = 0; i < 64; i++) {
       if (linkState.peerMap & ((uint64_t)1 << i)) {
-        if (linkState.peerIPs[i][0] != 0) udpAnnounce.writeTo(pkg, 54, linkState.peerIPs[i], PORT_ANNOUNCE);
+        if (linkState.peerIPs[i][0] != 0) {
+          udpAnnounce.writeTo(pkg, 54, linkState.peerIPs[i], PORT_ANNOUNCE);
+        }
       }
     }
   }
@@ -175,11 +216,39 @@ private:
     if (data[0x0A] == TYPE_ANNOUNCE) {
       uint8_t devID = data[0x24];
       if (devID > 0 && devID < 64 && devID != WLED_DEVICE_ID) {
-        bool isNew = !(linkState.peerMap & ((uint64_t)1 << (devID - 1)));
-        linkState.peerMap |= ((uint64_t)1 << (devID - 1));
-        linkState.peerIPs[devID - 1] = packet.remoteIP();
+        unsigned long now = millis();
+        uint8_t peerIdx = devID - 1;
+        bool wasKnown = (linkState.peerMap & ((uint64_t)1 << peerIdx)) != 0;
+        bool wasTimedOut = wasKnown && (now - linkState.peerLastSeen[peerIdx] > PEER_TIMEOUT_MS);
+        bool isNew = !wasKnown;
+
+        // Update peer info
+        linkState.peerMap |= ((uint64_t)1 << peerIdx);
+        linkState.peerIPs[peerIdx] = packet.remoteIP();
+        linkState.peerLastSeen[peerIdx] = now;
         linkState.isConnected = true;
-        if (isNew) sendKeepAlive();
+
+        if (isNew) {
+          if (enableDebug) Serial.printf("[ProLink] New peer: Player %d at %s\n", devID, packet.remoteIP().toString().c_str());
+          sendKeepAlive();
+        } else if (wasTimedOut) {
+          // Peer came back after being gone
+          if (enableDebug) Serial.printf("[ProLink] Peer returned: Player %d at %s\n", devID, packet.remoteIP().toString().c_str());
+
+          // If this was our active player, we may need to re-fetch phrase data
+          if (devID == linkState.activePlayerID && linkState.currentTrackId > 0) {
+            if (enableDebug) Serial.println(F("[ProLink] Active player returned, will re-fetch phrases if needed"));
+            // Reset fetch state so we can try again
+            if (lastAnalyzedTrackId != linkState.currentTrackId) {
+              fetchRetryCount = 0;
+              pendingFetchTrackId = linkState.currentTrackId;
+              cleanupTcpConnection();
+              fetchState = IDLE;
+              startMetadataFetch();
+            }
+          }
+          sendKeepAlive();
+        }
       }
     }
   }
@@ -190,6 +259,14 @@ private:
 
     uint8_t playerID = data[0x21];
     bool isMaster = (data[0x89] & 0x20) != 0;
+
+    // Update peer lastSeen - status packets also prove the peer is alive
+    if (playerID > 0 && playerID < 64) {
+      uint8_t peerIdx = playerID - 1;
+      if (linkState.peerMap & ((uint64_t)1 << peerIdx)) {
+        linkState.peerLastSeen[peerIdx] = millis();
+      }
+    }
 
     if (isMaster) {
       linkState.activePlayerID = playerID;
@@ -211,6 +288,10 @@ private:
           linkState.currentSlot = data[0x28];
 
           if (tid != lastAnalyzedTrackId) {
+            // New track - reset and start fetch
+            fetchRetryCount = 0;
+            pendingFetchTrackId = tid;
+            cleanupTcpConnection();
             fetchState = IDLE;
             startMetadataFetch();
           }
@@ -220,17 +301,17 @@ private:
       // Beat in Measure
       if (packet.length() > 0xA6) linkState.beatInMeasure = data[0xA6];
 
-      // Beats Elapsed (2 bytes at 0xA2-0xA3)
+      // Beats Elapsed
       if (packet.length() > 0xA3) {
         linkState.beatsElapsed = (data[0xA2] << 8) | data[0xA3];
       }
 
-      // Half-bars Remaining (Byte 0x11D)
+      // Half-bars Remaining
       if (packet.length() > 0x11D) {
         linkState.halfBarsRemaining = data[0x11D];
       }
 
-      // Half-bars Elapsed (Byte 0x11E)
+      // Half-bars Elapsed
       if (packet.length() > 0x11E) {
         linkState.halfBarsElapsed = data[0x11E];
       }
@@ -240,53 +321,84 @@ private:
   void parseBeatPacket(AsyncUDPPacket packet) {
     uint8_t* data = packet.data();
     if (packet.length() < 60) return;
-    if (data[0x21] != linkState.activePlayerID) return;
+
+    uint8_t playerID = data[0x21];
+    if (playerID != linkState.activePlayerID) return;
+
+    // Update peer lastSeen - beat packets also prove the peer is alive
+    if (playerID > 0 && playerID < 64) {
+      uint8_t peerIdx = playerID - 1;
+      if (linkState.peerMap & ((uint64_t)1 << peerIdx)) {
+        linkState.peerLastSeen[peerIdx] = millis();
+      }
+    }
 
     if (data[0x0A] == TYPE_BEAT_GRID) {
-      // Raw BPM (Value is typically BPM * 10, not * 100, for this packet offset)
       uint32_t rawBpm = (data[0x38] << 24) | (data[0x39] << 16) | (data[0x3A] << 8) | data[0x3B];
-      if (rawBpm != 0xFFFFFFFF) linkState.bpm = rawBpm / 10.0f; // <-- FIXED DIVISION FACTOR
+      if (rawBpm != 0xFFFFFFFF) linkState.bpm = rawBpm / 10.0f;
 
-      // Absolute Beat Number
       linkState.beatNumber = (data[0x24] << 24) | (data[0x25] << 16) | (data[0x26] << 8) | data[0x27];
     }
   }
 
-  // --- TCP Fetch Logic ---
+  // --- TCP Connection Management ---
+
+  void cleanupTcpConnection() {
+    if (dbClient.connected()) {
+      dbClient.stop();
+    }
+    // Clear any pending data
+    while (dbClient.available()) dbClient.read();
+  }
 
   void startMetadataFetch() {
-    if (linkState.activePlayerIP[0] == 0) return;
+    if (linkState.activePlayerIP[0] == 0) {
+      if (enableDebug) Serial.println(F("[ProLink] No active player IP, skipping fetch"));
+      return;
+    }
+
+    if (fetchRetryCount >= FETCH_MAX_RETRIES) {
+      if (enableDebug) Serial.printf("[ProLink] Max retries (%d) reached for track %d\n", FETCH_MAX_RETRIES, pendingFetchTrackId);
+      fetchState = IDLE;
+      return;
+    }
+
     fetchState = CONNECT_STAGE1;
     stateTimer = millis();
-    if (enableDebug) Serial.println(F("[ProLink] Starting Phrase Fetch..."));
+    if (enableDebug) Serial.printf("[ProLink] Starting Phrase Fetch (attempt %d/%d)...\n", fetchRetryCount + 1, FETCH_MAX_RETRIES);
+  }
+
+  void scheduleFetchRetry() {
+    fetchRetryCount++;
+    if (fetchRetryCount < FETCH_MAX_RETRIES) {
+      fetchState = RETRY_WAIT;
+      stateTimer = millis();
+      if (enableDebug) Serial.printf("[ProLink] Scheduling retry %d/%d in %dms\n", fetchRetryCount + 1, FETCH_MAX_RETRIES, FETCH_RETRY_DELAY_MS);
+    } else {
+      if (enableDebug) Serial.println(F("[ProLink] All retries exhausted"));
+      fetchState = IDLE;
+    }
   }
 
   void sendDBQuery(uint16_t type, uint32_t* args, uint8_t argCount) {
     if (!dbClient.connected()) return;
     txId++;
 
-    // Header
     dbClient.write(DBSERVER_MAGIC, 5);
     uint8_t head[] = { 0x11, 0,0,0,0, 0x10, 0,0, 0x0F, argCount };
 
-    // Inject TX ID
     head[1] = (txId >> 24) & 0xFF; head[2] = (txId >> 16) & 0xFF;
     head[3] = (txId >> 8) & 0xFF;  head[4] = txId & 0xFF;
-
-    // Inject Type
     head[6] = (type >> 8) & 0xFF;  head[7] = type & 0xFF;
 
     dbClient.write(head, 10);
 
-    // Arg Types Header
     uint8_t argHead[] = { 0x14, 0,0,0,0x0C };
     dbClient.write(argHead, 5);
 
-    // Arg Types List
     for (int i = 0; i < argCount; i++) dbClient.write((uint8_t)0x06);
     for (int i = argCount; i < 12; i++) dbClient.write((uint8_t)0x00);
 
-    // Args
     for (int i = 0; i < argCount; i++) {
       dbClient.write((uint8_t)0x11);
       uint32_t val = args[i];
@@ -297,11 +409,11 @@ private:
 
   bool readBytesWithTimeout(uint8_t* buf, size_t len, int timeoutMs = 500) {
     unsigned long start = millis();
-    size_t read = 0;
-    while (read < len) {
-      if (millis() - start > timeoutMs) return false;
+    size_t bytesRead = 0;
+    while (bytesRead < len) {
+      if (millis() - start > (unsigned long)timeoutMs) return false;
       if (dbClient.available()) {
-        buf[read++] = dbClient.read();
+        buf[bytesRead++] = dbClient.read();
       } else {
         delay(1);
       }
@@ -310,7 +422,6 @@ private:
   }
 
   String getPhraseName(uint16_t kind, uint16_t mood, uint8_t k1, uint8_t k2, uint8_t k3) {
-    // Mood 1: High (Default)
     if (mood == 1 || mood == 0) {
       switch (kind) {
       case 1: return (k1 == 1) ? F("Intro 1") : F("Intro 2");
@@ -320,13 +431,11 @@ private:
         if (k2 == 1 && k3 == 0) return F("Up 3");
         return F("Up");
       case 3: return F("Down");
-      case 5: return (k1 == 1) ? F("Chorus 2") : F("Chorus 1"); // Inverted
+      case 5: return (k1 == 1) ? F("Chorus 2") : F("Chorus 1");
       case 6: return (k1 == 1) ? F("Outro 1") : F("Outro 2");
       default: return "High " + String(kind);
       }
-    }
-    // Mood 2: Mid
-    else if (mood == 2) {
+    } else if (mood == 2) {
       switch (kind) {
       case 1: return F("Intro");
       case 2: return F("Verse 1");
@@ -340,9 +449,7 @@ private:
       case 10: return F("Outro");
       default: return "Mid " + String(kind);
       }
-    }
-    // Mood 3: Low
-    else if (mood == 3) {
+    } else if (mood == 3) {
       switch (kind) {
       case 1: return F("Intro");
       case 2: return F("Verse 1");
@@ -361,23 +468,48 @@ private:
   }
 
   void handleFetchStateMachine() {
-    if (fetchState == IDLE || fetchState == COOLDOWN) return;
+    // Handle retry wait state
+    if (fetchState == RETRY_WAIT) {
+      if (millis() - stateTimer > FETCH_RETRY_DELAY_MS) {
+        startMetadataFetch();
+      }
+      return;
+    }
 
-    if (millis() - stateTimer > 3000) {
+    if (fetchState == IDLE || fetchState == COOLDOWN) {
+      if (fetchState == COOLDOWN && millis() - stateTimer > 1000) {
+        fetchState = IDLE;
+      }
+      return;
+    }
+
+    // Timeout handling
+    if (millis() - stateTimer > FETCH_TIMEOUT_MS) {
       if (enableDebug) Serial.println(F("[ProLink] Fetch Timeout"));
-      dbClient.stop();
-      fetchState = COOLDOWN;
-      stateTimer = millis();
+      cleanupTcpConnection();
+      scheduleFetchRetry();
       return;
     }
 
     switch (fetchState) {
-    case CONNECT_STAGE1:
+    case CONNECT_STAGE1: {
+      // Protect against invalid IP
+      if (linkState.activePlayerIP[0] == 0) {
+        if (enableDebug) Serial.println(F("[ProLink] Player IP invalid, aborting"));
+        fetchState = IDLE;
+        return;
+      }
+
       if (dbClient.connect(linkState.activePlayerIP, PORT_DBSERVER)) {
         dbClient.write("\x00\x00\x00\x0fRemoteDBServer\x00", 19);
         fetchState = WAIT_STAGE1;
+        stateTimer = millis();
+      } else {
+        if (enableDebug) Serial.println(F("[ProLink] Stage1 connect failed"));
+        scheduleFetchRetry();
       }
       break;
+    }
 
     case WAIT_STAGE1:
       if (dbClient.available() >= 2) {
@@ -386,6 +518,7 @@ private:
         dynamicPort = (buf[0] << 8) | buf[1];
         dbClient.stop();
         fetchState = CONNECT_STAGE2;
+        stateTimer = millis();
         if (enableDebug) Serial.printf("[ProLink] Port: %u\n", dynamicPort);
       }
       break;
@@ -395,6 +528,10 @@ private:
         uint8_t hand1[] = { 0x11, 0,0,0,1 };
         dbClient.write(hand1, 5);
         fetchState = HANDSHAKE;
+        stateTimer = millis();
+      } else {
+        if (enableDebug) Serial.println(F("[ProLink] Stage2 connect failed"));
+        scheduleFetchRetry();
       }
       break;
 
@@ -414,6 +551,7 @@ private:
 
         dbClient.write(pkt, 37);
         fetchState = WAIT_HANDSHAKE;
+        stateTimer = millis();
       }
       break;
 
@@ -421,6 +559,7 @@ private:
       if (dbClient.available() > 10) {
         while (dbClient.available()) dbClient.read();
         fetchState = REQUEST_PHRASES;
+        stateTimer = millis();
       }
       break;
 
@@ -431,13 +570,15 @@ private:
       uint32_t args[] = { compound, linkState.currentTrackId, pssi, ext };
       sendDBQuery(0x2c04, args, 4);
       fetchState = WAIT_PHRASES;
+      stateTimer = millis();
       break;
     }
 
     case WAIT_PHRASES:
       if (dbClient.available() > 32) {
         bool found = false;
-        while (dbClient.available() >= 4) {
+        int searchLimit = 1000; // Prevent infinite loop
+        while (dbClient.available() >= 4 && searchLimit-- > 0) {
           if (dbClient.peek() == 'P') {
             uint8_t tag[4];
             dbClient.read(tag, 4);
@@ -451,12 +592,18 @@ private:
         }
 
         if (found) {
-          parsePSSI();
-          if (enableDebug) printPhrases();
-          dbClient.stop();
-          fetchState = IDLE;
-          lastAnalyzedTrackId = linkState.currentTrackId;
-          if (enableDebug) Serial.println(F("[ProLink] PSSI Parsed Success"));
+          if (parsePSSI()) {
+            if (enableDebug) printPhrases();
+            cleanupTcpConnection();
+            fetchState = IDLE;
+            lastAnalyzedTrackId = linkState.currentTrackId;
+            fetchRetryCount = 0;
+            if (enableDebug) Serial.println(F("[ProLink] PSSI Parsed Success"));
+          } else {
+            if (enableDebug) Serial.println(F("[ProLink] PSSI Parse Failed"));
+            cleanupTcpConnection();
+            scheduleFetchRetry();
+          }
         }
       }
       break;
@@ -473,12 +620,35 @@ private:
     }
   }
 
-  void parsePSSI() {
+  // --- Example usage in your phrase change logic ---
+  void onPhraseChange(int activeIdx, int previousPhraseIdx) {
+    auto pool = buildPresetPool();
+    int newPreset = getPresetForPhraseNoRepeat(activeIdx, pool);
+
+    if (newPreset > 0) {
+      USER_PRINTF("[ProLink] Phrase %d -> %d. Applying Preset %d (%s)\n",
+        previousPhraseIdx, activeIdx,
+        newPreset, presetCache[newPreset].name);
+
+      if (strip.getSegmentsNum() > 1) strip.resetSegments(false);
+      if (currentPlaylist >= 0) unloadPlaylist();
+      applyPreset(newPreset);
+      handlePresets();
+    }
+  }
+  
+  bool parsePSSI() {
     uint8_t head[28];
-    if (!readBytesWithTimeout(head, 28)) return;
+    if (!readBytesWithTimeout(head, 28)) return false;
 
     uint32_t headerLen = (head[0] << 24) | (head[1] << 16) | (head[2] << 8) | head[3];
     uint16_t numEntries = (head[12] << 8) | head[13];
+
+    // Sanity checks
+    if (headerLen > 10000 || numEntries > 500) {
+      if (enableDebug) Serial.printf("[ProLink] Invalid PSSI header: len=%d entries=%d\n", headerLen, numEntries);
+      return false;
+    }
 
     // Decrypt Header fields
     for (int i = 14; i < 28; i++) {
@@ -497,12 +667,19 @@ private:
 
     // Read remaining header
     int readSoFar = 4 + 28;
-    while (readSoFar < headerLen) { dbClient.read(); readSoFar++; }
+    while (readSoFar < (int)headerLen) {
+      if (!dbClient.available()) {
+        delay(1);
+        if (millis() - stateTimer > FETCH_TIMEOUT_MS) return false;
+      }
+      dbClient.read();
+      readSoFar++;
+    }
 
     // Read Entries
     for (int i = 0; i < numEntries; i++) {
       uint8_t e[24];
-      if (!readBytesWithTimeout(e, 24)) break;
+      if (!readBytesWithTimeout(e, 24)) return false;
 
       // Decrypt Entry
       for (int b = 0; b < 24; b++) {
@@ -510,7 +687,6 @@ private:
         e[b] = e[b] ^ ((XOR_KEY[(tagOffset - 18) % 19] + numEntries) & 0xFF);
       }
 
-      // Parse Fields
       uint16_t kind = (e[4] << 8) | e[5];
       uint16_t beat = (e[2] << 8) | e[3];
       bool fill = (e[21] != 0);
@@ -523,13 +699,10 @@ private:
       pe.isFill = false;
       pe.label = getPhraseName(kind, mood, e[7], e[9], e[19]);
 
-      // Linearization Logic (Splitting Fills)
       if (fill && beatFill > beat) {
-        // 1. Main Part
         pe.count = beatFill - beat;
         phrases.push_back(pe);
 
-        // 2. Fill Part
         PhraseEntry peFill;
         peFill.kind = kind;
         peFill.startBeat = beatFill;
@@ -547,18 +720,27 @@ private:
       if (i < phrases.size() - 1) {
         phrases[i].count = phrases[i + 1].startBeat - phrases[i].startBeat;
       } else {
-        phrases[i].count = 32; // Fallback default
+        phrases[i].count = 32;
       }
     }
     prolink_total_phrases_public = phrases.size();
+
+    if (prolink_total_phrases_public > 0) {
+
+      auto pool = buildPresetPool();
+
+      if (!pool.empty()) {
+        prolink_presetOffset = random(pool.size()); // randomized start
+        USER_PRINTF("[ProLink] Initialized preset offset: %d\n", prolink_presetOffset);
+      }
+
+    }
+
+    return true;
   }
 
   void updatePhraseState() {
-
-    static uint8_t previous_phrase = 0;
-
     if (phrases.empty()) {
-      // If phrase list is empty (no track loaded/analyzed), reset all.
       prolink_phrase_name_public = "";
       prolink_phrase_index_public = -1;
       prolink_phrase_beats_public = 0;
@@ -567,48 +749,62 @@ private:
     }
 
     uint32_t currentBeat = linkState.beatsElapsed;
-
-    // Ensure currentBeat is valid (avoid 0, which often falls outside the phrase structure)
-    // We use the absolute beat number. The first phrase usually starts >= 1.
-    if (currentBeat < 1) {
-      currentBeat = 1;
-    }
+    if (currentBeat < 1) currentBeat = 1;
 
     int activeIdx = -1;
-    // --- Core Logic: Find active phrase ---
     for (size_t i = 0; i < phrases.size(); i++) {
-      // Check if currentBeat falls within the range [startBeat, startBeat + count)
       if (currentBeat >= phrases[i].startBeat && currentBeat < (phrases[i].startBeat + phrases[i].count)) {
         activeIdx = i;
         break;
       }
     }
-    // --- End Find active phrase ---
 
-    if (activeIdx != previous_phrase) {
-      uint16_t high_bits = random16();
-      uint16_t low_bits = random16();
-      uint32_t random32_value = ((uint32_t)high_bits << 16) | low_bits;
-      strip.fill(random32_value);
-      previous_phrase = activeIdx;
+    // Deterministic preset on phrase change
+    if (enableRandomPreset && activeIdx != previousPhraseIdx && previousPhraseIdx != -1 && activeIdx != -1) {
+      auto pool = buildPresetPool(); // collect valid presets from presetCache
+      int newPreset = getPresetForPhraseNoRepeat(activeIdx, pool); // uses prolink_presetOffset internally
+
+      // hard-coded for testing. 2 is the MM mascot pulsing, looks good for fills
+
+      if (phrases[activeIdx].label.indexOf("Fill") != -1) {
+        newPreset = 2;
+      } else if (newPreset == 2) {
+        if (!pool.empty()) {
+          int attempts = 0;
+          int candidate;
+          do {
+            candidate = pool[random(pool.size())];
+            attempts++;
+          } while (candidate == 2 && attempts < 10);
+          newPreset = candidate;
+        }
+      }
+    
+      if (newPreset > 0) {
+        if (enableDebug) {
+          Serial.printf("[ProLink] Phrase %d -> %d. Applying Preset %d (%s)\n",
+            previousPhraseIdx, activeIdx,
+            newPreset, presetCache[newPreset].name);
+        }
+        if (strip.getSegmentsNum() > 1) strip.resetSegments(false);
+        if (currentPlaylist >= 0) unloadPlaylist();
+        applyPreset(newPreset);
+        handlePresets();
+      }
     }
-
+    previousPhraseIdx = activeIdx;
 
     if (activeIdx != -1) {
-      // --- Update Public Variables (Active Phrase Found) ---
       prolink_phrase_index_public = activeIdx;
       prolink_phrase_name_public = phrases[activeIdx].label;
       prolink_phrase_beats_public = phrases[activeIdx].count;
 
       uint32_t beatsIntoPhrase = currentBeat - phrases[activeIdx].startBeat;
-
-      // Add progress within the beat (0.0 - 0.99)
       float totalProgress = (float)beatsIntoPhrase + prolink_beat_progress_public;
       if (phrases[activeIdx].count > 0) {
         prolink_phrase_progress_public = totalProgress / (float)phrases[activeIdx].count;
       }
     } else {
-      // --- Reset Public Variables (No Phrase Match Found / Gap) ---
       prolink_phrase_index_public = -1;
       prolink_phrase_name_public = "Gap/End";
       prolink_phrase_beats_public = 0;
@@ -616,11 +812,70 @@ private:
     }
   }
 
+  // Check for peers that have stopped sending keepalives
+  void checkPeerTimeouts() {
+    unsigned long now = millis();
+
+    for (int i = 0; i < 64; i++) {
+      if (linkState.peerMap & ((uint64_t)1 << i)) {
+        if (linkState.peerLastSeen[i] > 0 && (now - linkState.peerLastSeen[i]) > PEER_TIMEOUT_MS) {
+          uint8_t devID = i + 1;
+
+          if (enableDebug) Serial.printf("[ProLink] Peer timeout: Player %d\n", devID);
+
+          // If this was our active/master player, reset state
+          if (devID == linkState.activePlayerID) {
+            if (enableDebug) Serial.println(F("[ProLink] Active player went away"));
+
+            linkState.isMaster = false;
+            linkState.activePlayerID = 0;
+            linkState.bpm = 0;
+            linkState.beatNumber = 0;
+            linkState.beatsElapsed = 0;
+            linkState.currentTrackId = 0;
+
+            // Clear phrases
+            phrases.clear();
+            lastAnalyzedTrackId = 0;
+            prolink_phrase_name_public = "";
+            prolink_phrase_index_public = -1;
+            prolink_mood_public = "";
+            previousPhraseIdx = -1;
+
+            // Cancel any pending fetch
+            cleanupTcpConnection();
+            fetchState = IDLE;
+            fetchRetryCount = 0;
+
+            prolink_connected_public = false;
+          }
+
+          // Mark peer as gone (but keep the IP in case it comes back)
+          // We don't clear peerMap bit - parseAnnouncePacket will detect it as "returning"
+          // by checking if lastSeen is stale
+        }
+      }
+    }
+
+    // Update overall connection status
+    bool anyPeerAlive = false;
+    for (int i = 0; i < 64; i++) {
+      if ((linkState.peerMap & ((uint64_t)1 << i)) &&
+        linkState.peerLastSeen[i] > 0 &&
+        (now - linkState.peerLastSeen[i]) <= PEER_TIMEOUT_MS) {
+        anyPeerAlive = true;
+        break;
+      }
+    }
+    linkState.isConnected = anyPeerAlive;
+  }
+
 public:
   ProLinkUsermod() : Usermod() { }
 
   void setup() {
     if (!enabled) return;
+
     if (udpStatus.listen(PORT_STATUS)) {
       udpStatus.onPacket([this](AsyncUDPPacket packet) { this->parseStatusPacket(packet); });
     }
@@ -630,13 +885,16 @@ public:
     if (udpAnnounce.listen(PORT_ANNOUNCE)) {
       udpAnnounce.onPacket([this](AsyncUDPPacket packet) { this->parseAnnouncePacket(packet); });
     }
+
+    // Send initial keepalive to announce ourselves even before seeing any peers
+    sendKeepAlive();
+
+    if (enableDebug) Serial.println(F("[ProLink] Initialized and listening"));
   }
 
-  // --- ADDED: Helper to calculate effective BPM ---
   float getEffectiveBPM() {
     if (linkState.activePlayerID > 0 && linkState.activePlayerID <= 4) {
       float effectivePitch = linkState.effectivePitch;
-      // linkState.bpm is track BPM (from beat packet)
       return linkState.bpm * (1.0f + (effectivePitch / 100.0f));
     }
     return linkState.bpm;
@@ -645,19 +903,43 @@ public:
   void loop() {
     if (!enabled) return;
 
+    // Check for peer timeouts periodically
+    static unsigned long lastPeerCheck = 0;
+    if (millis() - lastPeerCheck > PEER_CHECK_INTERVAL_MS) {
+      checkPeerTimeouts();
+      lastPeerCheck = millis();
+    }
+
     // Handle Metadata TCP State Machine
     handleFetchStateMachine();
 
-    // --- BEAT PROGRESS CALCULATION ---
-    // This logic relies on tracking the system time (millis()) since the last detected beat.
+    // Beat progress calculation
     static unsigned long lastBeatTime = 0;
     static uint32_t lastBeatNumber = 0;
+    static unsigned long beatFlashStart = 0;
 
-    // Check if a new beat number has been received (from parseBeatPacket)
     if (linkState.beatNumber != lastBeatNumber && linkState.beatNumber > 0) {
       lastBeatTime = millis();
       lastBeatNumber = linkState.beatNumber;
-      // You could trigger a visual effect here if needed (e.g., enableBeatFlash)
+
+      // Trigger beat flash
+      if (enableBeatFlash) {
+        beatFlashStart = millis();
+        prolink_beat_flash_active = true;
+        prolink_beat_flash_brightness = 255;
+      }
+    }
+
+    // Update beat flash decay
+    if (enableBeatFlash && prolink_beat_flash_active) {
+      unsigned long flashElapsed = millis() - beatFlashStart;
+      if (flashElapsed < BEAT_FLASH_DURATION_MS) {
+        // Quick attack, exponential decay
+        prolink_beat_flash_brightness = 255 - (uint8_t)((flashElapsed * 255) / BEAT_FLASH_DURATION_MS);
+      } else {
+        prolink_beat_flash_active = false;
+        prolink_beat_flash_brightness = 0;
+      }
     }
 
     if (linkState.bpm > 0 && lastBeatTime > 0) {
@@ -665,26 +947,21 @@ public:
       float beatDurationMs = 60000.0f / effectiveBpm;
       unsigned long timeSinceBeat = millis() - lastBeatTime;
 
-      // Calculate progress (0.0 to 0.999...)
       float progress = timeSinceBeat / beatDurationMs;
-
-      // Ensure progress wraps correctly (though beat packets should handle major jumps)
       while (progress >= 1.0f) {
         progress -= 1.0f;
-        lastBeatTime += (unsigned long)beatDurationMs; // Adjust the reference time
+        lastBeatTime += (unsigned long)beatDurationMs;
       }
 
       prolink_beat_progress_public = progress;
     } else {
       prolink_beat_progress_public = 0.0f;
     }
-    // --- END BEAT PROGRESS CALCULATION ---
 
-
-    // Determine current phrase based on beats
+    // Update phrase state
     updatePhraseState();
 
-    // Update Public Vars (ALWAYS LAST)
+    // Update Public Vars
     prolink_bpm_public = getEffectiveBPM();
     prolink_beat_public = linkState.beatInMeasure;
     prolink_beat_number_public = linkState.beatNumber;
@@ -692,11 +969,11 @@ public:
     prolink_beats_elapsed_public = linkState.beatsElapsed;
     prolink_bars_elapsed_public = linkState.halfBarsElapsed / 2;
     prolink_bars_remaining_public = linkState.halfBarsRemaining / 2;
+    prolink_connected_public = linkState.isMaster;
 
-
-    // Keepalive (every 1.5s)
+    // Keepalive - always send, even without peers
     static unsigned long lastKA = 0;
-    if (millis() - lastKA > 1500) {
+    if (millis() - lastKA > KEEPALIVE_INTERVAL_MS) {
       sendKeepAlive();
       lastKA = millis();
     }
@@ -705,39 +982,80 @@ public:
   void addToConfig(JsonObject& root) {
     JsonObject top = root.createNestedObject(FPSTR(_name));
     top[FPSTR(_enabled)] = enabled;
-    top[FPSTR(_beatDebug)] = enableDebug;
-    top[FPSTR(_pitchDebug)] = enableBeatFlash; // Reuse key for now or add new one
+    top[FPSTR(_debug)] = enableDebug;
+    top[FPSTR(_beatFlash)] = enableBeatFlash;
+    top[FPSTR(_randomPreset)] = enableRandomPreset;
   }
 
   bool readFromConfig(JsonObject& root) {
     JsonObject top = root[FPSTR(_name)];
-    if (top.isNull()) return false;
+    if (top.isNull()) {
+      if (enableDebug) Serial.println(F("[ProLink] No config found, using defaults"));
+      return false;
+    }
+
     enabled = top[FPSTR(_enabled)] | enabled;
-    enableDebug = top[FPSTR(_beatDebug)] | enableDebug;
-    enableBeatFlash = top[FPSTR(_pitchDebug)] | enableBeatFlash;
+    enableDebug = top[FPSTR(_debug)] | enableDebug;
+    enableBeatFlash = top[FPSTR(_beatFlash)] | enableBeatFlash;
+    enableRandomPreset = top[FPSTR(_randomPreset)] | enableRandomPreset;
+
+    if (enableDebug) {
+      Serial.printf("[ProLink] Config: enabled=%d debug=%d beatFlash=%d randomPreset=%d\n",
+        enabled, enableDebug, enableBeatFlash, enableRandomPreset);
+    }
     return true;
   }
 
   void addToJsonInfo(JsonObject& root) {
     JsonObject user = root["u"];
     if (user.isNull()) user = root.createNestedObject("u");
+
     if (enabled) {
       JsonArray infoArr = user.createNestedArray("Pro DJ Link");
-      String status = linkState.isMaster ? "M" + String(linkState.activePlayerID) : "Waiting";
-      status += " | " + String(linkState.bpm, 1) + " BPM";
+
+      String status;
+      if (linkState.isMaster && linkState.activePlayerID > 0) {
+        status = "M" + String(linkState.activePlayerID);
+        status += " | " + String(getEffectiveBPM(), 1) + " BPM";
+      } else if (linkState.isConnected) {
+        // Count active peers
+        int peerCount = 0;
+        unsigned long now = millis();
+        for (int i = 0; i < 64; i++) {
+          if ((linkState.peerMap & ((uint64_t)1 << i)) &&
+            linkState.peerLastSeen[i] > 0 &&
+            (now - linkState.peerLastSeen[i]) <= PEER_TIMEOUT_MS) {
+            peerCount++;
+          }
+        }
+        status = String(peerCount) + " peer(s), waiting for master";
+      } else {
+        status = "Listening...";
+      }
       infoArr.add(status);
 
-      if (prolink_phrase_name_public.length() > 0) {
+      if (prolink_phrase_name_public.length() > 0 && linkState.isMaster) {
         infoArr.add("<br />" + prolink_mood_public + " " + prolink_phrase_name_public);
+      }
+
+      // Show fetch status if in progress
+      if (fetchState != IDLE && fetchState != COOLDOWN) {
+        String fetchStatus = "<br />Fetching phrases";
+        if (fetchRetryCount > 0) {
+          fetchStatus += " (retry " + String(fetchRetryCount) + "/" + String(FETCH_MAX_RETRIES) + ")";
+        }
+        infoArr.add(fetchStatus);
       }
     }
   }
 
   uint16_t getId() { return 0xCD30; }
+
 };
 
 // --- Static Definitions ---
 const char ProLinkUsermod::_name[] PROGMEM = "Pro DJ Link";
 const char ProLinkUsermod::_enabled[] PROGMEM = "Enabled";
-const char ProLinkUsermod::_beatDebug[] PROGMEM = "Beat Packet Debug";
-const char ProLinkUsermod::_pitchDebug[] PROGMEM = "Pitch Debug";
+const char ProLinkUsermod::_debug[] PROGMEM = "Enable Debug";
+const char ProLinkUsermod::_beatFlash[] PROGMEM = "Beat Flash";
+const char ProLinkUsermod::_randomPreset[] PROGMEM = "Random Preset on Phrase";

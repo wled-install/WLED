@@ -234,6 +234,22 @@ void buildPresetCache();
 String strip_unicode(const String& name);
 bool getCachedPresetExists(int id);
 byte getRandomPresetId();
+int getPreviousPreset(int currentId);
+int getNextPreset(int currentId);
+void initPresetMapping();
+
+struct PresetMetadata {
+  bool exists;
+  bool isPlaylist;
+  char name[33]; // adjust size to match your actual struct
+};
+
+extern PresetMetadata* presetCache;
+
+// Optionally declare helpers too
+std::vector<int> buildPresetPool();
+int getPresetForPhrase(int phraseIdx, const std::vector<int>& pool);
+int getPresetForPhraseNoRepeat(int phraseIdx, const std::vector<int>& pool);
 
 //remote.cpp
 void handleRemote();
