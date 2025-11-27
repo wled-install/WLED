@@ -6754,6 +6754,7 @@ uint16_t mode_2Dscrollingtext(void) {
   extern volatile uint16_t  prolink_phrase_beats_public;
   extern volatile float     prolink_phrase_progress_public;
   extern String             prolink_mood_public;
+  extern float              prolink_pitchPercent;
   #endif
 
   const uint16_t cols = SEGMENT.virtualWidth();
@@ -6803,7 +6804,7 @@ uint16_t mode_2Dscrollingtext(void) {
     !strncmp_P(text, PSTR("#TIME"), 5) || !strncmp_P(text, PSTR("#HH"), 3) || !strncmp_P(text, PSTR("#MM"), 3) ||
     strstr(text, "#BPM") || strstr(text, "#BPOS") || strstr(text, "#BEAT") || strstr(text, "#BARS") ||
     strstr(text, "#END") || strstr(text, "#TR") || strstr(text, "#PR") ||
-    strstr(text, "#PH") || strstr(text, "#PB") || strstr(text, "#PH") || strstr(text, "#MD");
+    strstr(text, "#PH") || strstr(text, "#PB") || strstr(text, "#PH") || strstr(text, "#PT") || strstr(text, "#MD");
 
   if (hasMacro) {
     if (!strncmp_P(text, PSTR("#D"), 2) || !strncmp_P(text, PSTR("#MM"), 3) || !strncmp_P(text, PSTR("#HH"), 3)) drawShadow = false;
@@ -6879,6 +6880,9 @@ uint16_t mode_2Dscrollingtext(void) {
           } else if (strncmp(src, "#BPM", 4) == 0) {
             dst += sprintf(dst, "%.1f", prolink_bpm_public);
             src += 4;
+          } else if (strncmp(src, "#PT", 3) == 0) {
+            dst += sprintf(dst, "%s%.2f%", (prolink_pitchPercent > 0.00f) ? "+":"", prolink_pitchPercent);
+            src += 3;
           } else if (strncmp(src, "#MD", 3) == 0) {
             dst += sprintf(dst, "%s", prolink_mood_public.c_str());
             src += 3;

@@ -47,6 +47,9 @@ volatile uint32_t prolink_beat_number_public = 0;
 volatile float prolink_beat_progress_public = 0.0;
 volatile uint32_t prolink_track_id_public = 0;
 
+// Pitch slider
+volatile float prolink_pitchPercent = 0.0f;
+
 // Bar/Beat Counters
 volatile uint16_t prolink_beats_elapsed_public = 0;
 volatile uint8_t prolink_bars_elapsed_public = 0;
@@ -98,6 +101,10 @@ struct ProLinkState {
   volatile uint16_t beatsElapsed = 0;
   volatile uint8_t halfBarsRemaining = 0;
   volatile uint8_t halfBarsElapsed = 0;
+
+  // Beat Packets
+  volatile uint32_t msToNextBar = 0;
+  volatile float    pitchPercent = 0.0f;
 
   // Track ID
   volatile uint32_t currentTrackId = 0;
@@ -151,6 +158,9 @@ private:
   // Phrase change tracking
   int previousPhraseIdx = -1;
 
+  const uint8_t TYPE_BEAT = 0x28;
+  const float SPEED_UNITY = 1048576.0f; // 0x100000
+
   // Settings
   bool enabled = true;
   bool enableDebug = false;
@@ -180,6 +190,20 @@ private:
     return (float)offset / PITCH_SCALE;
   }
 
+  uint8_t getActivePeerCount() {
+    unsigned long now = millis();
+    uint8_t count = 0;
+
+    for (int i = 0; i < 64; i++) {
+      if (linkState.peerMap & ((uint64_t)1 << i)) {
+        if (now - linkState.peerLastSeen[i] <= PEER_TIMEOUT_MS) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
   void sendKeepAlive() {
     if (!Network.isConnected()) return;
 
@@ -193,18 +217,25 @@ private:
     Network.localMAC(&pkg[0x26]);
     uint32_t ip = (uint32_t)Network.localIP();
     memcpy(&pkg[0x2C], &ip, 4);
-    pkg[0x30] = 1; pkg[0x34] = 0x01;
+    pkg[0x30] = getActivePeerCount() + 1; // add 1 for ourselves.
+    pkg[0x34] = 0x01;
 
     // Always broadcast to subnet even if no peers known yet
     IPAddress broadcast = Network.localIP();
     broadcast[3] = 255;
     udpAnnounce.writeTo(pkg, 54, broadcast, PORT_ANNOUNCE);
 
-    // Also send to known peers
+    IPAddress lastip = INADDR_NONE;
+    // Also send to known peers...
+    // in the case of the XDJ-AZ, all devices are 
+    // the same IP so we don't need to spam it.
     for (int i = 0; i < 64; i++) {
       if (linkState.peerMap & ((uint64_t)1 << i)) {
         if (linkState.peerIPs[i][0] != 0) {
-          udpAnnounce.writeTo(pkg, 54, linkState.peerIPs[i], PORT_ANNOUNCE);
+          if (lastip != linkState.peerIPs[i]) {
+            udpAnnounce.writeTo(pkg, 54, linkState.peerIPs[i], PORT_ANNOUNCE);
+            lastip = linkState.peerIPs[i];
+          }
         }
       }
     }
@@ -333,11 +364,37 @@ private:
       }
     }
 
-    if (data[0x0A] == TYPE_BEAT_GRID) {
-      uint32_t rawBpm = (data[0x38] << 24) | (data[0x39] << 16) | (data[0x3A] << 8) | data[0x3B];
-      if (rawBpm != 0xFFFFFFFF) linkState.bpm = rawBpm / 10.0f;
+    if (data[0x0A] == TYPE_BEAT) {
+      // --- 0x28 PACKET PARSING ---
 
-      linkState.beatNumber = (data[0x24] << 24) | (data[0x25] << 16) | (data[0x26] << 8) | data[0x27];
+      // 1. Live BPM Calc
+      uint16_t baseBpmRaw = (data[0x5A] << 8) | data[0x5B];
+      uint32_t speedRaw = (data[0x54] << 24) | (data[0x55] << 16) | (data[0x56] << 8) | data[0x57];
+
+      float baseBpm = baseBpmRaw / 100.0f;
+      float speedRatio = speedRaw / SPEED_UNITY;
+      float currentBpm = baseBpm * speedRatio;
+
+      // 2. Rolling Grid Data (Timers to next markers)
+      uint32_t msToNextBar = (data[0x2C] << 24) | (data[0x2D] << 16) | (data[0x2E] << 8) | data[0x2F];
+      uint32_t msTo2ndBar = (data[0x34] << 24) | (data[0x35] << 16) | (data[0x36] << 8) | data[0x37];
+
+      // 3. Intervals (Static durations)
+      uint32_t msBeat = (data[0x24] << 24) | (data[0x25] << 16) | (data[0x26] << 8) | data[0x27];
+      uint32_t msBar = (data[0x30] << 24) | (data[0x31] << 16) | (data[0x32] << 8) | data[0x33];
+
+      // 4. Status
+      uint8_t beat = data[0x5C];
+
+      // Update Link State
+      linkState.bpm = currentBpm;
+      linkState.beatNumber = beat;
+      linkState.msToNextBar = msToNextBar; // Use for syncing
+
+      // Calculated Pitch % for display
+      linkState.pitchPercent = (speedRatio - 1.0f) * 100.0f;
+      prolink_pitchPercent = linkState.pitchPercent;
+      
     }
   }
 
