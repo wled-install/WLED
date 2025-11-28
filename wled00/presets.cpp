@@ -516,6 +516,7 @@ std::vector<int> buildPresetPool() {
 
 // Call this once when starting a track
 void initPresetMapping() {
+  #ifdef USERMOD_PIONEER_PROLINK
   auto pool = buildPresetPool();
   if (!pool.empty()) {
     prolink_presetOffset = random(pool.size()); // randomized start
@@ -528,17 +529,23 @@ void initPresetMapping() {
   } else {
     USER_PRINTLN(F("No presets available in cache."));
   }
+  #endif
 }
 
 // --- Phrase → Preset mapping ---
 int getPresetForPhrase(int phraseIdx, const std::vector<int>& pool) {
+  #ifdef USERMOD_PIONEER_PROLINK
   if (pool.empty()) return -1;
   int presetCount = pool.size();
   return pool[(prolink_presetOffset + phraseIdx) % presetCount];
+  #else
+  return 0;
+  #endif
 }
 
 // --- No-repeat variant (avoids consecutive duplicates) ---
 int getPresetForPhraseNoRepeat(int phraseIdx, const std::vector<int>& pool) {
+  #ifdef USERMOD_PIONEER_PROLINK
   if (pool.empty()) return -1;
   int presetCount = pool.size();
   int preset = pool[(prolink_presetOffset + phraseIdx) % presetCount];
@@ -550,6 +557,9 @@ int getPresetForPhraseNoRepeat(int phraseIdx, const std::vector<int>& pool) {
     }
   }
   return preset;
+  #else
+  return 0;
+  #endif
 }
 
 // --- Helper to print preset name ---

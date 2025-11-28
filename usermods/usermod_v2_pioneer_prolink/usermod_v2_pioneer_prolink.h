@@ -8,7 +8,7 @@
    @target    ESP32 (Requires AsyncUDP, PSRAM recommended for waveform/artwork)
    @repo      WLED MoonModules
 
-   FIXED VERSION: Improved timing for waveform/artwork fetch
+   FIXED VERSION: Corrected artwork ID usage and improved metadata parsing
 */
 
 #include "wled.h"
@@ -40,22 +40,25 @@
 #define PEER_TIMEOUT_MS       5000
 #define KEEPALIVE_INTERVAL_MS 1500
 #define PEER_CHECK_INTERVAL_MS 2000
-#define BEAT_FLASH_DURATION_MS 80
+#define BEAT_FLASH_DURATION_MS 300
 
 // Data collection timeouts - NEW
 #define WAVEFORM_COLLECT_MS   1500   // Time to collect waveform data (PWV4 preview ~7KB)
-#define ARTWORK_COLLECT_MS    3000   // Time to collect artwork data
+#define ARTWORK_COLLECT_MS    5000   // Time to collect artwork data (can be 50-100KB)
 #define METADATA_COLLECT_MS   500    // Time to collect metadata
 
 // Buffer sizes
 #define METADATA_BUFFER_MAX   8192
 #define WAVEFORM_BUFFER_MAX   4096   // Max waveform points to store
-#define ARTWORK_BUFFER_MAX    (256 * 1024)  // 256KB max for album art JPEG
+#define ARTWORK_BUFFER_MAX    (512 * 1024)  // 256KB max for album art JPEG
 
 // --- Waveform Data Structure ---
 struct WaveformPoint {
   uint8_t height;  // 0-127 amplitude (PWV4 full resolution)
-  uint8_t color;   // Pioneer color index 0-7
+  uint8_t color;   // Pioneer color index 0-7 (frequency-based)
+  uint8_t r;       // Raw high frequency value (0-127)
+  uint8_t g;       // Raw mid frequency value (0-127)
+  uint8_t b;       // Raw low frequency value (0-127)
 };
 
 // --- Public Variables (Exposed to FX.cpp) ---
@@ -115,6 +118,8 @@ volatile uint32_t prolink_total_beats = 0;
 
 extern std::vector<int> presetPool;
 extern int presetOffset;
+
+bool altWaveformColors = false;
 
 // --- Internal Data Structures ---
 
@@ -236,6 +241,7 @@ private:
   bool enableDebug = false;
   bool enableBeatFlash = false;
   bool enableRandomPreset = false;
+  bool enableHighResArtwork = true;  // NEW: Request 240x240 artwork instead of 80x80
 
   // New settings: IP override and virtual deck number
   String playerIPOverride = "";
@@ -247,8 +253,10 @@ private:
   static const char _debug[];
   static const char _beatFlash[];
   static const char _randomPreset[];
+  static const char _highResArt[];
   static const char _ipOverride[];
   static const char _deckNumber[];
+  static const char _altcolors[];
 
   // --- Constants for Protocol ---
   // Fixed magic prefix for all dbserver queries (NOT the handshake response!)
@@ -261,15 +269,16 @@ private:
   };
 
   // Pioneer waveform color palette (RGB888)
+  // Maps frequency content: Bass (blue) -> Mids (green) -> Highs (red)
   const uint32_t PIONEER_COLORS[8] = {
-    0x0000FF,  // 0: Blue
-    0x0080FF,  // 1: Blue-cyan
-    0x00FFFF,  // 2: Cyan
-    0x00FF00,  // 3: Green
-    0x80FF00,  // 4: Green-yellow
-    0xFFFF00,  // 5: Yellow
-    0xFF8000,  // 6: Orange
-    0xFF0000   // 7: Red
+    0x0000FF,  // 0: Blue - pure bass
+    0x0080FF,  // 1: Blue-cyan - bass + some mids
+    0x00FFFF,  // 2: Cyan - bass + mids
+    0x00FF00,  // 3: Green - pure mids (leaning bass)
+    0x80FF00,  // 4: Green-yellow - mids (leaning treble)
+    0xFFFF00,  // 5: Yellow - highs + mids
+    0xFF8000,  // 6: Orange - highs + some mids
+    0xFF0000   // 7: Red - pure highs
   };
 
   // --- Helpers ---
@@ -626,7 +635,8 @@ private:
 
     fetchState = CONNECT_STAGE1;
     stateTimer = millis();
-    if (enableDebug) Serial.printf("[ProLink] Starting fetch (attempt %d/%d)...\n", fetchRetryCount + 1, FETCH_MAX_RETRIES);
+    if (enableDebug) Serial.printf("[ProLink] Starting fetch (attempt %d/%d) for track %u...\n",
+      fetchRetryCount + 1, FETCH_MAX_RETRIES, linkState.currentTrackId);
   }
 
   void scheduleFetchRetry() {
@@ -680,7 +690,7 @@ private:
       if (dbClient.available()) {
         buf[bytesRead++] = dbClient.read();
       } else {
-        delay(1);
+        vTaskDelay(1);
       }
     }
     return true;
@@ -698,7 +708,7 @@ private:
 
       // Yield periodically to prevent watchdog timeout
       if (chunkSize >= CHUNK_LIMIT) {
-        yield();
+        vTaskDelay(1);
         chunkSize = 0;
       }
     }
@@ -710,7 +720,7 @@ private:
         dbClient.read();  // Discard
         drained++;
         if ((drained % CHUNK_LIMIT) == 0) {
-          yield();
+          vTaskDelay(1);
         }
       }
       if (enableDebug && drained > 0) {
@@ -796,7 +806,7 @@ private:
     int readSoFar = 4 + 28;
     while (readSoFar < (int)headerLen) {
       if (!dbClient.available()) {
-        delay(1);
+        vTaskDelay(1);
         if (millis() - stateTimer > FETCH_TIMEOUT_MS) return false;
       }
       dbClient.read();
@@ -883,82 +893,236 @@ private:
     sendDBQuery(0x3000, args, 6);
   }
 
+  // Parse a 4-byte big-endian number field (type 0x11) at given position
+  // Returns the value, advances pos past the field
+  uint32_t parseNumberField(size_t& pos) {
+    if (pos >= metadataBuffer.size()) return 0;
+    uint8_t type = metadataBuffer[pos];
+    if (type == 0x0f && pos + 1 < metadataBuffer.size()) {
+      // 1-byte number
+      pos += 2;
+      return metadataBuffer[pos - 1];
+    } else if (type == 0x10 && pos + 2 < metadataBuffer.size()) {
+      // 2-byte number
+      uint32_t val = (metadataBuffer[pos + 1] << 8) | metadataBuffer[pos + 2];
+      pos += 3;
+      return val;
+    } else if (type == 0x11 && pos + 4 < metadataBuffer.size()) {
+      // 4-byte number
+      uint32_t val = ((uint32_t)metadataBuffer[pos + 1] << 24) |
+        ((uint32_t)metadataBuffer[pos + 2] << 16) |
+        ((uint32_t)metadataBuffer[pos + 3] << 8) |
+        (uint32_t)metadataBuffer[pos + 4];
+      pos += 5;
+      return val;
+    }
+    pos++;
+    return 0;
+  }
+
+  // Skip a string field (type 0x26)
+  void skipStringField(size_t& pos) {
+    if (pos >= metadataBuffer.size() - 5) return;
+    if (metadataBuffer[pos] != 0x26) { pos++; return; }
+    // String: 0x26 + 4-byte length (in UTF-16 chars) + chars
+    uint32_t len = ((uint32_t)metadataBuffer[pos + 1] << 24) |
+      ((uint32_t)metadataBuffer[pos + 2] << 16) |
+      ((uint32_t)metadataBuffer[pos + 3] << 8) |
+      (uint32_t)metadataBuffer[pos + 4];
+    pos += 5 + (len * 2);  // Skip header + UTF-16 characters
+  }
+
+  // Parse a UTF-16 string field, returns the decoded string
+  String parseStringField(size_t& pos) {
+    String result = "";
+    if (pos >= metadataBuffer.size() - 5) return result;
+    if (metadataBuffer[pos] != 0x26) { pos++; return result; }
+
+    uint32_t len = ((uint32_t)metadataBuffer[pos + 1] << 24) |
+      ((uint32_t)metadataBuffer[pos + 2] << 16) |
+      ((uint32_t)metadataBuffer[pos + 3] << 8) |
+      (uint32_t)metadataBuffer[pos + 4];
+    pos += 5;
+
+    for (uint32_t i = 0; i < len && pos + 1 < metadataBuffer.size(); i++) {
+      uint16_t ch = (metadataBuffer[pos] << 8) | metadataBuffer[pos + 1];  // Big-endian UTF-16
+      pos += 2;
+
+      if (ch == 0) continue;  // Skip NUL
+
+      if (ch < 128) {
+        result += (char)ch;
+      } else if (ch < 0x800) {
+        result += (char)(0xC0 | (ch >> 6));
+        result += (char)(0x80 | (ch & 0x3F));
+      } else {
+        result += (char)(0xE0 | (ch >> 12));
+        result += (char)(0x80 | ((ch >> 6) & 0x3F));
+        result += (char)(0x80 | (ch & 0x3F));
+      }
+    }
+    result.trim();
+    return result;
+  }
+
   bool parseMetadataResponse() {
-    if (metadataBuffer.size() < 32) return false;
+    if (metadataBuffer.size() < 50) return false;
 
-    std::vector<String> strings;
+    // Reset artwork ID before parsing
+    artworkId = 0;
+
+    // Clear metadata
+    prolink_track_title = "";
+    prolink_track_artist = "";
+    prolink_track_album = "";
+    prolink_track_key = "";
+    prolink_track_genre = "";
+    prolink_track_label = "";
+
+    if (enableDebug) {
+      Serial.printf("[ProLink] Parsing metadata buffer: %d bytes\n", metadataBuffer.size());
+      // Dump first 100 bytes for debugging
+      Serial.print(F("[ProLink] First 100 bytes: "));
+      for (size_t i = 0; i < min((size_t)100, metadataBuffer.size()); i++) {
+        Serial.printf("%02X ", metadataBuffer[i]);
+      }
+      Serial.println();
+    }
+
+    // The metadata response contains multiple menu items (type 0x4101)
+    // Each menu item has 12 arguments: 10 numbers and 2 strings
+    // Structure per item:
+    //   Arg1 (num): parent ID
+    //   Arg2 (num): main ID (rekordbox ID for title item)
+    //   Arg3 (num): label 1 byte size
+    //   Arg4 (str): label 1 (track title for type 04)
+    //   Arg5 (num): label 2 byte size
+    //   Arg6 (str): label 2
+    //   Arg7 (num): item type (04=title, 07=artist, 02=album, 0f=key, 06=genre, etc)
+    //   Arg8 (num): flags
+    //   Arg9 (num): artwork ID (for title item type 04)
+    //   Arg10-12 (num): other fields
+
+    // Look for menu item messages (type 0x4101 = 16641)
+    // Message structure: magic(5) + txid(5) + type(3) + argcount(2) + argtypes(13) + args
+
     size_t pos = 0;
+    int itemsParsed = 0;
 
-    while (pos < metadataBuffer.size() - 6) {
-      // Look for UTF-16 string marker: 0x26 0x00 0x00 0x00
-      if (metadataBuffer[pos] == 0x26 &&
-        metadataBuffer[pos + 1] == 0x00 &&
-        metadataBuffer[pos + 2] == 0x00 &&
-        metadataBuffer[pos + 3] == 0x00) {
+    while (pos < metadataBuffer.size() - 30) {
+      // Look for dbserver magic: 0x11 0x87 0x23 0x49 0xae
+      if (metadataBuffer[pos] == 0x11 &&
+        metadataBuffer[pos + 1] == 0x87 &&
+        metadataBuffer[pos + 2] == 0x23 &&
+        metadataBuffer[pos + 3] == 0x49 &&
+        metadataBuffer[pos + 4] == 0xae) {
 
-        uint16_t slen = metadataBuffer[pos + 4] | (metadataBuffer[pos + 5] << 8);
+        // Found message start
+        size_t msgStart = pos;
+        pos += 5;  // Skip magic
 
-        if (slen > 0 && slen < 500 && (pos + 6 + slen * 2) <= metadataBuffer.size()) {
-          String decoded = "";
-          for (uint16_t i = 0; i < slen; i++) {
-            size_t bytePos = pos + 6 + (i * 2);
-            uint16_t ch = metadataBuffer[bytePos] | (metadataBuffer[bytePos + 1] << 8);
+        // Skip transaction ID (0x11 + 4 bytes)
+        if (pos + 5 > metadataBuffer.size()) break;
+        pos += 5;
 
-            if (ch == 0 || ch == 0x11 || ch == 0x1100) continue;
+        // Read message type (0x10 + 2 bytes)
+        if (pos + 3 > metadataBuffer.size()) break;
+        if (metadataBuffer[pos] != 0x10) { pos = msgStart + 1; continue; }
+        uint16_t msgType = (metadataBuffer[pos + 1] << 8) | metadataBuffer[pos + 2];
+        pos += 3;
 
-            if (ch < 128) {
-              decoded += (char)ch;
-            } else if (ch < 0x800) {
-              decoded += (char)(0xC0 | (ch >> 6));
-              decoded += (char)(0x80 | (ch & 0x3F));
-            } else {
-              decoded += (char)(0xE0 | (ch >> 12));
-              decoded += (char)(0x80 | ((ch >> 6) & 0x3F));
-              decoded += (char)(0x80 | (ch & 0x3F));
-            }
-          }
-
-          decoded.trim();
-          if (decoded.length() > 0) {
-            strings.push_back(decoded);
-          }
+        // Check if this is a menu item (0x4101)
+        if (msgType != 0x4101) {
+          pos = msgStart + 1;
+          continue;
         }
-        pos++;
+
+        // Read argument count (0x0f + 1 byte)
+        if (pos + 2 > metadataBuffer.size()) break;
+        if (metadataBuffer[pos] != 0x0f) { pos = msgStart + 1; continue; }
+        uint8_t argCount = metadataBuffer[pos + 1];
+        pos += 2;
+
+        // Skip argument type blob (0x14 + 4-byte length + data)
+        if (pos + 5 > metadataBuffer.size()) break;
+        if (metadataBuffer[pos] != 0x14) { pos = msgStart + 1; continue; }
+        uint32_t blobLen = ((uint32_t)metadataBuffer[pos + 1] << 24) |
+          ((uint32_t)metadataBuffer[pos + 2] << 16) |
+          ((uint32_t)metadataBuffer[pos + 3] << 8) |
+          (uint32_t)metadataBuffer[pos + 4];
+        pos += 5 + blobLen;
+
+        if (pos >= metadataBuffer.size() - 20) break;
+
+        // Now parse the 12 arguments
+        // Args 1-3 are numbers, arg 4 is string, arg 5 is number, arg 6 is string, args 7-12 are numbers
+
+        uint32_t arg1 = parseNumberField(pos);   // Parent ID
+        uint32_t arg2 = parseNumberField(pos);   // Main ID (rekordbox ID)
+        uint32_t arg3 = parseNumberField(pos);   // Label 1 size
+        String label1 = parseStringField(pos);   // Label 1
+        uint32_t arg5 = parseNumberField(pos);   // Label 2 size
+        String label2 = parseStringField(pos);   // Label 2
+        uint32_t itemType = parseNumberField(pos); // Item type
+        uint32_t arg8 = parseNumberField(pos);   // Flags
+        uint32_t arg9 = parseNumberField(pos);   // Artwork ID (for title)
+
+        // Mask item type to handle CDJ-3000 extended info in high bytes
+        itemType = itemType & 0xFFFF;
+
+        if (enableDebug) {
+          Serial.printf("[ProLink] Menu item type=0x%02X label1='%s' label2='%s' arg9=%u\n",
+            itemType, label1.c_str(), label2.c_str(), arg9);
+        }
+
+        // Map item types to metadata fields
+        switch (itemType) {
+        case 0x04:  // Track Title
+          prolink_track_title = label1;
+          // Artwork ID is in argument 9 for title items!
+          if (arg9 > 0 && arg9 < 0x7FFFFFFF) {
+            artworkId = arg9;
+          }
+          break;
+        case 0x07:  // Artist
+          prolink_track_artist = label1;
+          break;
+        case 0x02:  // Album
+          prolink_track_album = label1;
+          break;
+        case 0x0f:  // Key
+          prolink_track_key = label1;
+          break;
+        case 0x06:  // Genre
+          prolink_track_genre = label1;
+          break;
+        case 0x10:  // Label
+          prolink_track_label = label1;
+          break;
+        }
+
+        itemsParsed++;
+
+        // Skip remaining args for this item and continue
+        // (we've consumed most of them above)
+
       } else {
         pos++;
       }
     }
 
-    // Extract artwork ID from response
-    artworkId = 0;
-    for (size_t i = 0; i < metadataBuffer.size() - 8; i++) {
-      if (i > 20 && metadataBuffer[i] == 0x11) {
-        uint32_t potentialId = (metadataBuffer[i + 1] << 24) |
-          (metadataBuffer[i + 2] << 16) |
-          (metadataBuffer[i + 3] << 8) |
-          metadataBuffer[i + 4];
-        if (potentialId > 0 && potentialId < 0x7FFFFFFF && artworkId == 0) {
-          artworkId = potentialId;
-          break;
-        }
-      }
-    }
+    prolink_metadata_valid = (prolink_track_title.length() > 0 || prolink_track_artist.length() > 0);
 
-    // Map strings to fields
-    if (strings.size() > 0) prolink_track_title = strings[0];
-    if (strings.size() > 1) prolink_track_artist = strings[1];
-    if (strings.size() > 2) prolink_track_album = strings[2];
-    if (strings.size() > 3) prolink_track_key = strings[3];
-    if (strings.size() > 4) prolink_track_genre = strings[4];
-    if (strings.size() > 6) prolink_track_label = strings[6];
-
-    prolink_metadata_valid = (strings.size() > 0);
-
-    if (enableDebug && prolink_metadata_valid) {
-      Serial.printf("[ProLink] Track: %s - %s (artwork ID: %u)\n",
+    if (enableDebug) {
+      Serial.printf("[ProLink] Parsed %d menu items\n", itemsParsed);
+      Serial.printf("[ProLink] Track: %s - %s\n",
         prolink_track_artist.c_str(),
-        prolink_track_title.c_str(),
-        artworkId);
+        prolink_track_title.c_str());
+      Serial.printf("[ProLink] Album: %s, Key: %s\n",
+        prolink_track_album.c_str(),
+        prolink_track_key.c_str());
+      Serial.printf("[ProLink] Artwork ID: %u (trackId=%u)\n",
+        artworkId, linkState.currentTrackId);
     }
 
     return prolink_metadata_valid;
@@ -1084,33 +1248,62 @@ private:
       // Calculate overall height as max of RGB channels
       uint8_t height = max(max(ch3, ch4), ch5);
 
-      // Map RGB to Pioneer color index (0-7)
-      // Simple mapping based on dominant channel
+      // Map frequency bands to Pioneer color index (0-7)
+      // ch3 = highs (red), ch4 = mids (green), ch5 = lows (blue)
+      // Pioneer spectrum: 0=Blue(bass) -> 3=Green(mids) -> 7=Red(highs)
       uint8_t colorIdx = 0;
-      if (height > 0) {
-        // Calculate normalized RGB
-        uint8_t r = (ch3 * 7) / 127;
-        uint8_t g = (ch4 * 7) / 127;
-        uint8_t b = (ch5 * 7) / 127;
 
-        // Map to Pioneer color scheme:
-        // 0=Red, 1=Orange, 2=Yellow, 3=Green, 4=Cyan, 5=Blue, 6=Purple, 7=Pink
-        if (r > g && r > b) {
-          colorIdx = (g > b) ? 1 : 0;  // Orange or Red
-        } else if (g > r && g > b) {
-          colorIdx = (b > r) ? 4 : 3;  // Cyan or Green
-        } else if (b > r && b > g) {
-          colorIdx = (r > g) ? 6 : 5;  // Purple or Blue
-        } else if (r == g && r > b) {
-          colorIdx = 2;  // Yellow
+      // Store raw frequency values (available for full-color mode)
+      // ch3 = highs (red), ch4 = mids (green), ch5 = lows (blue)
+      uint8_t low = ch5;   // Bass
+      uint8_t mid = ch4;   // Mids
+      uint8_t high = ch3;  // Highs
+
+      if (height > 0) {
+        // Find dominant frequency band
+        uint8_t maxVal = max(max(low, mid), high);
+
+        if (maxVal == 0) {
+          colorIdx = 0;
+        } else if (low >= mid && low >= high) {
+          // Bass dominant: Blue end (0-2)
+          // 0 = pure bass, 1 = bass + some mids, 2 = bass + more mids
+          if (mid > low / 2) {
+            colorIdx = 2;  // Cyan - bass with significant mids
+          } else if (mid > low / 4) {
+            colorIdx = 1;  // Blue-cyan - bass with some mids
+          } else {
+            colorIdx = 0;  // Pure blue - bass dominant
+          }
+        } else if (high >= mid && high >= low) {
+          // Highs dominant: Red end (5-7)
+          // 7 = pure highs, 6 = highs + some mids, 5 = highs + more mids
+          if (mid > high / 2) {
+            colorIdx = 5;  // Yellow - highs with significant mids
+          } else if (mid > high / 4) {
+            colorIdx = 6;  // Orange - highs with some mids
+          } else {
+            colorIdx = 7;  // Pure red - highs dominant
+          }
         } else {
-          colorIdx = 7;  // Pink/White
+          // Mids dominant: Green/Yellow middle (3-5)
+          // Check if leaning towards bass or treble
+          if (low > high) {
+            colorIdx = 3;  // Green - mids leaning bass
+          } else if (high > low) {
+            colorIdx = 4;  // Green-yellow - mids leaning treble
+          } else {
+            colorIdx = 3;  // Green - balanced mids
+          }
         }
       }
 
-      // Height is 0-127 (full resolution from PWV4)
+      // Store all values - both index and raw RGB for flexibility
       prolink_waveform_data[validPoints].height = height;
       prolink_waveform_data[validPoints].color = colorIdx;
+      prolink_waveform_data[validPoints].r = high;  // Highs -> Red
+      prolink_waveform_data[validPoints].g = mid;   // Mids -> Green  
+      prolink_waveform_data[validPoints].b = low;   // Lows -> Blue
       validPoints++;
     }
 
@@ -1128,23 +1321,66 @@ private:
 
   void requestArtwork() {
     // Request type 0x2003 = Album artwork
-    // Args: compound, trackId, 1
-    // Note: This request returns JPEG data
-    uint8_t deckNum = getVirtualDeckNumber();
-    uint32_t compound = (deckNum << 24) | (linkState.currentSlot << 16) | 0x0301;
-    uint32_t args[] = { compound, linkState.currentTrackId, 1 };
+    // IMPORTANT: Args are compound + artworkId (NOT trackId!)
+    // The artworkId comes from the metadata response (arg 9 of title item)
+    // To get HIGH RESOLUTION (240x240), add an extra arg with value 1
+    // Otherwise you get 80x80 (2 args only)
 
-    if (enableDebug) {
-      Serial.printf("[ProLink] Requesting artwork 0x2003: compound=0x%08X, trackId=%u, arg3=1\n",
-        compound, linkState.currentTrackId);
+    if (artworkId == 0) {
+      if (enableDebug) Serial.println(F("[ProLink] No artwork ID from metadata, skipping artwork fetch"));
+      // Skip to cooldown since we can't fetch artwork without the ID
+      cleanupTcpConnection();
+      fetchState = COOLDOWN;
+      stateTimer = millis();
+      return;
     }
 
-    sendDBQuery(0x2003, args, 3);
+    uint8_t deckNum = getVirtualDeckNumber();
+    uint32_t compound = ((uint32_t)deckNum << 24) | ((uint32_t)linkState.currentSlot << 16) | 0x0301;
+
+    if (enableHighResArtwork) {
+      // High-res 240x240: 3 arguments with flag=1
+      uint32_t args[] = { compound, artworkId, 1 };
+      if (enableDebug) {
+        Serial.printf("[ProLink] Requesting HIGH-RES artwork 0x2003: compound=0x%08X, artworkId=%u\n",
+          compound, artworkId);
+      }
+      sendDBQuery(0x2003, args, 3);
+    } else {
+      // Low-res 80x80: 2 arguments only
+      uint32_t args[] = { compound, artworkId };
+      if (enableDebug) {
+        Serial.printf("[ProLink] Requesting LOW-RES artwork 0x2003: compound=0x%08X, artworkId=%u\n",
+          compound, artworkId);
+      }
+      sendDBQuery(0x2003, args, 2);
+    }
   }
 
   bool parseArtworkData() {
+    if (enableDebug) {
+      Serial.printf("[ProLink] Artwork buffer: %d bytes\n", artworkBuffer.size());
+      Serial.print(F("[ProLink] Artwork data: "));
+      for (size_t i = 0; i < min((size_t)100, artworkBuffer.size()); i++) {
+        Serial.printf("%02X ", artworkBuffer[i]);
+      }
+      Serial.println();
+    }
+
     if (artworkBuffer.size() < 100) {
       if (enableDebug) Serial.printf("[ProLink] Artwork data too short: %d bytes\n", artworkBuffer.size());
+
+      // Check if this is an error response - look for message type in the response
+      if (artworkBuffer.size() >= 15) {
+        // Check message type at offset 10-12 (after magic + txid)
+        if (artworkBuffer.size() > 12 && artworkBuffer[10] == 0x10) {
+          uint16_t msgType = (artworkBuffer[11] << 8) | artworkBuffer[12];
+          if (enableDebug) Serial.printf("[ProLink] Response message type: 0x%04X\n", msgType);
+          // 0x4002 = artwork response (success with data)
+          // 0x4000 = success but check arg2 for actual status
+          // Other = error
+        }
+      }
       return false;
     }
 
@@ -1187,7 +1423,7 @@ private:
     prolink_artwork_valid = true;
 
     if (enableDebug) {
-      Serial.printf("[ProLink] Artwork parsed: %d bytes JPEG\n", jpegSize);
+      Serial.printf("[ProLink] Artwork parsed: %d bytes JPEG (artworkId=%u)\n", jpegSize, artworkId);
     }
 
     return true;
@@ -1428,7 +1664,7 @@ private:
       // Collect data - PWV4 preview responses are ~7KB (1200 samples × 6 bytes)
       // Much smaller than PWV5 detail waveform (~80KB)
       collectAvailableData(waveformBuffer, 8192);  // 8KB max for PWV4 preview
-      yield();  // Prevent watchdog
+      vTaskDelay(1);  // Prevent watchdog
 
       if (millis() - collectTimer > WAVEFORM_COLLECT_MS) {
         // Done collecting, parse it
@@ -1448,8 +1684,11 @@ private:
     case REQUEST_ARTWORK:
       artworkBuffer.clear();
       requestArtwork();
-      fetchState = WAIT_ARTWORK;
-      stateTimer = millis();
+      // Note: requestArtwork() may set fetchState to COOLDOWN if no artworkId
+      if (fetchState == REQUEST_ARTWORK) {
+        fetchState = WAIT_ARTWORK;
+        stateTimer = millis();
+      }
       break;
 
     case WAIT_ARTWORK:
@@ -1461,7 +1700,7 @@ private:
         stateTimer = millis();
         break;
       }
-      if (dbClient.available() > 10) {
+      if (dbClient.available() > 0) {
         collectTimer = millis();
         fetchState = COLLECT_ARTWORK;
         if (enableDebug) Serial.println(F("[ProLink] Collecting artwork data..."));
@@ -1469,19 +1708,51 @@ private:
       break;
 
     case COLLECT_ARTWORK:
-      collectAvailableData(artworkBuffer, ARTWORK_BUFFER_MAX, true);  // Drain excess
-      yield();  // Prevent watchdog during large transfers
+      collectAvailableData(artworkBuffer, ARTWORK_BUFFER_MAX, false);  // Don't drain yet
+      vTaskDelay(1);  // Prevent watchdog during large transfers
 
-      if (millis() - collectTimer > ARTWORK_COLLECT_MS) {
-        if (enableDebug) Serial.printf("[ProLink] Collected %d bytes for artwork\n", artworkBuffer.size());
+      // Artwork images can be large (50-100KB for 240x240 JPEG)
+      // Keep collecting as long as data is still arriving or until timeout
+      {
+        static size_t lastSize = 0;
+        static unsigned long lastGrowth = 0;
 
-        if (parseArtworkData()) {
-          if (enableDebug) Serial.println(F("[ProLink] Artwork parsed successfully"));
+        if (artworkBuffer.size() > lastSize) {
+          lastSize = artworkBuffer.size();
+          lastGrowth = millis();
         }
 
-        cleanupTcpConnection();
-        fetchState = COOLDOWN;
-        stateTimer = millis();
+        // Check if we have a complete JPEG (ends with FF D9)
+        bool hasJpegEnd = false;
+        if (artworkBuffer.size() > 100) {
+          for (size_t i = artworkBuffer.size() - 1; i > artworkBuffer.size() - 10 && i > 0; i--) {
+            if (artworkBuffer[i] == 0xD9 && artworkBuffer[i - 1] == 0xFF) {
+              hasJpegEnd = true;
+              break;
+            }
+          }
+        }
+
+        // Done if: JPEG complete, or no data for 500ms, or timeout
+        bool noGrowth = (millis() - lastGrowth > 500) && (artworkBuffer.size() > 100);
+        bool timeout = (millis() - collectTimer > ARTWORK_COLLECT_MS);
+
+        if (hasJpegEnd || noGrowth || timeout) {
+          if (enableDebug) {
+            Serial.printf("[ProLink] Collected %d bytes for artwork (jpeg=%d, noGrowth=%d, timeout=%d)\n",
+              artworkBuffer.size(), hasJpegEnd, noGrowth, timeout);
+          }
+
+          lastSize = 0;  // Reset for next time
+
+          if (parseArtworkData()) {
+            if (enableDebug) Serial.println(F("[ProLink] Artwork parsed successfully"));
+          }
+
+          cleanupTcpConnection();
+          fetchState = COOLDOWN;
+          stateTimer = millis();
+        }
       }
       break;
 
@@ -1506,7 +1777,7 @@ private:
         previousPhraseIdx, activeIdx,
         newPreset, presetCache[newPreset].name);
 
-      if (strip.getSegmentsNum() > 1) strip.resetSegments(false);
+      // if (strip.getSegmentsNum() > 1) strip.resetSegments(false);
       if (currentPlaylist >= 0) unloadPlaylist();
       applyPreset(newPreset);
       handlePresets();
@@ -1647,6 +1918,7 @@ public:
   ProLinkUsermod() : Usermod() { }
 
   void setup() {
+
     if (!enabled) return;
 
     if (udpStatus.listen(PORT_STATUS)) {
@@ -1754,11 +2026,14 @@ public:
     top[FPSTR(_debug)] = enableDebug;
     top[FPSTR(_beatFlash)] = enableBeatFlash;
     top[FPSTR(_randomPreset)] = enableRandomPreset;
+    top[FPSTR(_highResArt)] = enableHighResArtwork;
     top[FPSTR(_ipOverride)] = playerIPOverride;
     top[FPSTR(_deckNumber)] = virtualDeckNumber;
+    top[FPSTR(_altcolors)] = altWaveformColors;
   }
 
   bool readFromConfig(JsonObject& root) {
+    return false;
     JsonObject top = root[FPSTR(_name)];
     if (top.isNull()) {
       if (enableDebug) Serial.println(F("[ProLink] No config found, using defaults"));
@@ -1769,6 +2044,8 @@ public:
     enableDebug = top[FPSTR(_debug)] | enableDebug;
     enableBeatFlash = top[FPSTR(_beatFlash)] | enableBeatFlash;
     enableRandomPreset = top[FPSTR(_randomPreset)] | enableRandomPreset;
+    enableHighResArtwork = top[FPSTR(_highResArt)] | enableHighResArtwork;
+    altWaveformColors = top[FPSTR(_altcolors)] | altWaveformColors;
 
     const char* ipStr = top[FPSTR(_ipOverride)] | "";
     playerIPOverride = String(ipStr);
@@ -1778,8 +2055,8 @@ public:
     if (virtualDeckNumber > 127) virtualDeckNumber = 127;
 
     if (enableDebug) {
-      Serial.printf("[ProLink] Config: enabled=%d debug=%d beatFlash=%d randomPreset=%d deck=%d ip=%s\n",
-        enabled, enableDebug, enableBeatFlash, enableRandomPreset,
+      Serial.printf("[ProLink] Config: enabled=%d debug=%d beatFlash=%d randomPreset=%d highResArt=%d deck=%d ip=%s\n",
+        enabled, enableDebug, enableBeatFlash, enableRandomPreset, enableHighResArtwork,
         virtualDeckNumber, playerIPOverride.c_str());
     }
     return true;
@@ -1841,22 +2118,126 @@ public:
 
   uint16_t getId() { return 0xCD30; }
 
-  static uint32_t getPioneerColorRGB(uint8_t colorIndex) {
-    static const uint32_t colors[8] = {
-      0x0000FF, 0x0080FF, 0x00FFFF, 0x00FF00,
-      0x80FF00, 0xFFFF00, 0xFF8000, 0xFF0000
-    };
-    return colors[colorIndex & 0x07];
+};
+
+uint32_t getPioneerColorRGB(uint8_t colorIndex) {
+  // Pioneer waveform colors: Bass (blue) -> Mids (green) -> Highs (red)
+  static const uint32_t colors[8] = {
+    0x0000FF,  // 0: Blue - pure bass
+    0x0080FF,  // 1: Blue-cyan - bass + some mids
+    0x00FFFF,  // 2: Cyan - bass + mids
+    0x00FF00,  // 3: Green - mids (leaning bass)
+    0x80FF00,  // 4: Green-yellow - mids (leaning treble)
+    0xFFFF00,  // 5: Yellow - highs + mids
+    0xFF8000,  // 6: Orange - highs + some mids
+    0xFF0000   // 7: Red - pure highs
+  };
+  return colors[colorIndex & 0x07];
+}
+
+// Get vibrant frequency-based color from waveform point
+// Hue is determined by frequency balance (bass=blue, mids=green, highs=red)
+// Saturation is always full for vivid colors
+// Brightness comes from the waveform height
+// Returns 0x00RRGGBB format
+uint32_t getWaveformRawRGB(uint16_t index) {
+  if (!prolink_waveform_data || index >= prolink_waveform_length) {
+    return 0;
   }
 
-  static uint16_t getPioneerColorRGB565(uint8_t colorIndex) {
-    uint32_t rgb = getPioneerColorRGB(colorIndex);
-    uint8_t r = (rgb >> 16) & 0xFF;
-    uint8_t g = (rgb >> 8) & 0xFF;
-    uint8_t b = rgb & 0xFF;
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  if (altWaveformColors) return getPioneerColorRGB(prolink_waveform_data[index].color);
+
+  WaveformPoint& wp = prolink_waveform_data[index];
+
+  uint8_t low = wp.b;   // Bass
+  uint8_t mid = wp.g;   // Mids
+  uint8_t high = wp.r;  // Highs
+
+  // Calculate hue based on frequency balance (0-255 range)
+  // We want: Bass -> Blue (170), Mids -> Green (85), Highs -> Red (0)
+  // Using weighted average to blend between them
+
+  uint16_t total = low + mid + high;
+  if (total == 0) {
+    return 0;
   }
-};
+
+  // Calculate hue as weighted position on the spectrum
+  // Low = 170 (blue), Mid = 85 (green), High = 0/255 (red)
+  // We'll compute a weighted average
+
+  // Normalize weights to avoid overflow
+  uint8_t wLow = (low * 255) / total;
+  uint8_t wMid = (mid * 255) / total;
+  uint8_t wHigh = (high * 255) / total;
+
+  // Map to hue: Red=0, Green=85, Blue=170
+  // Using circular hue math - bass pulls toward blue, highs toward red, mids toward green
+  int16_t hue;
+
+  if (high >= mid && high >= low) {
+    // Highs dominant - red/orange/yellow range (0 to 42)
+    // Blend toward yellow if mids present, toward magenta if bass present
+    if (mid >= low) {
+      hue = 0 + ((42 * mid) / (high + 1));  // Red toward yellow
+    } else {
+      hue = 255 - ((25 * low) / (high + 1)); // Red toward magenta
+    }
+  } else if (mid >= low && mid >= high) {
+    // Mids dominant - green/yellow/cyan range (43 to 127)
+    if (high >= low) {
+      hue = 85 - ((42 * high) / (mid + 1));  // Green toward yellow
+    } else {
+      hue = 85 + ((42 * low) / (mid + 1));   // Green toward cyan
+    }
+  } else {
+    // Bass dominant - blue/cyan/magenta range (128 to 212)
+    if (mid >= high) {
+      hue = 170 - ((42 * mid) / (low + 1));  // Blue toward cyan
+    } else {
+      hue = 170 + ((42 * high) / (low + 1)); // Blue toward magenta
+    }
+  }
+
+  // Clamp hue to 0-255
+  if (hue < 0) hue += 256;
+  if (hue > 255) hue -= 256;
+
+  // Full saturation for vivid colors
+  uint8_t sat = 255;
+
+  // Brightness from height, scaled to be punchy (min 50% when there's signal)
+  uint8_t val = wp.height > 0 ? 128 + (wp.height) : 0;  // 128-255 range
+
+  // Convert HSV to RGB
+  // Based on FastLED's HSV to RGB conversion
+  uint8_t region = hue / 43;
+  uint8_t remainder = (hue - (region * 43)) * 6;
+
+  uint8_t p = (val * (255 - sat)) >> 8;
+  uint8_t q = (val * (255 - ((sat * remainder) >> 8))) >> 8;
+  uint8_t t = (val * (255 - ((sat * (255 - remainder)) >> 8))) >> 8;
+
+  uint8_t r, g, b;
+  switch (region) {
+  case 0:  r = val; g = t;   b = p;   break;
+  case 1:  r = q;   g = val; b = p;   break;
+  case 2:  r = p;   g = val; b = t;   break;
+  case 3:  r = p;   g = q;   b = val; break;
+  case 4:  r = t;   g = p;   b = val; break;
+  default: r = val; g = p;   b = q;   break;
+  }
+
+  return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+uint16_t getPioneerColorRGB565(uint8_t colorIndex) {
+  uint32_t rgb = getPioneerColorRGB(colorIndex);
+  uint8_t r = (rgb >> 16) & 0xFF;
+  uint8_t g = (rgb >> 8) & 0xFF;
+  uint8_t b = rgb & 0xFF;
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
 
 // --- Static Definitions ---
 const char ProLinkUsermod::_name[] PROGMEM = "Pro DJ Link";
@@ -1864,5 +2245,7 @@ const char ProLinkUsermod::_enabled[] PROGMEM = "Enabled";
 const char ProLinkUsermod::_debug[] PROGMEM = "Enable Debug";
 const char ProLinkUsermod::_beatFlash[] PROGMEM = "Beat Flash";
 const char ProLinkUsermod::_randomPreset[] PROGMEM = "Random Preset on Phrase";
+const char ProLinkUsermod::_highResArt[] PROGMEM = "High-Res Artwork (240x240)";
 const char ProLinkUsermod::_ipOverride[] PROGMEM = "Player IP Override";
 const char ProLinkUsermod::_deckNumber[] PROGMEM = "Virtual Deck Number";
+const char ProLinkUsermod::_altcolors[] PROGMEM = "Use Alt Waveform Colors";
