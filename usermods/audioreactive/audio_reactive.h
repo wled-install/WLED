@@ -11,6 +11,7 @@
 */
 
 #include "wled.h"
+#include <AsyncUDP.h>
 #ifdef UM_AUDIOREACTIVE_USE_ESPDSP_FFT
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
     // #include "esp_dsp.h"
@@ -1378,14 +1379,25 @@ class AudioReactive : public Usermod {
     bool     initDone = false;
 
     // variables  for UDP sound sync
-    WiFiUDP fftUdp;               // UDP object for sound sync (from WiFi UDP, not Async UDP!)
+    AsyncUDP fftUdp;               // UDP object for sound sync (from WiFi UDP, not Async UDP!)
+
+    // Hardcore Buffering (Shared between Callback and Loop)
+    volatile bool hasNewData = false;             // Flag to tell loop we have data
+    uint8_t incomingBuffer[UDPSOUND_MAX_PACKET];  // Shared storage
+    size_t incomingPacketSize = 0;                // Size of data in storage
+
+    // const uint16_t delayMs = 10;
+    uint16_t audioSyncPort = 11988;
+
+    // bool updateIsRunning = false;
+
     unsigned long lastTime = 0;   // last time of running UDP Microphone Sync
 #if defined(WLEDMM_FASTPATH)
     const uint16_t delayMs = 5;   // I don't want to sample too often and overload WLED
 #else
     const uint16_t delayMs = 10;  // I don't want to sample too often and overload WLED
 #endif
-    uint16_t audioSyncPort= 11988;// default port for UDP sound sync
+    // uint16_t audioSyncPort= 11988;// default port for UDP sound sync
 
     bool updateIsRunning = false; // true during OTA.
 
@@ -1405,6 +1417,7 @@ class AudioReactive : public Usermod {
 
     // variables used in effects
     int16_t  volumeRaw = 0;       // either sampleRaw or rawSampleAgc depending on soundAgc
+    float syncVolumeSmth = 0;
     float my_magnitude =0.0f;     // FFT_Magnitude, scaled by multAgc
     float soundPressure = 0;      // Sound Pressure estimation, based on microphone raw readings. 0 ->5db, 255 ->105db
 
@@ -1849,45 +1862,75 @@ class AudioReactive : public Usermod {
     //////////////////////
 
     // try to establish UDP sound sync connection
+
     void connectUDPSoundSync(void) {
-      // This function tries to establish a UDP sync connection if needed
-      // necessary as we also want to transmit in "AP Mode", but the standard "connected()" callback only reacts on STA connection
       static unsigned long last_connection_attempt = 0;
 
-      if ((audioSyncPort <= 0) || (audioSyncEnabled == AUDIOSYNC_NONE)) return;  // Sound Sync not enabled
-      if (!(apActive || WLED_CONNECTED || interfacesInited))  {
+      if ((audioSyncPort <= 0) || (audioSyncEnabled == AUDIOSYNC_NONE)) return;
+      if (!(apActive || WLED_CONNECTED || interfacesInited)) {
         if (udpSyncConnected) {
           udpSyncConnected = false;
-          fftUdp.stop();
+          fftUdp.close(); // AsyncUDP uses close(), not stop()
           receivedFormat = 0;
-          DEBUGSR_PRINTLN(F("AR connectUDPSoundSync(): connection lost, UDP closed."));
         }
-        return;                           // neither AP nor other connections available
+        return;
       }
-      if (udpSyncConnected) return;                                          // already connected
-      if (millis() - last_connection_attempt < 15000) return;                // only try once in 15 seconds
-      if (updateIsRunning) return;                                           // don't reconnect during OTA
+      if (udpSyncConnected) return;
+      if (millis() - last_connection_attempt < 5000) return; // Retry every 5s
+      if (updateIsRunning) return;
 
-      // if we arrive here, we need a UDP connection but don't have one
       last_connection_attempt = millis();
-      connected(); // try to start UDP
+      connected();
     }
+
+    void connected() {
+      if (udpSyncConnected) {   // clean-up: if open, close old UDP sync connection
+        udpSyncConnected = false;
+        fftUdp.close();         // <--- FIXED: changed from stop() to close()
+        receivedFormat = 0;
+        DEBUGSR_PRINTLN(F("AR connected(): old UDP connection closed."));
+      }
+
+      if ((audioSyncPort > 0) && (audioSyncEnabled > AUDIOSYNC_NONE)) {
+        IPAddress multicastGroup(239, 0, 0, 1);
+
+        // <--- FIXED: changed from beginMulticast() to listenMulticast()
+        if (fftUdp.listenMulticast(multicastGroup, audioSyncPort)) {
+          udpSyncConnected = true;
+
+          // Register the Async Callback
+          fftUdp.onPacket([this](AsyncUDPPacket packet) {
+            if (packet.length() > UDPSOUND_MAX_PACKET) return;
+            memcpy(this->incomingBuffer, packet.data(), packet.length());
+            this->incomingPacketSize = packet.length();
+            this->hasNewData = true;
+            this->last_UDPTime = millis();
+            });
+
+          if (apActive && !(WLED_CONNECTED)) {
+            DEBUGSR_PRINTLN(F("AR connected(): UDP: connected using AP."));
+          } else {
+            DEBUGSR_PRINTLN(F("AR connected(): UDP: connected to WIFI."));
+          }
+        } else {
+          DEBUGSR_PRINTLN(F("AR connected(): UDP: FAILED to connect."));
+        }
+      }
+    }
+
 #ifdef ARDUINO_ARCH_ESP32
-    void transmitAudioData()
-    {
-      if (!udpSyncConnected) return;
+    void transmitAudioData() {
+      if (!udpSyncConnected) return; // We reuse the listener socket for sending
       static uint8_t frameCounter = 0;
-      //DEBUGSR_PRINTLN("Transmitting UDP Mic Packet");
 
       audioSyncPacket transmitData;
-      memset(reinterpret_cast<void *>(&transmitData), 0, sizeof(transmitData)); // make sure that the packet - including "invisible" padding bytes added by the compiler - is fully initialized
+      memset(reinterpret_cast<void*>(&transmitData), 0, sizeof(transmitData));
 
       strncpy_P(transmitData.header, PSTR(UDP_SYNC_HEADER), 6);
-      // transmit samples that were not modified by limitSampleDynamics()
-      transmitData.sampleRaw   = (soundAgc) ? rawSampleAgc: sampleRaw;
-      transmitData.sampleSmth  = (soundAgc) ? sampleAgc   : sampleAvg;
-      transmitData.samplePeak  = udpSamplePeak ? 1:0;
-      udpSamplePeak            = false;           // Reset udpSamplePeak after we've transmitted it
+      transmitData.sampleRaw = (soundAgc) ? rawSampleAgc : sampleRaw;
+      transmitData.sampleSmth = (soundAgc) ? sampleAgc : sampleAvg;
+      transmitData.samplePeak = udpSamplePeak ? 1 : 0;
+      udpSamplePeak = false;
       transmitData.frameCounter = frameCounter;
       transmitData.zeroCrossingCount = zeroCrossingCount;
 
@@ -1895,24 +1938,22 @@ class AudioReactive : public Usermod {
         transmitData.fftResult[i] = fftResult[i];
       }
 
-      // WLEDMM transmit soundPressure as 16 bit fixed point
-      uint32_t pressure16bit = max(0.0f, soundPressure) * 256.0f; // convert to fixed point, remove negative values
-      uint16_t pressInt   = pressure16bit / 256;          // integer part
-      uint16_t pressFract = pressure16bit % 256;          // faction part
-      if (pressInt > 255) pressInt = 255;                 // saturation at 255
+      uint32_t pressure16bit = max(0.0f, soundPressure) * 256.0f;
+      uint16_t pressInt = pressure16bit / 256;
+      uint16_t pressFract = pressure16bit % 256;
+      if (pressInt > 255) pressInt = 255;
       transmitData.pressure[0] = (uint8_t)pressInt;
       transmitData.pressure[1] = (uint8_t)pressFract;
 
       transmitData.FFT_Magnitude = my_magnitude;
       transmitData.FFT_MajorPeak = FFT_MajorPeak;
 
-      if (fftUdp.beginMulticastPacket() != 0) { // beginMulticastPacket returns 0 in case of error
-        fftUdp.write(reinterpret_cast<uint8_t *>(&transmitData), sizeof(transmitData));
-        fftUdp.endPacket();
-      }
-      
+      // AsyncUDP Send
+      IPAddress multicastGroup(239, 0, 0, 1);
+      fftUdp.writeTo(reinterpret_cast<uint8_t*>(&transmitData), sizeof(transmitData), multicastGroup, audioSyncPort);
+
       frameCounter++;
-    } // transmitAudioData()
+    }
 #endif
     static bool isValidUdpSyncVersion(const char *header) {
       return strncmp_P(header, UDP_SYNC_HEADER, 6) == 0;
@@ -2019,60 +2060,138 @@ class AudioReactive : public Usermod {
       agcSensitivity = 128.0f; // substitute - V1 format does not include this value
     }
 
-    bool receiveAudioData() {
-      if (!udpSyncConnected) return false;
-      bool haveFreshData = false;
-      size_t packetSize = 0;
-      static uint8_t fftUdpBuffer[UDPSOUND_MAX_PACKET + 1] = {0};
-      size_t lastValidPacketSize = 0;
+    // bool receiveAudioData() {
+    //   if (!udpSyncConnected) return false;
+    //   bool haveFreshData = false;
+    //   size_t packetSize = 0;
+    //   static uint8_t fftUdpBuffer[UDPSOUND_MAX_PACKET + 1] = {0};
+    //   size_t lastValidPacketSize = 0;
 
-      // Loop to read all available packets
-      while (true) {
-        #if __cpp_exceptions
-        try {
-          packetSize = fftUdp.parsePacket();
-        } catch (...) {
-          packetSize = 0;
-          #ifdef ARDUINO_ARCH_ESP32
-          fftUdp.flush();
-          #endif
-          DEBUG_PRINTLN(F("receiveAudioData: parsePacket out of memory exception caught!"));
-          USER_FLUSH();
-          continue; // Skip to next iteration
-        }
-        #else
-        packetSize = fftUdp.parsePacket();
-        #endif
+    //   // Loop to read all available packets
+    //   while (true) {
+    //     #if __cpp_exceptions
+    //     try {
+    //       packetSize = fftUdp.parsePacket();
+    //     } catch (...) {
+    //       packetSize = 0;
+    //       #ifdef ARDUINO_ARCH_ESP32
+    //       fftUdp.flush();
+    //       #endif
+    //       DEBUG_PRINTLN(F("receiveAudioData: parsePacket out of memory exception caught!"));
+    //       USER_FLUSH();
+    //       continue; // Skip to next iteration
+    //     }
+    //     #else
+    //     packetSize = fftUdp.parsePacket();
+    //     #endif
 
-        #ifdef ARDUINO_ARCH_ESP32
-        if ((packetSize > 0) && ((packetSize < 5) || (packetSize > UDPSOUND_MAX_PACKET))) {
-          fftUdp.flush();
-          continue; // Skip invalid packets
-        }
-        #endif
+    //     #ifdef ARDUINO_ARCH_ESP32
+    //     if ((packetSize > 0) && ((packetSize < 5) || (packetSize > UDPSOUND_MAX_PACKET))) {
+    //       fftUdp.flush();
+    //       continue; // Skip invalid packets
+    //     }
+    //     #endif
 
-        if (packetSize == 0) break; // No more packets available
+    //     if (packetSize == 0) break; // No more packets available
 
-        if ((packetSize > 5) && (packetSize <= UDPSOUND_MAX_PACKET)) {
-          fftUdp.read(fftUdpBuffer, packetSize);
-          lastValidPacketSize = packetSize;
-        }
-      }
+    //     if ((packetSize > 5) && (packetSize <= UDPSOUND_MAX_PACKET)) {
+    //       fftUdp.read(fftUdpBuffer, packetSize);
+    //       lastValidPacketSize = packetSize;
+    //     }
+    //   }
 
-      // Process only the last valid packet
-      if (lastValidPacketSize > 0) {
-        if (lastValidPacketSize == sizeof(audioSyncPacket) && (isValidUdpSyncVersion((const char *)fftUdpBuffer))) {
+    //   // Process only the last valid packet
+    //   if (lastValidPacketSize > 0) {
+    //     if (lastValidPacketSize == sizeof(audioSyncPacket) && (isValidUdpSyncVersion((const char *)fftUdpBuffer))) {
+    //       receivedFormat = 2;
+    //       haveFreshData = decodeAudioData(lastValidPacketSize, fftUdpBuffer);
+    //     } else if (lastValidPacketSize == sizeof(audioSyncPacket_v1) && (isValidUdpSyncVersion_v1((const char *)fftUdpBuffer))) {
+    //       decodeAudioData_v1(lastValidPacketSize, fftUdpBuffer);
+    //       receivedFormat = 1;
+    //       haveFreshData = true;
+    //     } else {
+    //       receivedFormat = 0; // unknown format
+    //     }
+    //   }
+    //   return haveFreshData;
+    // }
+
+    // bool receiveAudioData() {
+    //   if (!udpSyncConnected) return false;
+
+    //   bool haveFreshData = false;
+    //   size_t packetSize = 0;
+
+    //   // Static buffer to avoid memory allocation overhead every loop
+    //   static uint8_t fftUdpBuffer[UDPSOUND_MAX_PACKET + 1] = { 0 };
+    //   size_t lastValidPacketSize = 0;
+
+    //   // --- HARDCORE ETHERNET FLUSH ---
+    //   // We must empty the FIFO buffer to get to the LATEST packet.
+    //   // Safety Cap: 25 iterations. 
+    //   // If we process >25 packets, we are taking too long; bail out to let LEDs draw.
+    //   int safetyBailout = 25;
+
+    //   while (safetyBailout-- > 0) {
+    //     // 1. Check next packet in the queue
+    //     packetSize = fftUdp.parsePacket();
+
+    //     // 2. If 0, queue is empty! We are finally "real-time".
+    //     if (packetSize == 0) break;
+
+    //     // 3. Consume the packet (Required to move queue forward)
+    //     // We overwrite the SAME buffer repeatedly. This is a fast RAM copy.
+    //     if (packetSize <= UDPSOUND_MAX_PACKET) {
+    //       fftUdp.read(fftUdpBuffer, packetSize);
+    //       lastValidPacketSize = packetSize;
+    //     } else {
+    //       // Packet too big? Just dump it to clear the interface.
+    //       fftUdp.flush();
+    //     }
+    //   }
+
+    //   // --- DECODE ONLY THE WINNER ---
+    //   // We disregarded all previous packets. We only care about the very last one 
+    //   // we saw before the buffer ran dry.
+    //   if (lastValidPacketSize > 0) {
+    //     // Only run expensive decoding logic ONCE per frame
+    //     if (isValidUdpSyncVersion((const char*)fftUdpBuffer)) {
+    //       receivedFormat = 2;
+    //       haveFreshData = decodeAudioData(lastValidPacketSize, fftUdpBuffer);
+    //     } else if (isValidUdpSyncVersion_v1((const char*)fftUdpBuffer)) {
+    //       receivedFormat = 1;
+    //       decodeAudioData_v1(lastValidPacketSize, fftUdpBuffer);
+    //       haveFreshData = true;
+    //     } else {
+    //       receivedFormat = 0;
+    //     }
+    //   }
+
+    //   return haveFreshData;
+    // }
+
+    // This is no longer "Receive", it is "Process what we received"
+    bool processNetworkData() {
+      if (!hasNewData) return false;
+      
+      // Clear flag immediately
+      hasNewData = false;
+      
+      // Process whatever is in the buffer
+      bool success = false;
+      
+      if (isValidUdpSyncVersion((const char *)incomingBuffer)) {
           receivedFormat = 2;
-          haveFreshData = decodeAudioData(lastValidPacketSize, fftUdpBuffer);
-        } else if (lastValidPacketSize == sizeof(audioSyncPacket_v1) && (isValidUdpSyncVersion_v1((const char *)fftUdpBuffer))) {
-          decodeAudioData_v1(lastValidPacketSize, fftUdpBuffer);
+          success = decodeAudioData(incomingPacketSize, incomingBuffer);
+      } else if (isValidUdpSyncVersion_v1((const char *)incomingBuffer)) {
           receivedFormat = 1;
-          haveFreshData = true;
-        } else {
-          receivedFormat = 0; // unknown format
-        }
+          decodeAudioData_v1(incomingPacketSize, incomingBuffer);
+          success = true;
+      } else {
+          receivedFormat = 0;
       }
-      return haveFreshData;
+      
+      return success;
     }
 
     //////////////////////
@@ -2333,41 +2452,6 @@ class AudioReactive : public Usermod {
       #endif
     }
 
-
-    /*
-     * connected() is called every time the WiFi is (re)connected
-     * Use it to initialize network interfaces
-     */
-    void connected()
-    {
-      if (udpSyncConnected) {   // clean-up: if open, close old UDP sync connection
-        udpSyncConnected = false;
-        fftUdp.stop();
-        receivedFormat = 0;
-        DEBUGSR_PRINTLN(F("AR connected(): old UDP connection closed."));
-      }
-      
-      if ((audioSyncPort > 0) && (audioSyncEnabled > AUDIOSYNC_NONE)) {
-      #ifdef ARDUINO_ARCH_ESP32
-        udpSyncConnected = fftUdp.beginMulticast(IPAddress(239, 0, 0, 1), audioSyncPort);
-      #else
-        udpSyncConnected = fftUdp.beginMulticast(WiFi.localIP(), IPAddress(239, 0, 0, 1), audioSyncPort);
-      #endif
-        receivedFormat = 0;
-        if (udpSyncConnected) last_UDPTime = millis();
-        if (apActive && !(WLED_CONNECTED)) {
-          DEBUGSR_PRINTLN(udpSyncConnected ? F("AR connected(): UDP: connected using AP.") : F("AR connected(): UDP is disconnected (AP)."));
-        } else {
-          DEBUGSR_PRINTLN(udpSyncConnected ? F("AR connected(): UDP: connected to WIFI.") :  F("AR connected(): UDP is disconnected (Wifi)."));
-        }
-      }
-
-      #if defined(ARDUINO_ARCH_ESP32) && defined(SR_DEBUG)
-      DEBUGSR_PRINTF("|| %-9s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
-      #endif
-    }
-
-
     /*
      * loop() is called continuously. Here you can check for events, read sensors, etc.
      * 
@@ -2435,6 +2519,12 @@ class AudioReactive : public Usermod {
         if (audioSyncEnabled > AUDIOSYNC_SEND) useNetworkAudio = true;
       }
       if ((audioSyncEnabled == AUDIOSYNC_REC_PLUS) && useNetworkAudio) disableSoundProcessing = true;   // UDP sound receiving - disable local audio
+
+      if (disableSoundProcessing) {
+        vTaskSuspend(FFT_Task);
+      } else {
+        vTaskResume(FFT_Task);
+      }
 
       #ifdef SR_DEBUG
       // debug info in case that task stack usage changes
@@ -2505,30 +2595,21 @@ class AudioReactive : public Usermod {
 
       // UDP Microphone Sync  - receive mode
       if ((audioSyncEnabled & AUDIOSYNC_REC) && udpSyncConnected) {
-          // Only run the audio listener code if we're in Receive mode
-          static float syncVolumeSmth = 0;
-          bool have_new_sample = false;
-          if (millis() - lastTime > delayMs) {
-            // DEBUG_PRINTF(F("AR reading at %d compared to %d max\n"), millis() - lastTime, delayMs); // TroyHacks
-            have_new_sample = receiveAudioData();
-            if (have_new_sample) {
-              last_UDPTime = millis();
-              useNetworkAudio = true;  // UDP input arrived - use it
-            }
-            lastTime = millis();
-          } else {
-#ifdef ARDUINO_ARCH_ESP32
-            fftUdp.flush(); // WLEDMM: Flush this if we haven't read it. Does not work on 8266.
-#endif
-          }
-          if (useNetworkAudio) {
-            if (have_new_sample) syncVolumeSmth = volumeSmth;   // remember received sample
-            else volumeSmth = syncVolumeSmth;                   // restore originally received sample for next run of dynamics limiter
-            limitSampleDynamics();                              // run dynamics limiter on received volumeSmth, to hide jumps and hickups
-            limitGEQDynamics(have_new_sample);                  // WLEDMM experimental: smooth FFT (GEQ) samples
-          }
-      } else {
-          receivedFormat = 0;
+
+        // Check our volatile flag (set by background callback)
+        bool have_new_sample = processNetworkData();
+
+        if (have_new_sample) {
+          useNetworkAudio = true;
+        }
+
+        if (useNetworkAudio) {
+          if (have_new_sample) syncVolumeSmth = volumeSmth;
+          else volumeSmth = syncVolumeSmth;
+
+          limitSampleDynamics();
+          limitGEQDynamics(have_new_sample);
+        }
       }
 
       if (   (audioSyncEnabled & AUDIOSYNC_REC) // receive mode
@@ -2537,7 +2618,7 @@ class AudioReactive : public Usermod {
           && ((millis() - last_UDPTime) > 25000)) {   // close connection after 25sec idle
         udpSyncConnected = false;
         receivedFormat = 0;
-        fftUdp.stop();
+        fftUdp.close();
         volumeSmth =0.0f;
         volumeRaw =0;
         my_magnitude = 0.1; FFT_Magnitude = 0.01; FFT_MajorPeak = 2;
@@ -2606,92 +2687,56 @@ class AudioReactive : public Usermod {
     }
 
 
-#ifdef ARDUINO_ARCH_ESP32
-    void onUpdateBegin(bool init)
-    {
-#ifdef WLED_DEBUG
+    #ifdef ARDUINO_ARCH_ESP32
+    void onUpdateBegin(bool init) {
+      #ifdef WLED_DEBUG
       fftTime = sampleTime = filterTime = 0;
-#endif
+      #endif
       // gracefully suspend FFT task (if running)
       disableSoundProcessing = true;
 
-      // reset sound data
+      // ... (reset sound data lines remain the same) ... 
       micDataReal = 0.0f;
       volumeRaw = 0; volumeSmth = 0;
       sampleAgc = 0; sampleAvg = 0;
       sampleRaw = 0; rawSampleAgc = 0;
       my_magnitude = 0; FFT_Magnitude = 0; FFT_MajorPeak = 1;
       multAgc = 1;
-      // reset FFT data
-      memset(fftCalc, 0, sizeof(fftCalc)); 
-      memset(fftAvg, 0, sizeof(fftAvg)); 
-      memset(fftResult, 0, sizeof(fftResult)); 
-      for(int i=(init?0:1); i<NUM_GEQ_CHANNELS; i+=2) fftResult[i] = 16; // make a tiny pattern
-      inputLevel = 128;                                    // reset level slider to default
+      memset(fftCalc, 0, sizeof(fftCalc));
+      memset(fftAvg, 0, sizeof(fftAvg));
+      memset(fftResult, 0, sizeof(fftResult));
+      for (int i = (init ? 0 : 1); i < NUM_GEQ_CHANNELS; i += 2) fftResult[i] = 16;
+      inputLevel = 128;
       autoResetPeak();
 
       if (init && FFT_Task) {
-        delay(25);                // WLEDMM: givesome time for I2S driver to finish sampling
-        vTaskSuspend(FFT_Task);   // update is about to begin, disable task to prevent crash
-        if (udpSyncConnected) {   // close UDP sync connection (if open)
+        delay(25);                 // WLEDMM: give some time for I2S driver to finish sampling
+        vTaskSuspend(FFT_Task);    // update is about to begin, disable task to prevent crash
+        if (udpSyncConnected) {    // close UDP sync connection (if open)
           udpSyncConnected = false;
-          fftUdp.stop();
+          fftUdp.close();          // <--- FIXED: changed from stop() to close()
           DEBUGSR_PRINTLN(F("AR onUpdateBegin(true): UDP connection closed."));
           receivedFormat = 0;
         }
       } else {
-        // update has failed or create task requested
+        // ... rest of function remains same ...
         if (FFT_Task) {
           vTaskResume(FFT_Task);
           connected(); // resume UDP
         } else {
-          if (audioSource)                    // WLEDMM only create FFT task if we have a valid audio source
-//          xTaskCreatePinnedToCore(
-//          xTaskCreate(                        // no need to "pin" this task to core #0
-          xTaskCreateUniversal(
-            FFTcode,                          // Function to implement the task
-            "FFT",                            // Name of the task
-            4096,                             // Stack size in words // 3592 leaves 800-1024 bytes of task stack free
-            NULL,                             // Task input parameter
-            FFTTASK_PRIORITY,                 // Priority of the task
-            &FFT_Task                         // Task handle
-            , 0                               // Core where the task should run
-          );
+          // ... task creation logic ...
+          if (audioSource)
+            xTaskCreateUniversal(
+              FFTcode, "FFT", 4096, NULL, FFTTASK_PRIORITY, &FFT_Task, 0
+            );
         }
       }
-      micDataReal = 0.0f;                     // just to be sure
+      micDataReal = 0.0f;
       if (enabled && audioSource) disableSoundProcessing = false;
       updateIsRunning = init;
-
-      #if defined(ARDUINO_ARCH_ESP32) && defined(SR_DEBUG)
-      DEBUGSR_PRINTF("|| %-9s min free stack %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
-      #endif
     }
+    #endif
 
-#else // reduced function for 8266
-    void onUpdateBegin(bool init)
-    {
-      // gracefully suspend audio (if running)
-      disableSoundProcessing = true;
-      // reset sound data
-      volumeRaw = 0; volumeSmth = 0;
-      for(int i=(init?0:1); i<NUM_GEQ_CHANNELS; i+=2) fftResult[i] = 16; // make a tiny pattern
-      autoResetPeak();
-
-      if (init) {
-        if (udpSyncConnected) {   // close UDP sync connection (if open)
-          udpSyncConnected = false;
-          fftUdp.stop();
-          DEBUGSR_PRINTLN(F("AR onUpdateBegin(true): UDP connection closed."));
-          receivedFormat = 0;
-        }
-      }
-      if (enabled) disableSoundProcessing = init; // init = true means that OTA is just starting --> don't process audio
-      updateIsRunning = init;
-    }
-#endif
-
-#ifdef ARDUINO_ARCH_ESP32
     /**
      * handleButton() can be used to override default button behaviour. Returning true
      * will prevent button working in a default way.
@@ -2708,7 +2753,6 @@ class AudioReactive : public Usermod {
       }
       return false;
     }
-#endif
 
     ////////////////////////////
     // Settings and Info Page //
@@ -2721,9 +2765,7 @@ class AudioReactive : public Usermod {
      */
     void addToJsonInfo(JsonObject& root)
     {
-#ifdef ARDUINO_ARCH_ESP32
       char myStringBuffer[16]; // buffer for snprintf() - not used yet on 8266
-#endif
       JsonObject user = root["u"];
       if (user.isNull()) user = root.createNestedObject("u");
 
@@ -2743,7 +2785,6 @@ class AudioReactive : public Usermod {
       if (enabled) {
         bool audioSyncIDLE = false; // true if sound sync is not receiving
 
-#ifdef ARDUINO_ARCH_ESP32
         // audio sync status
         if ((audioSyncEnabled & AUDIOSYNC_REC) && (!udpSyncConnected || (millis() - last_UDPTime > AUDIOSYNC_IDLE_MS))) // connected and nothing received in 2.5sec
           audioSyncIDLE = true;
@@ -2772,7 +2813,7 @@ class AudioReactive : public Usermod {
           uiDomString += F(" /><div class=\"sliderdisplay\"></div></div></div>"); //<output class=\"sliderbubble\"></output>
           infoArr.add(uiDomString);
         } 
-#endif
+
         // The following can be used for troubleshooting user errors and is so not enclosed in #ifdef WLED_DEBUG
         // current Audio input
         infoArr = user.createNestedArray(F("Audio Source"));
