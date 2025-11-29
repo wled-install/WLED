@@ -103,6 +103,10 @@ void WS2812FX::setUpMatrix() {
           USER_PRINT(F("Reading LED gap from "));
           USER_PRINTLN(fileName);
           if (readObjectFromFile(fileName, nullptr, &doc)) {
+          // the array is similar to ledmap, except it has only 3 values:
+          // -1 ... missing pixel (do not increase pixel count)
+          //  0 ... inactive pixel (it does count, but should be mapped out (-1))
+          //  1 ... active pixel (it will count and will be mapped)
             JsonArray map = doc.as<JsonArray>();
             uint32_t gapSize = map.size();
             if (!map.isNull() && gapSize >= customMappingSize) {
@@ -189,7 +193,9 @@ void IRAM_ATTR __attribute__((hot)) WS2812FX::setPixelColorXY_fast(int x, int y,
 {
   uint_fast32_t index = y * Segment::maxWidth + x;
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (index < customMappingSize) index = customMappingTable[index];
+  if (customMappingTable != nullptr && i < customMappingSize) {
+    i = customMappingTable[i];
+  }
   #endif
   if (index >= _length) return;
   busses.setPixelColor(index, col);
@@ -205,7 +211,9 @@ void IRAM_ATTR_YN WS2812FX::setPixelColorXY(int x, int y, uint32_t col) //WLEDMM
   uint16_t index = x;
 #endif
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (index < customMappingSize) index = customMappingTable[index];
+  if (customMappingTable != nullptr && i < customMappingSize) {
+    i = customMappingTable[i];
+  }
   #endif
   if (index >= _length) return;
   busses.setPixelColor(index, col);
@@ -219,7 +227,9 @@ uint32_t __attribute__((hot)) WS2812FX::getPixelColorXY(uint16_t x, uint16_t y) 
   uint16_t index = x;
 #endif
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (index < customMappingSize) index = customMappingTable[index];
+  if (customMappingTable != nullptr && i < customMappingSize) {
+    i = customMappingTable[i];
+  }
   #endif
   if (index >= _length) return 0;
   return busses.getPixelColor(index);
