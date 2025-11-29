@@ -15,14 +15,14 @@
 // but ledmap takes care of that. ledmap is constructed upon initialization
 // so matrix should disable regular ledmap processing
 void WS2812FX::setUpMatrix() {
-#ifndef WLED_DISABLE_2D
+  #ifndef WLED_DISABLE_2D
   // isMatrix is set in cfg.cpp or set.cpp
   if (isMatrix) {
     // calculate width dynamically because it will have gaps
     Segment::maxWidth = 1;
     Segment::maxHeight = 1;
     for (size_t i = 0; i < panel.size(); i++) {
-      Panel &p = panel[i];
+      Panel& p = panel[i];
       if (p.xOffset + p.width > Segment::maxWidth) {
         Segment::maxWidth = p.xOffset + p.width;
       }
@@ -31,168 +31,157 @@ void WS2812FX::setUpMatrix() {
       }
     }
 
-    // safety check 
-    // WLEDMM no check on Segment::maxWidth * Segment::maxHeight > MAX_LEDS || 
+    // safety check
     if (Segment::maxWidth <= 1 || Segment::maxHeight <= 1) {
       DEBUG_PRINTF("2D Bounds error. %d x %d\n", Segment::maxWidth, Segment::maxHeight);
       isMatrix = false;
       Segment::maxWidth = _length;
       Segment::maxHeight = 1;
       panels = 0;
-      panel.clear(); // release memory allocated by panels
-      resetSegments(true); //WLEDMM bounds only
+      panel.clear();
+      resetSegments(true);
       return;
     }
 
     USER_PRINTF("setUpMatrix %d x %d\n", Segment::maxWidth, Segment::maxHeight);
-    
-    // WLEDMM check if mapping table is necessary (avoiding heap fragmentation)
-#if defined(WLED_ENABLE_HUB75MATRIX)
-    bool needLedMap = (loadedLedmap >0);              // ledmap loaded
-    needLedMap |= WLED_FS.exists(F("/2d-gaps.json")); // gapFile found
-    needLedMap |= panel.size() > 1;                   // 2D config: more than one panel
+
+    // Check if mapping table is necessary
+    bool needLedMap = (loadedLedmap > 0);
+    needLedMap |= WLED_FS.exists(F("/2d-gaps.json"));
+    needLedMap |= panel.size() > 1;
     if (panel.size() == 1) {
-      Panel &p = panel[0];
-      needLedMap |= p.serpentine;                        // panel serpentine
-      needLedMap |= p.vertical;                          // panel not horizotal
-      needLedMap |= p.bottomStart | p.rightStart;        // panel not top left, or not left->light
-      needLedMap |= (p.xOffset > 0) || (p.yOffset > 0);  // panel does not start at (0,0)
-    }
-#else
-    bool needLedMap = true;                              // always use ledMaps on non-HUB75 builds
-#endif
-
-    //WLEDMM recreate customMappingTable if more space needed
-    if (Segment::maxWidth * Segment::maxHeight > customMappingTableSize) {
-      uint32_t size = max(ledmapMaxSize, uint32_t(Segment::maxWidth * Segment::maxHeight)); // TroyHacks
-      if (!needLedMap) size = 0;                                                        // softhack007
-      USER_PRINTF("setupmatrix customMappingTable alloc %d from %d\n", size, customMappingTableSize);
-      //if (customMappingTable != nullptr) delete[] customMappingTable;
-      //customMappingTable = new(std::nothrow) uint16_t[size];
-
-      // don't use new / delete
-      if ((size > 0) && (customMappingTable != nullptr)) {  // resize
-        customMappingTable = (uint32_t*) reallocf(customMappingTable, sizeof(uint32_t) * size); // reallocf will free memory if it cannot resize
-      }
-      if ((size > 0) && (customMappingTable == nullptr)) { // second try
-        DEBUG_PRINTLN("setUpMatrix: trying to get fresh memory block.");
-        customMappingTable = (uint32_t*) heap_caps_calloc_prefer(size, sizeof(uint32_t),2,MALLOC_CAP_SPIRAM,MALLOC_CAP_INTERNAL);
-        if (customMappingTable == nullptr) { 
-          USER_PRINTLN("setUpMatrix: alloc failed");
-          errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
-        }
-      }
-      if (customMappingTable != nullptr) customMappingTableSize = size;
+      Panel& p = panel[0];
+      needLedMap |= p.serpentine;
+      needLedMap |= p.vertical;
+      needLedMap |= p.bottomStart | p.rightStart;
+      needLedMap |= (p.xOffset > 0) || (p.yOffset > 0);
     }
 
-    if ((customMappingTable != nullptr) || (!needLedMap)) {                                          // softhack007
-      customMappingSize = Segment::maxWidth * Segment::maxHeight;
-      if (!needLedMap) customMappingSize = 0;                                                        // softhack007
-
-      // fill with empty in case we don't fill the entire matrix
-      // for (uint32_t i = 0; i< customMappingTableSize; i++) { //WLEDMM use customMappingTableSize
-      //   customMappingTable[i] = (uint32_t)-1;
-      // }
-      memset(customMappingTable,(uint32_t)-1,customMappingTableSize); // WLED-MM optimization TroyHacks
-
-      // we will try to load a "gap" array (a JSON file)
-      // the array has to have the same amount of values as mapping array (or larger)
-      // "gap" array is used while building ledmap (mapping array)
-      // and discarded afterwards as it has no meaning after the process
-      // content of the file is just raw JSON array in the form of [val1,val2,val3,...]
-      // there are no other "key":"value" pairs in it
-      // allowed values are: -1 (missing pixel/no LED attached), 0 (inactive/unused pixel), 1 (active/used pixel)
-      char    fileName[32]; strcpy_P(fileName, PSTR("/2d-gaps.json")); // reduce flash footprint
-      bool    isFile = WLED_FS.exists(fileName);
-      uint32_t  gapSize = 0;
-      int8_t *gapTable = nullptr;
-
-      if (isFile && requestJSONBufferLock(20)) {
-        USER_PRINT(F("Reading LED gap from "));
-        USER_PRINTLN(fileName);
-        // read the array into global JSON buffer
-        if (readObjectFromFile(fileName, nullptr, &doc)) {
-          // the array is similar to ledmap, except it has only 3 values:
-          // -1 ... missing pixel (do not increase pixel count)
-          //  0 ... inactive pixel (it does count, but should be mapped out (-1))
-          //  1 ... active pixel (it will count and will be mapped)
-          JsonArray map = doc.as<JsonArray>();
-          gapSize = map.size();
-          if (!map.isNull() && (gapSize > 0) && gapSize >= customMappingSize) { // not an empty map //softhack also check gapSize>0 
-            gapTable = new(std::nothrow) int8_t[gapSize];
-            if (gapTable) for (size_t i = 0; i < gapSize; i++) {
-              gapTable[i] = constrain(map[i], -1, 1);
-            }
-          }
-        }
-        DEBUG_PRINTLN(F("Gaps loaded."));
-        releaseJSONBufferLock();
+    if (!needLedMap) {
+      // Simple 1:1 layout - no allocation needed
+      if (customMappingTable != nullptr) {
+        free(customMappingTable);
+        customMappingTable = nullptr;
       }
-
-      if (needLedMap && customMappingTable != nullptr) {  // softhack007
-        uint_fast16_t x, y, pix=0; //pixel
-        for (uint32_t pan = 0; pan < panel.size(); pan++) {
-          Panel &p = panel[pan];
-          uint_fast16_t h = p.vertical ? p.height : p.width;
-          uint_fast16_t v = p.vertical ? p.width  : p.height;
-          for (size_t j = 0; j < v; j++){
-            for(size_t i = 0; i < h; i++) {
-              y = (p.vertical?p.rightStart:p.bottomStart) ? v-j-1 : j;
-              x = (p.vertical?p.bottomStart:p.rightStart) ? h-i-1 : i;
-              x = p.serpentine && j%2 ? h-x-1 : x;
-              size_t index = (p.yOffset + (p.vertical?x:y)) * Segment::maxWidth + p.xOffset + (p.vertical?y:x);
-              if (!gapTable || (gapTable && gapTable[index] >  0)) customMappingTable[index] = pix; // a useful pixel (otherwise -1 is retained)
-              if (!gapTable || (gapTable && gapTable[index] >= 0)) pix++; // not a missing pixel
-            }
-          }
-        }
-      }
-
-      // delete gap array as we no longer need it
-      if (gapTable) {delete[] gapTable; gapTable=nullptr;}   // softhack prevent dangling pointer
-
-      #ifdef WLED_DEBUG_MAPS
-      DEBUG_PRINTF("Matrix ledmap: \n");
-      for (uint16_t i=0; i<customMappingSize; i++) {
-        if (!(i%Segment::maxWidth)) DEBUG_PRINTLN();
-        DEBUG_PRINTF("%4d,", customMappingTable[i]);
-      }
-      DEBUG_PRINTLN();
-      USER_FLUSH();  // wait until serial buffer is written out - to avoid loss/corruption of future debug messages
-      #endif
-    } else { // memory allocation error
-      customMappingTableSize = 0;
-      USER_PRINTLN(F("Ledmap alloc error."));
-      errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
-      isMatrix = false; //WLEDMM does not like this done in teh background while end users are confused whats happened...
-      panels = 0;
-      panel.clear();
-      Segment::maxWidth = _length;
-      Segment::maxHeight = 1;
-      //WLEDMM: no resetSegments here, only do it in set.cpp/handleSettingsSet - as we want t0 maintain the segment settings after setup has changed
-    }
-  }
-
-#ifdef WLED_ENABLE_HUB75MATRIX
-  // softhack007 hack: delete mapping table in case it only contains "identity"
-  if (customMappingTable != nullptr && customMappingTableSize > 0) {
-    bool isIdentity = true;
-    for (uint32_t i = 0; (i< customMappingSize) && isIdentity; i++) { //WLEDMM use customMappingTableSize
-      if (customMappingTable[i] != (uint16_t)i ) isIdentity = false;
-    }
-    if (isIdentity) {
-      free(customMappingTable); customMappingTable = nullptr;      
-      USER_PRINTF("!setupmatrix: customMappingTable is not needed. Dropping %d bytes.\n", customMappingTableSize * sizeof(uint16_t));
       customMappingTableSize = 0;
       customMappingSize = 0;
-      loadedLedmap = 0; //WLEDMM
+      USER_PRINTLN("setUpMatrix: 1:1 layout, no mapping table needed.");
+    } else {
+      // Allocate customMappingTable if more space needed
+      uint32_t size = max(ledmapMaxSize, uint32_t(Segment::maxWidth * Segment::maxHeight));
+
+      if (size > customMappingTableSize) {
+        USER_PRINTF("setUpMatrix customMappingTable alloc %u from %u\n", size, customMappingTableSize);
+
+        if (customMappingTable != nullptr) {
+          customMappingTable = (uint32_t*)reallocf(customMappingTable, sizeof(uint32_t) * size);
+        }
+        if (customMappingTable == nullptr) {
+          DEBUG_PRINTLN("setUpMatrix: trying to get fresh memory block.");
+          customMappingTable = (uint32_t*)heap_caps_calloc_prefer(size, sizeof(uint32_t), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
+          if (customMappingTable == nullptr) {
+            USER_PRINTLN("setUpMatrix: alloc failed");
+            errorFlag = ERR_LOW_MEM;
+          }
+        }
+        if (customMappingTable != nullptr) customMappingTableSize = size;
+      }
+
+      if (customMappingTable != nullptr) {
+        customMappingSize = Segment::maxWidth * Segment::maxHeight;
+
+        // Fill with -1 (unmapped)
+        memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint32_t));
+
+        // Load gap array if present
+        char fileName[32];
+        strcpy_P(fileName, PSTR("/2d-gaps.json"));
+        bool isFile = WLED_FS.exists(fileName);
+        int8_t* gapTable = nullptr;
+
+        if (isFile && requestJSONBufferLock(20)) {
+          USER_PRINT(F("Reading LED gap from "));
+          USER_PRINTLN(fileName);
+          if (readObjectFromFile(fileName, nullptr, &doc)) {
+            JsonArray map = doc.as<JsonArray>();
+            uint32_t gapSize = map.size();
+            if (!map.isNull() && gapSize >= customMappingSize) {
+              gapTable = new(std::nothrow) int8_t[gapSize];
+              if (gapTable) {
+                for (size_t i = 0; i < gapSize; i++) {
+                  gapTable[i] = constrain(map[i], -1, 1);
+                }
+              }
+            }
+          }
+          DEBUG_PRINTLN(F("Gaps loaded."));
+          releaseJSONBufferLock();
+        }
+
+        // Build the mapping table
+        uint_fast32_t pix = 0;
+        for (uint32_t pan = 0; pan < panel.size(); pan++) {
+          Panel& p = panel[pan];
+          uint_fast16_t h = p.vertical ? p.height : p.width;
+          uint_fast16_t v = p.vertical ? p.width : p.height;
+          for (size_t j = 0; j < v; j++) {
+            for (size_t i = 0; i < h; i++) {
+              uint_fast16_t y = (p.vertical ? p.rightStart : p.bottomStart) ? v - j - 1 : j;
+              uint_fast16_t x = (p.vertical ? p.bottomStart : p.rightStart) ? h - i - 1 : i;
+              x = (p.serpentine && (j % 2)) ? h - x - 1 : x;
+              size_t index = (p.yOffset + (p.vertical ? x : y)) * Segment::maxWidth + p.xOffset + (p.vertical ? y : x);
+              if (!gapTable || gapTable[index] > 0) customMappingTable[index] = pix;
+              if (!gapTable || gapTable[index] >= 0) pix++;
+            }
+          }
+        }
+
+        if (gapTable) {
+          delete[] gapTable;
+          gapTable = nullptr;
+        }
+
+        #ifdef WLED_DEBUG_MAPS
+        DEBUG_PRINTF("Matrix ledmap:\n");
+        for (uint32_t i = 0; i < customMappingSize; i++) {
+          if (!(i % Segment::maxWidth)) DEBUG_PRINTLN();
+          DEBUG_PRINTF("%4d,", customMappingTable[i]);
+        }
+        DEBUG_PRINTLN();
+        USER_FLUSH();
+        #endif
+
+        // Check if mapping table is identity (safety net for edge cases)
+        bool isIdentity = true;
+        for (uint32_t i = 0; i < customMappingSize && isIdentity; i++) {
+          if (customMappingTable[i] != i) isIdentity = false;
+        }
+        if (isIdentity) {
+          free(customMappingTable);
+          customMappingTable = nullptr;
+          USER_PRINTF("customMappingTable is identity - dropping %u bytes.\n", customMappingTableSize * sizeof(uint32_t));
+          customMappingTableSize = 0;
+          customMappingSize = 0;
+          loadedLedmap = 0;
+        }
+
+      } else {
+        // Memory allocation error
+        customMappingTableSize = 0;
+        customMappingSize = 0;
+        USER_PRINTLN(F("Ledmap alloc error."));
+        errorFlag = ERR_LOW_MEM;
+        isMatrix = false;
+        panels = 0;
+        panel.clear();
+        Segment::maxWidth = _length;
+        Segment::maxHeight = 1;
+      }
     }
   }
-#endif
-
-#else
-  isMatrix = false; // no matter what config says
-#endif
+  #else
+  isMatrix = false;
+  #endif
 }
 
 // absolute matrix version of setPixelColor(), without error checking
