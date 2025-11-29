@@ -1862,13 +1862,18 @@ private:
 
   void checkPeerTimeouts() {
     unsigned long now = millis();
-
+    
     for (int i = 0; i < 64; i++) {
+
       if (linkState.peerMap & ((uint64_t)1 << i)) {
+
         if (linkState.peerLastSeen[i] > 0 && (now - linkState.peerLastSeen[i]) > PEER_TIMEOUT_MS) {
           uint8_t devID = i + 1;
 
           if (enableDebug) Serial.printf("[ProLink] Peer timeout: Player %d\n", devID);
+
+          linkState.peerMap &= ~((uint64_t)1 << i);
+          linkState.peerLastSeen[i] = 0;
 
           if (devID == linkState.activePlayerID) {
             if (enableDebug) Serial.println(F("[ProLink] Active player went away"));
@@ -1902,16 +1907,8 @@ private:
       }
     }
 
-    bool anyPeerAlive = false;
-    for (int i = 0; i < 64; i++) {
-      if ((linkState.peerMap & ((uint64_t)1 << i)) &&
-        linkState.peerLastSeen[i] > 0 &&
-        (now - linkState.peerLastSeen[i]) <= PEER_TIMEOUT_MS) {
-        anyPeerAlive = true;
-        break;
-      }
-    }
-    linkState.isConnected = anyPeerAlive;
+    linkState.isConnected = (linkState.peerMap > 0);
+
   }
 
 public:
@@ -2033,7 +2030,6 @@ public:
   }
 
   bool readFromConfig(JsonObject& root) {
-    return false;
     JsonObject top = root[FPSTR(_name)];
     if (top.isNull()) {
       if (enableDebug) Serial.println(F("[ProLink] No config found, using defaults"));
@@ -2145,7 +2141,7 @@ uint32_t getWaveformRawRGB(uint16_t index) {
     return 0;
   }
 
-  if (altWaveformColors) return getPioneerColorRGB(prolink_waveform_data[index].color);
+  // if (altWaveformColors) return getPioneerColorRGB(prolink_waveform_data[index].color);
 
   WaveformPoint& wp = prolink_waveform_data[index];
 
@@ -2240,12 +2236,12 @@ uint16_t getPioneerColorRGB565(uint8_t colorIndex) {
 }
 
 // --- Static Definitions ---
-const char ProLinkUsermod::_name[] PROGMEM = "Pro DJ Link";
+const char ProLinkUsermod::_name[] PROGMEM = "Pro_DJ_Link";
 const char ProLinkUsermod::_enabled[] PROGMEM = "Enabled";
-const char ProLinkUsermod::_debug[] PROGMEM = "Enable Debug";
-const char ProLinkUsermod::_beatFlash[] PROGMEM = "Beat Flash";
-const char ProLinkUsermod::_randomPreset[] PROGMEM = "Random Preset on Phrase";
-const char ProLinkUsermod::_highResArt[] PROGMEM = "High-Res Artwork (240x240)";
-const char ProLinkUsermod::_ipOverride[] PROGMEM = "Player IP Override";
-const char ProLinkUsermod::_deckNumber[] PROGMEM = "Virtual Deck Number";
-const char ProLinkUsermod::_altcolors[] PROGMEM = "Use Alt Waveform Colors";
+const char ProLinkUsermod::_debug[] PROGMEM = "Enable_Debug";
+const char ProLinkUsermod::_beatFlash[] PROGMEM = "Beat_Flash";
+const char ProLinkUsermod::_randomPreset[] PROGMEM = "Random_Preset_on_Phrase";
+const char ProLinkUsermod::_highResArt[] PROGMEM = "High-Res_Artwork_240x240";
+const char ProLinkUsermod::_ipOverride[] PROGMEM = "Player_IP_Override";
+const char ProLinkUsermod::_deckNumber[] PROGMEM = "Virtual_Deck_Number";
+const char ProLinkUsermod::_altcolors[] PROGMEM = "Use_Alt_Waveform_Colors";

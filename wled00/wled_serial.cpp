@@ -142,6 +142,8 @@ void handleSerial() {
     } else if (next == 'F') {
       ArtNetSkipFrame = !ArtNetSkipFrame;
       USER_PRINTF("Art-Net Skip-Frame is now %s.\n", ArtNetSkipFrame ? "ON" : "OFF");
+    } else if (next == 'f') {
+      USER_PRINTF("FPS: %d\n", strip.getFps());
     } else if (next == '^') {
       esp_err_t err;
       const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
@@ -166,6 +168,13 @@ void handleSerial() {
       } else {
         USER_PRINTF("Looks like the other partion is invalid as we exepected %s but we booted failsafe to %s. Ignoring boot change.\n", boot_partition->label, running_partition->label);
       }
+    } else if ((next >= '0' && next <= '9') || next == '+' || next == '-' || next == '*') {
+      #ifdef USERMOD_PIONEER_PROLINK
+        handleSerialInput(next);
+      #endif
+    } else if (next == 'X') { // WLEDMM - force reconnect via Serial
+      USER_PRINTLN("handleSerial forcing reconnect");
+      forceReconnect = true;
     } else if (next == 'X') { // WLEDMM - force reconnect via Serial
       USER_PRINTLN("handleSerial forcing reconnect");
       forceReconnect = true;

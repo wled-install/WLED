@@ -241,6 +241,7 @@ void initPresetMapping();
 uint16_t getPioneerColorRGB565(uint8_t colorIndex);
 uint32_t getPioneerColorRGB(uint8_t colorIndex);
 uint32_t getWaveformRawRGB(uint16_t index);
+void handleSerialInput(char inpuit);
 #endif
 
 struct PresetMetadata {

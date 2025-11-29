@@ -573,3 +573,73 @@ void printPhrasePreset(int phraseIdx, const std::vector<int>& pool) {
     USER_PRINTF("Phrase %d → No preset\n", phraseIdx);
   }
 }
+
+int getPresetByIndex(int presetIdx, const std::vector<int>& pool) {
+  #ifdef USERMOD_PIONEER_PROLINK
+  // Guard against invalid input
+  if (presetIdx <= 0) return -1;
+  if (pool.empty()) return -1;
+
+  // Check if the requested preset index is in the pool
+  for (int id : pool) {
+    if (id == presetIdx) {
+      return id;  // Found, return the preset number
+    }
+  }
+
+  // Not found
+  return -1;
+  #else
+  return 0;
+  #endif
+}
+  
+void handleSerialInput(char next) {
+  #ifdef USERMOD_PIONEER_PROLINK
+  // Build a fresh pool each time
+  auto pool = buildPresetPool();
+  if (pool.empty()) return;
+
+  int newPreset = -1;
+
+  if (next >= '0' && next <= '9') {
+    // Digit pressed → convert to int
+    int idx = next - '0';
+    newPreset = getPresetByIndex(idx, pool);
+
+  } else if (next == '+') {
+    // Next preset relative to current
+    auto it = std::find(pool.begin(), pool.end(), currentPreset);
+    if (it != pool.end()) {
+      ++it;
+      if (it == pool.end()) it = pool.begin();
+      newPreset = *it;
+    }
+
+  } else if (next == '-') {
+    // Previous preset relative to current
+    auto it = std::find(pool.begin(), pool.end(), currentPreset);
+    if (it != pool.end()) {
+      if (it == pool.begin()) it = pool.end();
+      --it;
+      newPreset = *it;
+    }
+
+  } else if (next == '*') {
+    // Random preset that isn’t current
+    if (pool.size() > 1) {
+      do {
+        int r = random(pool.size());
+        newPreset = pool[r];
+      } while (newPreset == currentPreset);
+    }
+  }
+
+  // Apply if valid
+  if (newPreset != -1) {
+    currentPreset = newPreset;
+    applyPreset(newPreset);
+    handlePresets();
+  }
+  #endif
+}
