@@ -642,7 +642,7 @@ void background_loop_nonblocking(void* pvParameters) {
 void WLED::loop() {
   static bool raised_priority = false;
   if (!raised_priority) {
-    vTaskPrioritySet(NULL, configMAX_PRIORITIES - 1);
+    vTaskPrioritySet(NULL, configMAX_PRIORITIES - 9);
     raised_priority = true;
   }
   #ifdef WLED_DEBUG

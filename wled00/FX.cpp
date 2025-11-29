@@ -9867,386 +9867,71 @@ struct WaveformPoint {
   uint8_t color;   // Pioneer color index 0-7
 };
 
-// uint16_t IRAM_ATTR mode_PRO_LINK() {
-//   #ifdef SOC_PPA_SUPPORTED // always for PPA effects
-
-//   extern uint8_t*           prolink_artwork_data;         // Raw JPEG bytes
-//   extern volatile uint32_t  prolink_artwork_size;         // JPEG size in bytes
-//   extern volatile bool      prolink_artwork_valid;        // True when artwork is loaded
-  
-//   extern WaveformPoint*      prolink_waveform_data;    // Array of 1200 waveform points
-//   extern volatile uint16_t  prolink_waveform_length;      // Number of valid points (typically 1200)
-//   extern volatile bool      prolink_waveform_valid;       // True when waveform is loaded
-
-//   extern volatile float     prolink_bpm_public;
-//   extern volatile uint8_t   prolink_beat_public;
-//   extern volatile uint32_t  prolink_beat_number_public;
-//   extern volatile float     prolink_beat_progress_public;
-//   extern volatile int       prolink_total_beats;
-
-//   // Bar/Beat Counters
-//   extern volatile uint16_t  prolink_beats_elapsed_public;
-//   extern volatile uint8_t   prolink_bars_elapsed_public;
-//   extern volatile uint8_t   prolink_bars_remaining_public;
-
-//   // Phrase / Structure Public Vars
-//   extern volatile int       prolink_phrase_index_public;
-//   extern String             prolink_phrase_name_public;
-//   extern volatile uint16_t  prolink_phrase_beats_public;
-//   extern volatile float     prolink_phrase_progress_public;
-//   extern String             prolink_mood_public;
-//   extern float              prolink_pitchPercent;
-
-//   // Track Metadata
-//   extern String            prolink_track_title;          // Track title
-//   extern String            prolink_track_artist;         // Artist name
-//   extern String            prolink_track_album;          // Album name
-//   extern String            prolink_track_key;            // Musical key (e.g., "Am", "F#")
-//   extern String            prolink_track_genre;          // Genre
-//   extern String            prolink_track_label;          // Record label
-//   extern volatile bool     prolink_metadata_valid;       // True when metadata is loaded
-//   extern volatile uint32_t prolink_track_id_public;      // Rekordbox track ID
-
-//   extern volatile bool prolink_beat_flash_active;
-//   extern volatile uint8_t prolink_beat_flash_brightness;
-//   extern volatile float prolink_track_progress;
-
-//   // Pioneer color palette (index 0-7):
-//   // 0=Blue, 1=LightBlue, 2=Cyan, 3=Green, 4=LimeGreen, 5=Yellow, 6=Orange, 7=Red
-
-//   // Author: @TroyHacks
-//   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-
-//   unsigned long timer = micros();
-
-//   if (!strip.isMatrix) return mode_static(); // not a 2D set-up
-
-//   const uint32_t width = SEGMENT.virtualWidth();
-//   const uint32_t height = SEGMENT.virtualHeight();
-
-//   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed
-
-//   byte* busPixelData = nullptr;
-//   uint32_t busPixelSize = 0;
-//   Bus* bus = busses.getBus(0);
-//   if (bus) {
-//     busPixelData = bus->getPixelData();
-//     busPixelSize = SEGMENT.length() * 3;
-//     if (busPixelData == NULL || busPixelSize == 0) return 1;
-//   } else {
-//     return 1;
-//   }
-
-//   uint8_t* file_jpeg = NULL;
-//   size_t file_jpeg_size = 0;
-//   bool draw_jpeg = true;
-
-//   if (prolink_artwork_valid) {
-//     file_jpeg = prolink_artwork_data;
-//     file_jpeg_size = prolink_artwork_size;
-//   } else {
-//     draw_jpeg = false;
-//   }
-
-//   if (!file_jpeg || file_jpeg_size == 0) {
-//     draw_jpeg = false;
-//   }
-
-//   if (file_jpeg == NULL) {
-//     draw_jpeg = false;
-//   }
-
-//   static uint32_t pre_jpeg_height = 0;
-//   static uint32_t pre_jpeg_width = 0;
-//   static uint32_t pre_height = 0;
-//   static uint32_t pre_width = 0;
-//   static size_t rx_bitmap_size = 0;
-//   static uint8_t* rx_bitmap = NULL;
-//   static uint32_t blackbuffer_size = 0;
-//   static uint8_t* blackbuffer = NULL;
-
-//   jpeg_decode_cfg_t decode_cfg_rgb = {
-//     .output_format = JPEG_DECODE_OUT_FORMAT_RGB888,
-//     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB,
-//   };
-
-//   jpeg_decode_memory_alloc_cfg_t rx_mem_cfg = {
-//     .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
-//   };
-
-//   jpeg_decode_picture_info_t header_info;
-
-//   if (draw_jpeg) {
-
-//     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_get_info(file_jpeg, file_jpeg_size, &header_info));
-
-//   } else {
-
-//     header_info.width = 240;
-//     header_info.height = 240;
-
-//   }
-
-//   if (header_info.width != pre_jpeg_width || header_info.height != pre_jpeg_height) {
-
-//     USER_PRINTF("IP JPEG Size %u x %u\n", header_info.width, header_info.height);
-
-//     if (rx_bitmap != NULL) free(rx_bitmap);
-
-//     rx_bitmap = (uint8_t*)jpeg_alloc_decoder_mem(header_info.width * header_info.height * 3, &rx_mem_cfg, &rx_bitmap_size);
-
-//     pre_jpeg_height = header_info.height;
-//     pre_jpeg_width = header_info.width;
-
-//   }
-
-//   if (width != pre_width || height != pre_height) {
-
-//     if (blackbuffer != NULL) free(blackbuffer);
-
-//     blackbuffer_size = width * height * 4;
-
-//     blackbuffer = (uint8_t*)heap_caps_calloc(blackbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
-
-//     pre_height = height;
-//     pre_width = width;
-
-//   }
-
-//   if (rx_bitmap == NULL) {
-//     USER_PRINTLN("Can't allocate received bitmap buffer!");
-//     return 1;
-//   }
-
-//   uint32_t out_size = 0; // we don't use this anywhere but need to catch it. PPA may need this depending on the operation.
-
-//   if (draw_jpeg) ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, file_jpeg, file_jpeg_size, rx_bitmap, rx_bitmap_size, &out_size));
-
-//   // um_data_t* um_data = getAudioData();
-//   // uint8_t fftResult[NUM_GEQ_CHANNELS] = { 0 };
-//   // if (um_data && um_data->u_data) {
-//   //   memcpy(fftResult, um_data->u_data[2], sizeof(fftResult));
-//   // }
-
-//   if (1 || width != header_info.width || height != header_info.height) { // force this always until PPA scaling is mathed out so we always fill the frame.
-
-//     ppa_fill_oper_config_t fill_config = {};
-//     fill_config.out.buffer = busPixelData;
-//     fill_config.out.buffer_size = busPixelSize;
-//     fill_config.out.pic_w = width;
-//     fill_config.out.pic_h = height;
-//     fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
-//     fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
-//     fill_config.fill_block_w = width;
-//     fill_config.fill_block_h = height;
-
-//     if (SEGMENT.custom2 > 0) {
-//       CHSV hsvColor(SEGMENT.custom2, 255, (float)prolink_beat_flash_brightness); // Full saturation and half brightness
-//       CRGB rgbColor;
-//       rgbColor = hsvColor; // FastLED auto-converts HSV to RGB
-//       fill_config.fill_argb_color.r = rgbColor.r;
-//       fill_config.fill_argb_color.g = rgbColor.g;
-//       fill_config.fill_argb_color.b = rgbColor.b;
-//     } else {
-//       fill_config.fill_argb_color.r = 0;
-//       fill_config.fill_argb_color.g = 0;
-//       fill_config.fill_argb_color.b = 0;
-//     }
-
-//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
-
-//   }
-
-//   ppa_srm_oper_config_t srm_config = {};
-//   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-//   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
-//   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-//   srm_config.in.block_offset_x = 0;
-//   srm_config.in.block_offset_y = 0;
-//   srm_config.out.buffer = busPixelData;
-//   srm_config.out.buffer_size = busPixelSize;
-//   srm_config.out.pic_w = width;
-//   srm_config.out.pic_h = height;
-//   srm_config.out.block_offset_x = 0;
-//   srm_config.out.block_offset_y = 0;
-//   srm_config.scale_x = 1;
-//   srm_config.scale_y = 1;
-//   srm_config.mirror_x = false;
-//   srm_config.mirror_y = false;
-//   srm_config.rgb_swap = 0;
-//   srm_config.byte_swap = 0;
-//   srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-//   srm_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-//   srm_config.in.buffer = rx_bitmap;
-//   srm_config.in.pic_w = header_info.width;
-//   srm_config.in.pic_h = header_info.height;
-//   srm_config.in.block_w = header_info.width;
-//   srm_config.in.block_h = header_info.height;
-
-//   srm_config.scale_x = float(float(64) / float(header_info.width));
-//   srm_config.scale_y = float(float(64) / float(header_info.height));
-  
-//   srm_config.out.block_offset_x = width - 64 - 5;
-//   srm_config.out.block_offset_y = 5;
-
-//   if (draw_jpeg) ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-  
-//   // if (micros() % 100 < 3) USER_PRINTF("Scale was %0.3f and %0.3f\n",srm_config.scale_x, srm_config.scale_y);
-
-//   static LGFX_Sprite myFramebuffer;
-//   myFramebuffer.setPsram(true);
-//   myFramebuffer.setColorDepth(32);
-//   static auto transpalette = 0;
-//   uint32_t myFramebuffer_w = (draw_jpeg) ? 100 : width-10;
-//   uint32_t myFramebuffer_h = height / 2;
-//   myFramebuffer.createSprite(myFramebuffer_w, myFramebuffer_h);
-//   myFramebuffer.fillScreen(TFT_TRANSPARENT);
-//   myFramebuffer.setTextColor(TFT_WHITE);
-//   myFramebuffer.setFont(&fonts::Font0);
-
-//   if (1 || prolink_metadata_valid) { // prolink_metadata_valid seems to flash with the beat??!? FIXME
-
-//     myFramebuffer.drawString(prolink_track_title, 0, 0);
-//     myFramebuffer.drawString(prolink_track_artist, 0, 10);
-//     static char buf[64];
-//     sprintf(buf, "%4.1f%% %s ", (prolink_phrase_progress_public * 100.0f > 99.9) ? 99.9 : prolink_phrase_progress_public * 100.0f, prolink_phrase_name_public);
-//     if (prolink_track_title.length() > 0) myFramebuffer.drawString(buf, 0, 20);
-
-//     ppa_blend_oper_config_t blend_config = {};
-//     blend_config.in_bg.buffer = busPixelData;
-//     blend_config.in_bg.pic_w = width;
-//     blend_config.in_bg.pic_h = height;
-//     blend_config.in_bg.block_w = myFramebuffer_w;
-//     blend_config.in_bg.block_h = myFramebuffer_h;
-//     blend_config.in_bg.block_offset_x = 5;
-//     blend_config.in_bg.block_offset_y = 5;
-//     blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-//     blend_config.in_fg.buffer = (uint8_t*)myFramebuffer.getBuffer();
-//     blend_config.in_fg.pic_w = myFramebuffer_w;
-//     blend_config.in_fg.pic_h = myFramebuffer_h;
-//     blend_config.in_fg.block_w = myFramebuffer_w;
-//     blend_config.in_fg.block_h = myFramebuffer_h;
-//     blend_config.in_fg.block_offset_x = 0;
-//     blend_config.in_fg.block_offset_y = 0;
-//     blend_config.bg_rgb_swap = 0;
-//     blend_config.bg_byte_swap = 0;
-//     blend_config.fg_rgb_swap = 0;
-//     blend_config.fg_byte_swap = 0;
-//     blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
-//     blend_config.out.buffer = busPixelData;
-//     blend_config.out.buffer_size = busPixelSize;
-//     blend_config.out.pic_w = width;
-//     blend_config.out.pic_h = height;
-//     blend_config.out.block_offset_x = 5;
-//     blend_config.out.block_offset_y = 5;
-//     blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-//     blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-//     blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-//     blend_config.bg_ck_en = false;
-//     blend_config.fg_ck_en = false;
-//     blend_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-    
-//   }
-
-//   ppa_fill_oper_config_t fill_config = {};
-//   fill_config.out.buffer = busPixelData;
-//   fill_config.out.buffer_size = busPixelSize;
-//   fill_config.out.pic_w = width;
-//   fill_config.out.pic_h = height;
-//   fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
-//   fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
-
-//   fill_config.fill_argb_color.r = 0;
-//   fill_config.fill_argb_color.g = 0;
-//   fill_config.fill_argb_color.b = 0;
-//   fill_config.fill_argb_color.a = 0;
-
-//   fill_config.fill_block_w = 1;
-
-//   // Helper macro for Linear Interpolation (LERP)
-//   #ifndef LERP
-//   #define LERP(a, b, t) ((a) + ((b) - (a)) * (t))
-//   #endif
-
-//   uint8_t max_bar_height = (height - 20) / 2;
-
-//   // STATIC variable keeps track of the smooth position between frames
-//   static double visual_waveform_index = 0.0;
-
-//   if (prolink_waveform_valid) {
-//     int playhead_screen_x = width / 3;
-
-//     // --- 1. CALCULATE RAW TARGET (Noisy) ---
-//     // This calculates exactly where the network SAYS we should be.
-//     // Because of UDP jitter, this value will "vibrate" slightly frame-to-frame.
-//     double target_index;
-
-//     if (prolink_total_beats > 0) {
-//       double current_precise_beat = (double)prolink_beats_elapsed_public + (double)prolink_beat_progress_public;
-//       target_index = (current_precise_beat / (double)prolink_total_beats) * prolink_waveform_length;
-//     } else {
-//       target_index = (double)prolink_track_progress * prolink_waveform_length;
-//     }
-
-//     // --- 2. APPLY SHOCK ABSORBER (The Fix) ---
-
-//     // Calculate distance between where we are drawn vs where the network says we are
-//     double diff = target_index - visual_waveform_index;
-
-//     // Handle Wrapping/Seeking:
-//     // If the difference is HUGE (e.g. > 10 slices), the user likely pressed CUE or Seek.
-//     // In this case, snap instantly. Don't slide.
-//     if (abs(diff) > 10.0) {
-//       visual_waveform_index = target_index;
-//     }
-//     // Handle Normal Playback:
-//     // Only move 20% (0.2) of the way to the target per frame.
-//     // This swallows the jitter while keeping the scrolling tight.
-//     else {
-//       visual_waveform_index += (diff * 0.2);
-//     }
-
-//     // --- 3. DRAW LOOP (Using Smoothed Index) ---
-//     for (int x = 0; x < width; x++) {
-
-//       int offset = x - playhead_screen_x;
-
-//       // Use the SMOOTHED variable, not the raw one
-//       int target_draw_index = (int)floor(visual_waveform_index + offset);
-
-//       // Boundary Check
-//       if (target_draw_index >= 0 && target_draw_index < prolink_waveform_length) {
-
-//         fill_config.fill_block_h = map(prolink_waveform_data[target_draw_index].height, 0, 127, 0, max_bar_height);
-//         fill_config.fill_argb_color.val = getWaveformRawRGB(target_draw_index);
-
-//         fill_config.out.block_offset_y = (height - 2 - fill_config.fill_block_h) - ((max_bar_height - fill_config.fill_block_h) / 2);
-//         fill_config.out.block_offset_x = x;
-//         fill_config.fill_block_w = 1;
-
-//         if (fill_config.fill_block_h > 0) {
-//           ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
-//         }
-//       }
-//     }
-
-//     // --- 4. PLAYHEAD ---
-//     fill_config.fill_block_w = 1;
-//     fill_config.fill_block_h = max_bar_height;
-//     fill_config.out.block_offset_x = playhead_screen_x;
-//     fill_config.out.block_offset_y = (height - 2 - max_bar_height);
-//     fill_config.fill_argb_color.val = 0xFFFFFFFF; // White
-
-//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
-//   }
-
-//   #endif // PPA Required
-//   return FRAMETIME;
-
-// } // mode_PRO_LINK
+// -------------------------------------------------------- -
+// 1. Helper: Truncates a single string if it exceeds width
+//    Now accepts the framebuffer reference 'fb'
+// ---------------------------------------------------------
+String truncateToWidth(LGFX_Sprite & fb, String text, int32_t max_w) {
+  // Check width using the passed framebuffer
+  if (fb.textWidth(text) <= max_w) {
+    return text;
+  }
+
+  int ellipsisWidth = fb.textWidth("...");
+  String truncatedText = "";
+
+  // Iterative check to find the cut-off point
+  for (int i = 1; i <= text.length(); ++i) {
+    String sub = text.substring(0, i);
+    if (fb.textWidth(sub) + ellipsisWidth > max_w) {
+      // We went one char too far, back up and add ...
+      truncatedText = text.substring(0, i - 1) + "...";
+      break;
+    }
+  }
+
+  return (truncatedText.length() > 0) ? truncatedText : text;
+}
+
+// ---------------------------------------------------------
+// 2. Main Draw Logic: Splits at first '(', Max 2 lines
+//    Now accepts the framebuffer reference 'fb'
+// ---------------------------------------------------------
+void drawSmartSection(LGFX_Sprite& fb, String text, int32_t x, int32_t& cursor_y, int32_t max_w, int32_t line_h) {
+  if (text.length() == 0) return;
+
+  String line1, line2;
+
+  // Find ONLY the first '('
+  int splitIndex = text.indexOf('(');
+
+  if (splitIndex > 0) {
+    // Found a split point. 
+    line1 = text.substring(0, splitIndex);
+    line2 = text.substring(splitIndex);
+  } else {
+    // No split, treated as one line
+    line1 = text;
+    line2 = "";
+  }
+
+  line1.trim();
+  line2.trim();
+
+  // --- DRAW LINE 1 ---
+  // Pass 'fb' to truncate helper
+  String finalLine1 = truncateToWidth(fb, line1, max_w);
+  fb.drawString(finalLine1, x, cursor_y);
+  cursor_y += line_h;
+
+  // --- DRAW LINE 2 (If exists) ---
+  if (line2.length() > 0) {
+    // Pass 'fb' to truncate helper
+    String finalLine2 = truncateToWidth(fb, line2, max_w);
+    fb.drawString(finalLine2, x, cursor_y);
+    cursor_y += line_h;
+  }
+}
 
 uint16_t IRAM_ATTR mode_PRO_LINK() {
   #if defined(SOC_PPA_SUPPORTED) && defined(USERMOD_PIONEER_PROLINK)
@@ -10395,7 +10080,7 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
     srm_config.scale_y = (float)art_size / (float)cached_img_h;
 
     // Position top right
-    srm_config.out.block_offset_x = width - art_size - 5;
+    srm_config.out.block_offset_x = width - art_size;
     srm_config.out.block_offset_y = 5;
 
     srm_config.mode = PPA_TRANS_MODE_BLOCKING;
@@ -10420,16 +10105,25 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
 
   if (prolink_metadata_valid) {
     myFramebuffer.fillScreen(TFT_TRANSPARENT);
-    myFramebuffer.drawString(prolink_track_title, 0, 0);
-    myFramebuffer.drawString(prolink_track_artist, 0, 10);
 
-    static char buf[32]; // smaller buffer
-    // Avoid sprintf if possible, or use snprintf
+    int32_t cur_y = 0;
+    int32_t line_h = 10;
+
+    // 1. Title: Pass 'myFramebuffer' as first arg
+    drawSmartSection(myFramebuffer, prolink_track_title, 0, cur_y, fb_w, line_h);
+
+    // 2. Artist: Pass 'myFramebuffer' as first arg
+    drawSmartSection(myFramebuffer, prolink_track_artist, 0, cur_y, fb_w, line_h);
+
+    // 3. Info Line
+    static char buf[32];
     snprintf(buf, sizeof(buf), "%4.1f%% %s",
       (prolink_phrase_progress_public * 100.0f),
       prolink_phrase_name_public.c_str());
 
-    if (prolink_track_title.length() > 0) myFramebuffer.drawString(buf, 0, 20);
+    if (prolink_track_title.length() > 0) {
+      drawSmartSection(myFramebuffer, String(buf), 0, cur_y, fb_w, line_h);
+    }
 
     // Blend Sprite onto Bus
     ppa_blend_oper_config_t blend_config = {};
@@ -10480,7 +10174,7 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
 
     double diff = target_index - visual_waveform_index;
     if (abs(diff) > 10.0) visual_waveform_index = target_index; // Snap on seek
-    else visual_waveform_index += (diff * 0.2); // Smooth scroll
+    else visual_waveform_index += (diff * 0.1); // Smooth scroll
 
     // CPU DRAWING LOOP
     // We write directly to the RGB array. 
