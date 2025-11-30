@@ -6744,7 +6744,7 @@ uint16_t mode_2Dscrollingtext(void) {
   extern volatile float     prolink_beat_progress_public;
 
   // Bar/Beat Counters
-  extern volatile uint16_t  prolink_beats_elapsed_public;
+  extern volatile uint32_t  prolink_beats_elapsed_public;
   extern volatile uint8_t   prolink_bars_elapsed_public;
   extern volatile uint8_t   prolink_bars_remaining_public;
 
@@ -6754,7 +6754,7 @@ uint16_t mode_2Dscrollingtext(void) {
   extern volatile uint16_t  prolink_phrase_beats_public;
   extern volatile float     prolink_phrase_progress_public;
   extern String             prolink_mood_public;
-  extern float              prolink_pitchPercent;
+  extern volatile float     prolink_pitchPercent;
 
   // Track Metadata
   extern String            prolink_track_title;          // Track title
@@ -9877,7 +9877,7 @@ String truncateToWidth(LGFX_Sprite & fb, String text, int32_t max_w) {
     return text;
   }
 
-  int ellipsisWidth = fb.textWidth("...");
+  int ellipsisWidth = fb.textWidth(""); // was "..."
   String truncatedText = "";
 
   // Iterative check to find the cut-off point
@@ -9885,7 +9885,7 @@ String truncateToWidth(LGFX_Sprite & fb, String text, int32_t max_w) {
     String sub = text.substring(0, i);
     if (fb.textWidth(sub) + ellipsisWidth > max_w) {
       // We went one char too far, back up and add ...
-      truncatedText = text.substring(0, i - 1) + "...";
+      truncatedText = text.substring(0, i - 1) + ""; // was "..."
       break;
     }
   }
@@ -9937,18 +9937,19 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
   #if defined(SOC_PPA_SUPPORTED) && defined(USERMOD_PIONEER_PROLINK)
 
   // --- External Variables ---
-  extern uint8_t* prolink_artwork_data;       // Raw JPEG bytes
+  extern uint8_t*           prolink_artwork_data;       // Raw JPEG bytes
   extern volatile uint32_t  prolink_artwork_size;       // JPEG size in bytes
   extern volatile bool      prolink_artwork_valid;      // True when artwork is loaded
 
-  extern WaveformPoint* prolink_waveform_data;      // Array of 1200 waveform points
+  extern WaveformPoint*     prolink_waveform_data;      // Array of 1200 waveform points
   extern volatile uint16_t  prolink_waveform_length;    // Number of valid points
   extern volatile bool      prolink_waveform_valid;
 
-  extern volatile int       prolink_total_beats;
-  extern volatile uint16_t  prolink_beats_elapsed_public;
   extern volatile float     prolink_beat_progress_public;
   extern volatile float     prolink_track_progress;
+  extern volatile uint32_t  prolink_beats_elapsed_public;
+  extern volatile uint32_t  prolink_total_beats;
+  extern volatile float     prolink_pitchPercent;
 
   // Metadata
   extern String             prolink_track_title;
@@ -10156,50 +10157,74 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
   }
 
   // --- 5. WAVEFORM (CPU OPTIMIZED) ---
-  // Direct memory access is FASTER than PPA for single pixel lines.
+  extern volatile uint32_t prolink_track_duration_ms;
+  extern volatile float prolink_bpm_public;
+  extern volatile bool prolink_connected_public;
 
   static double visual_waveform_index = 0.0;
+  static double last_valid_target = 0.0;
+
   uint8_t max_bar_height = (height - 20) / 2;
   int playhead_screen_x = width / 3;
 
-  if (prolink_waveform_valid) {
-    // Smooth seeking logic
-    double target_index = 0;
-    if (prolink_total_beats > 0) {
-      double current_precise_beat = (double)prolink_beats_elapsed_public + (double)prolink_beat_progress_public;
-      target_index = (current_precise_beat / (double)prolink_total_beats) * prolink_waveform_length;
+  if (prolink_waveform_valid && prolink_waveform_length > 0) {
+
+    float effectiveBpm = prolink_bpm_public;
+    bool is_playing = (effectiveBpm > 0);
+
+    double target_index;
+
+    if (is_playing) {
+      double currentBeat = (double)prolink_beats_elapsed_public + (double)prolink_beat_progress_public;
+
+      // Use base BPM (pitch-independent) for position calculation
+      double baseBpm = effectiveBpm / (1.0 + (prolink_pitchPercent / 100.0));
+      double beatDurationMs = 60000.0 / baseBpm;
+      double positionMs = currentBeat * beatDurationMs;
+
+      if (prolink_track_duration_ms > 0) {
+        double progress = positionMs / (double)prolink_track_duration_ms;
+        if (progress < 0) progress = 0;
+        if (progress > 1) progress = 1;
+        target_index = progress * prolink_waveform_length;
+      } else if (prolink_total_beats > 0) {
+        target_index = (currentBeat / (double)prolink_total_beats) * prolink_waveform_length;
+      } else {
+        target_index = last_valid_target;
+      }
+
+      last_valid_target = target_index;
     } else {
-      target_index = (double)prolink_track_progress * prolink_waveform_length;
+      // Paused - stay at last position
+      target_index = last_valid_target;
     }
 
+    // Simple smoothing - same as your original "deadly accurate" version
     double diff = target_index - visual_waveform_index;
-    if (abs(diff) > 10.0) visual_waveform_index = target_index; // Snap on seek
-    else visual_waveform_index += (diff * 0.1); // Smooth scroll
+    if (abs(diff) > 10.0) {
+      visual_waveform_index = target_index;
+    } else {
+      visual_waveform_index += (diff * 0.15);
+    }
 
     // CPU DRAWING LOOP
-    // We write directly to the RGB array. 
-    // Format is assumed RGB888 based on PPA settings.
-
     int wave_y_base = (height - 2);
 
     for (int x = 0; x < width; x++) {
       int offset = x - playhead_screen_x;
       int target_draw_index = (int)(visual_waveform_index + offset);
 
-      // Determine Color and Height
       uint32_t color = 0;
       int bar_h = 0;
 
       if (x == playhead_screen_x) {
-        // Draw Playhead (White)
         color = 0xFFFFFF;
         bar_h = max_bar_height;
       } else if (target_draw_index >= 0 && target_draw_index < prolink_waveform_length) {
-        // Draw Waveform Bar
         bar_h = map(prolink_waveform_data[target_draw_index].height, 0, 127, 0, max_bar_height);
         color = getWaveformRawRGB(target_draw_index);
       } else {
-        continue; // Nothing to draw here
+        continue;
       }
 
       if (bar_h > 0) {
@@ -10207,18 +10232,12 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
         uint8_t g = (color >> 8) & 0xFF;
         uint8_t b = color & 0xFF;
 
-        // Center the bar vertically around the waveform bottom area
-        // Or align bottom as per original code: 
-        // offset_y = (height - 2 - bar_h) - ((max_bar_height - bar_h) / 2);
-        // Simplified centering logic:
         int start_y = wave_y_base - bar_h - ((max_bar_height - bar_h) / 2);
         int end_y = start_y + bar_h;
 
-        // Clip to screen
         if (start_y < 0) start_y = 0;
         if (end_y > height) end_y = height;
 
-        // Vertical Line Draw - CPU is fast at this!
         for (int y = start_y; y < end_y; y++) {
           uint32_t idx = (y * width + x) * 3;
           busPixelData[idx] = r;
