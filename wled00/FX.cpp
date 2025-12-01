@@ -9960,6 +9960,10 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
   extern volatile bool      prolink_metadata_valid;
   extern volatile uint8_t   prolink_beat_flash_brightness;
 
+  extern volatile float     prolink_bpm_public;
+  extern volatile uint8_t   prolink_beat_public;
+  extern String             prolink_mood_public;
+
   // --- Initialization & Safety Checks ---
   if (!strip.isMatrix) return mode_static();
 
@@ -10025,7 +10029,7 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
         if (jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, prolink_artwork_data, prolink_artwork_size, cached_bitmap, cached_bitmap_size, &out_size) == ESP_OK) {
           cached_track_id = prolink_track_id_public;
           has_valid_cache = true;
-          USER_PRINTF("Loaded Art: %u x %u\n", cached_img_w, cached_img_h);
+          DEBUG_PRINTF("Loaded Art: %u x %u\n", cached_img_w, cached_img_h);
         }
       }
     }
@@ -10121,6 +10125,13 @@ uint16_t IRAM_ATTR mode_PRO_LINK() {
     snprintf(buf, sizeof(buf), "%4.1f%% %s",
       (prolink_phrase_progress_public * 100.0f),
       prolink_phrase_name_public.c_str());
+
+    if (prolink_track_title.length() > 0) {
+      drawSmartSection(myFramebuffer, String(buf), 0, cur_y, fb_w, line_h);
+    }
+
+    snprintf(buf, sizeof(buf), "%5.1f BPM %s%1.2f%%",
+      (prolink_bpm_public), (prolink_pitchPercent > 0.0) ? "+":"", (prolink_pitchPercent));
 
     if (prolink_track_title.length() > 0) {
       drawSmartSection(myFramebuffer, String(buf), 0, cur_y, fb_w, line_h);
