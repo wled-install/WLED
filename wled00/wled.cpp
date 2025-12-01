@@ -507,7 +507,7 @@ void background_loop_blocking(void* pvParameters) {
 
     }
 
-    vTaskDelay(10);
+    vTaskDelay(1);
 
   }
 }
@@ -634,13 +634,13 @@ void background_loop_nonblocking(void* pvParameters) {
     }
     #endif // SOC_USB_OTG_SUPPORTED
 
-    vTaskDelay(10);
+    vTaskDelay(1);
 
   }
 }
 
 void WLED::loop() {
-  static bool raised_priority = false;
+  static bool raised_priority = true;
   if (!raised_priority) {
     vTaskPrioritySet(NULL, configMAX_PRIORITIES - 9);
     raised_priority = true;
@@ -1482,9 +1482,9 @@ void WLED::setup() {
     "BG_Blocking",     // Name
     24000,            // Stack size in words
     NULL,             // Parameters
-    1,                // Priority
+    24,                // Priority
     NULL,             // Task handle (optional)
-    0                 // Core ID (0 or 1)
+    1                 // Core ID (0 or 1)
   );
 
   xTaskCreatePinnedToCore(
@@ -1492,9 +1492,9 @@ void WLED::setup() {
     "Background",     // Name
     24000,            // Stack size in words
     NULL,             // Parameters
-    1,                // Priority
+    24,                // Priority
     NULL,             // Task handle (optional)
-    0                 // Core ID (0 or 1)
+    1                 // Core ID (0 or 1)
   );
 
   //#endif

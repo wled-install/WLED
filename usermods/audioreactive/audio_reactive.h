@@ -2727,7 +2727,7 @@ class AudioReactive : public Usermod {
           // ... task creation logic ...
           if (audioSource)
             xTaskCreateUniversal(
-              FFTcode, "FFT", 4096, NULL, FFTTASK_PRIORITY, &FFT_Task, 0
+              FFTcode, "FFT", 8192, NULL, FFTTASK_PRIORITY, &FFT_Task, 1
             );
         }
       }

@@ -570,38 +570,71 @@ String dmxProcessor(const String& var)
 #endif
 
 
-void serveSettingsJS(AsyncWebServerRequest* request)
-{
-  static char* buf = (char*)heap_caps_calloc_prefer(SETTINGS_STACK_BUF_SIZE, 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_INTERNAL);
+void serveSettingsJS(AsyncWebServerRequest* request) {
+  // 1. Allocate buffer (Heap/PSRAM)
+  // Ensure -D SETTINGS_STACK_BUF_SIZE=40960 is in platformio.ini
+  size_t bufSize = SETTINGS_STACK_BUF_SIZE;
+
+  // Try PSRAM first
+  char* buf = (char*)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+  // Fallback to internal RAM
+  if (buf == nullptr) {
+    buf = (char*)malloc(bufSize);
+  }
+
+  // Panic if OOM
+  if (buf == nullptr) {
+    request->send(500, "text/plain", "OOM: Settings buffer");
+    return;
+  }
+
+  // 2. Safety clear
   buf[0] = 0;
+
+  // 3. Logic Validation
   byte subPage = request->arg(F("p")).toInt();
   if (subPage > 10) {
-    strcpy_P(buf, PSTR("alert('Settings for this request are not implemented.');"));
+    strcpy_P(buf, PSTR("alert('Page not implemented.');"));
     request->send(501, "application/javascript", buf);
+    free(buf);
     return;
   }
-  if (subPage > 0 && !correctPIN && strlen(settingsPIN)>0) {
+
+  if (subPage > 0 && !correctPIN && strlen(settingsPIN) > 0) {
     strcpy_P(buf, PSTR("alert('PIN incorrect.');"));
     request->send(403, "application/javascript", buf);
+    free(buf);
     return;
   }
-  strcat_P(buf,PSTR("function GetV(){var d=document;"));
-  getSettingsJS(request, subPage, buf+strlen(buf));  // this may overflow by 35bytes!!! WLEDMM add request
-  strcat_P(buf,PSTR("}"));
+
+  // 4. Generate Content
+  strcat_P(buf, PSTR("function GetV(){var d=document;"));
+
+  // Populate settings into buf
+  getSettingsJS(request, subPage, buf + strlen(buf));
+
+  strcat_P(buf, PSTR("}"));
 
   #ifdef ARDUINO_ARCH_ESP32
-    DEBUG_PRINT(F("ServeSettingsJS: "));
-    DEBUG_PRINTF("%s min free stack %d", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL)); //WLEDMM
-    DEBUG_PRINTF(PSTR(" bytes.\t\tString buffer usage: %4d of %d bytes\n"), strlen(buf)+1, SETTINGS_STACK_BUF_SIZE+37);
+  DEBUG_PRINT(F("ServeSettingsJS: "));
+  DEBUG_PRINTF("Buffer usage: %d / %d\n", strlen(buf), bufSize);
   #endif
-  
-  AsyncWebServerResponse *response;
-  response = request->beginResponse(200, "application/javascript", buf);
-  response->addHeader(F("Cache-Control"),"no-store");
-  response->addHeader(F("Expires"),"0");
-  request->send(response);
-}
 
+  // 5. Send Response (THE CRITICAL FIX)
+  // We wrap 'buf' in 'String()'. This forces the library to allocate 
+  // its OWN memory and copy the data immediately.
+  AsyncWebServerResponse* response;
+  response = request->beginResponse(200, "application/javascript", String(buf));
+
+  response->addHeader(F("Cache-Control"), "no-store");
+  response->addHeader(F("Expires"), "0");
+  request->send(response);
+
+  // 6. Clean up our manual buffer
+  // This is now safe because 'response' has its own copy.
+  free(buf);
+}
 
 void serveSettings(AsyncWebServerRequest* request, bool post)
 {

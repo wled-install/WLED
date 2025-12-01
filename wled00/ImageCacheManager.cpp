@@ -38,7 +38,7 @@ void ImageCacheManager::startPreload(const std::string& root_path) {
   }
   // Don't clear cache here to allow for intelligent sync
   preload_root_path = root_path.c_str();
-  xTaskCreatePinnedToCore(_preloadTask, "preload_task", 4096, this, IMAGECACHE_BG_PRIORITY, &preload_task_handle, 0); // core 0, where FFT lives
+  xTaskCreatePinnedToCore(_preloadTask, "preload_task", 4096, this, IMAGECACHE_BG_PRIORITY, &preload_task_handle, 1); // core 0, where FFT lives
 }
 
 ImageData* ImageCacheManager::getImage(const std::string& folder_path, size_t index) {
