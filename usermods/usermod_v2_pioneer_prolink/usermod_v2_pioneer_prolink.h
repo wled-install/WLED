@@ -1375,8 +1375,7 @@ private:
       }
     }
 
-    if (enableRandomPreset && activeIdx != previousPhraseIdx &&
-      previousPhraseIdx != -1 && activeIdx != -1) {
+    if (prolink_presetMover && activeIdx != previousPhraseIdx && previousPhraseIdx != -1 && activeIdx != -1) {
       auto pool = buildPresetPool();
       int newPreset = getPresetForPhraseNoRepeat(activeIdx, pool);
 
@@ -1600,6 +1599,17 @@ public:
     virtualDeckNumber = top[FPSTR(_deckNumber)] | WLED_DEVICE_ID_DEFAULT;
     virtualDeckNumber = constrain(virtualDeckNumber, 1, 127);
 
+    // Static guards to persist across calls
+    static bool prolink_presetMover_init = false;
+    static bool enableRandomPreset_config_val;  // cache of last config value
+
+    // Seed once, or resync if config changes externally
+    if (!prolink_presetMover_init || enableRandomPreset_config_val != enableRandomPreset) {
+      prolink_presetMover = enableRandomPreset;          // sync from config
+      enableRandomPreset_config_val = enableRandomPreset; // update cache
+      prolink_presetMover_init = true;
+    }
+    
     return true;
   }
 

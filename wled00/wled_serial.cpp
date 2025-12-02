@@ -168,17 +168,14 @@ void handleSerial() {
       } else {
         USER_PRINTF("Looks like the other partion is invalid as we exepected %s but we booted failsafe to %s. Ignoring boot change.\n", boot_partition->label, running_partition->label);
       }
-    } else if ((next >= '0' && next <= '9') || next == '+' || next == '-' || next == '*') {
+    } else if ((next >= '0' && next <= '9') || next == '+' || next == '-' || next == '*' || next == '/') {
       #ifdef USERMOD_PIONEER_PROLINK
         handleSerialInput(next);
       #endif
     } else if (next == 'X') { // WLEDMM - force reconnect via Serial
       USER_PRINTLN("handleSerial forcing reconnect");
       forceReconnect = true;
-    } else if (next == 'X') { // WLEDMM - force reconnect via Serial
-      USER_PRINTLN("handleSerial forcing reconnect");
-      forceReconnect = true;
-    } else if (next == 'C') { // WLEDMM - force reconnect via Serial
+    } else if (next == 'C') { // WLEDMM - task list display for developers
       task_list();
     } else if (next == 'R') { // WLEDMM - force reboot via Serial
       Serial.print("Rebooting ");

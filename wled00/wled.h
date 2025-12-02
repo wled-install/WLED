@@ -344,7 +344,8 @@ WLED_GLOBAL bool update_screen_background _INIT(true);
 #endif
 
 #ifdef USERMOD_PIONEER_PROLINK
-WLED_GLOBAL int prolink_presetOffset _INIT(0);
+WLED_GLOBAL int   prolink_presetOffset  _INIT(0);
+WLED_GLOBAL bool  prolink_presetMover   _INIT(false);
 #endif
 
 // Global Variable definitions

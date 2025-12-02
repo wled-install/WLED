@@ -616,6 +616,10 @@ void handleSerialInput(char next) {
       newPreset = *it;
     }
 
+  } else if (next == '/') {
+    // Toggle automatic preset switching
+    prolink_presetMover = !prolink_presetMover;
+    USER_PRINTF("Pro Link Preset Advance %s\n", prolink_presetMover ? "Enabled" : "Disabled");
   } else if (next == '-') {
     // Previous preset relative to current
     auto it = std::find(pool.begin(), pool.end(), currentPreset);
