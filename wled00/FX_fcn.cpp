@@ -1897,7 +1897,7 @@ void WS2812FX::service() {
 void IRAM_ATTR WS2812FX::setPixelColor(int i, uint32_t col)
 {
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (customMappingTable != nullptr && i < customMappingSize) {
+  if (this->customMappingTable != nullptr && i < this->customMappingSize) {
     i = customMappingTable[i];
   }
   #endif
@@ -1908,7 +1908,7 @@ void IRAM_ATTR WS2812FX::setPixelColor(int i, uint32_t col)
 uint32_t WS2812FX::getPixelColor(uint_fast16_t i) const // WLEDMM fast int types
 {
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (customMappingTable != nullptr && i < customMappingSize) {
+  if (this->customMappingTable != nullptr && i < this->customMappingSize) {
     i = customMappingTable[i];
   }
   #endif
@@ -1919,7 +1919,7 @@ uint32_t WS2812FX::getPixelColor(uint_fast16_t i) const // WLEDMM fast int types
 uint32_t WS2812FX::getPixelColorRestored(uint_fast16_t i)  const  // WLEDMM gets the original color from the driver (without downscaling by _bri)
 {
   #ifndef WLEDMM_REMAP_AT_OUTPUT
-  if (customMappingTable != nullptr && i < customMappingSize) {
+  if (this->customMappingTable != nullptr && i < this->customMappingSize) {
     i = customMappingTable[i];
   }
   #endif
