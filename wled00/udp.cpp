@@ -803,6 +803,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
       uint32_t mappingTableSize = strip.getCustomMappingTableSize();
       const uint8_t my_bytes_per_pixel = isRGBW ? 4 : 3;
       const bool hasMappingTable = (mappingTable != nullptr);
+      const bool needsColorReorder = (color_order != COL_ORDER_RGB);
       const bool fullBrightness = (bri == 255);
 
       // Pre-build color order LUT (do this once at setup, not per frame)
@@ -865,11 +866,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
           #endif
 
           #ifdef WLEDMM_REMAP_AT_OUTPUT
-          uint32_t* mappingTable = strip.getCustomMappingTable();
-          const uint8_t my_bytes_per_pixel = isRGBW ? 4 : 3;
-          const bool hasMappingTable = (mappingTable != nullptr);
-          const bool needsColorReorder = (color_order != COL_ORDER_RGB);
-          const bool fullBrightness = (bri == 255);
 
           // Fast path: no mapping, no color reorder - use SIMD or memcpy
           if (!hasMappingTable && !needsColorReorder) {
@@ -888,16 +884,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
             }
             #endif
           } else {
-            // Slow path: need mapping or color reorder
-            uint8_t r_idx, g_idx, b_idx;
-            switch (color_order) {
-            case COL_ORDER_GRB: r_idx = 1; g_idx = 0; b_idx = 2; break;
-            case COL_ORDER_RGB: default: r_idx = 0; g_idx = 1; b_idx = 2; break;
-            case COL_ORDER_BRG: r_idx = 1; g_idx = 2; b_idx = 0; break;
-            case COL_ORDER_RBG: r_idx = 0; g_idx = 2; b_idx = 1; break;
-            case COL_ORDER_BGR: r_idx = 2; g_idx = 1; b_idx = 0; break;
-            case COL_ORDER_GBR: r_idx = 1; g_idx = 0; b_idx = 2; break;
-            }
 
             uint16_t packetNumPixels = packetSize / my_bytes_per_pixel;
             uint32_t startPixel = bufferOffset / my_bytes_per_pixel;
