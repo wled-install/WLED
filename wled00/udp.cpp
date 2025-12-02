@@ -754,12 +754,26 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
         return 1;
       }
       static unsigned long artnetlimiter = micros() + (1000000 / fps_limit);
-      while (artnetlimiter > micros()) {
+
+      long time_to_wait = artnetlimiter - micros();
+
+      if (time_to_wait > 0) {
+
         if (ArtNetSkipFrame) {
-          return 0; // Let WLED keep generating effect frames and we output an Art-Net frame when fps_limit is reached.
-        } else {
-          vTaskDelay(1); // non-blocking delay, but not as accurate. Won't exceed tho.
-          // delayMicroseconds(100); // BLOCKING delay. Can mess with other stuff but it is accurate.
+          return 0;
+        }
+
+        // If we have a big gap (>2ms), yield to OS to keep WiFi/Net stack happy
+        // This prevents the "Oversleeping" issue of vTaskDelay
+        while (time_to_wait > 2000) {
+          vTaskDelay(1);
+          time_to_wait = artnetlimiter - micros();
+        }
+
+        // If we have a tiny gap (<2ms), just burn cycles (Busy Wait)
+        // This is extremely precise and ensures we hit 45 FPS exactly
+        while (artnetlimiter > micros()) {
+          asm volatile("nop");
         }
       }
 
@@ -780,7 +794,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
       #endif
       unsigned long timer = micros();
 
-      AsyncUDP artnetudp;// AsyncUDP so we can just blast packets.
+      static AsyncUDP artnetudp;// AsyncUDP so we can just blast packets.
 
       const uint_fast16_t ARTNET_CHANNELS_PER_PACKET = isRGBW ? 512 : 510; // 512/4=128 RGBW LEDs, 510/3=170 RGB LEDs
 
@@ -833,7 +847,9 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
 
           #ifdef ARTNET_TIMER
           packetstotal++;
-          datatotal += packetSize + 18;
+          // Add Layer 2 Overhead:
+          // packetSize + 18 (ArtNet) + 8 (UDP) + 20 (IP) + 14 (Eth) + 4 (FCS) = +46 bytes
+          datatotal += packetSize + 18 + 46;
           #endif
 
           // set the parts of the Art-Net packet header that change:
@@ -1004,7 +1020,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
 
         #ifdef ARTNET_TIMER
         packetstotal++;
-        datatotal += 14;
+        datatotal += packetSize + 18 + 46;
         #endif
       
       #endif
@@ -1014,9 +1030,9 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress
       // This is the proper stop if pixels = Art-Net output.
       
       #ifdef ARTNET_TIMER
-      float mbps = (datatotal*8)/((micros()-timer)*0.95367431640625f);
+      float mbps = (float)(datatotal * 8) / (float)(micros() - timer);
       // the "micros()" calc is just to limit the print to a more random debug output so it doesn't overwhelm the terminal
-      if (micros() % 100 < 3) USER_PRINTF("UDP for %u pixels took %lu micros. %u data in %u total packets. %2.2f mbit/sec at %u FPS.\n",length, micros()-timer, datatotal, packetstotal, mbps, strip.getFps());
+      if (micros() % 100 < 3)USER_PRINTF("UDP for %u pixels took %lu micros. %u data in %u total packets. %2.2f mbit/sec at %u FPS.\n", length, micros() - timer, datatotal, packetstotal, mbps, strip.getFps());
       #endif
     
       break;
