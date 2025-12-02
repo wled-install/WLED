@@ -41,6 +41,7 @@ static constexpr uint32_t PEER_TIMEOUT_MS = 5000;
 static constexpr uint32_t KEEPALIVE_INTERVAL_MS = 1500;
 static constexpr uint32_t PEER_CHECK_INTERVAL_MS = 2000;
 static constexpr uint32_t BEAT_FLASH_DURATION_MS = 300;
+static constexpr uint32_t STARTUP_DELAY_US = 1000000;  // 10 seconds in microseconds
 
 static constexpr uint32_t WAVEFORM_COLLECT_MS = 1500;
 static constexpr uint32_t ARTWORK_COLLECT_MS = 5000;
@@ -203,6 +204,9 @@ private:
   // Buffer management
   size_t waveformAllocated = 0;
   size_t artworkAllocated = 0;
+
+  // Startup timing
+  int64_t startupTime = 0;
 
   // Settings
   bool enabled = true;
@@ -1467,6 +1471,8 @@ public:
   void setup() {
     if (!enabled) return;
 
+    startupTime = esp_timer_get_time();
+
     if (udpStatus.listen(PORT_STATUS)) {
       udpStatus.onPacket([this](AsyncUDPPacket packet) { parseStatusPacket(packet); });
     }
@@ -1495,11 +1501,24 @@ public:
   void loop() {
     if (!enabled) return;
 
+    bool startupComplete = (esp_timer_get_time() >= startupTime + STARTUP_DELAY_US);
+
+    // Keepalives must always run - CDJs need these every 1.5s
+    static unsigned long lastKA = 0;
+    if (millis() - lastKA > KEEPALIVE_INTERVAL_MS) {
+      sendKeepAlive();
+      lastKA = millis();
+    }
+
+    // Peer timeout checks are lightweight, keep them running
     static unsigned long lastPeerCheck = 0;
     if (millis() - lastPeerCheck > PEER_CHECK_INTERVAL_MS) {
       checkPeerTimeouts();
       lastPeerCheck = millis();
     }
+
+    // Delay heavy TCP operations until startup complete
+    if (!startupComplete) return;
 
     handleFetchStateMachine();
 
@@ -1553,13 +1572,6 @@ public:
     prolink_bars_elapsed_public = linkState.halfBarsElapsed / 2;
     prolink_bars_remaining_public = linkState.halfBarsRemaining / 2;
     prolink_connected_public = linkState.isMaster;
-
-    // Keepalive
-    static unsigned long lastKA = 0;
-    if (millis() - lastKA > KEEPALIVE_INTERVAL_MS) {
-      sendKeepAlive();
-      lastKA = millis();
-    }
   }
 
   void addToConfig(JsonObject& root) {
@@ -1629,9 +1641,9 @@ uint32_t getPioneerColorRGB(uint8_t colorIndex) {
 
 uint32_t getWaveformRawRGB(uint16_t index) {
   if (!prolink_waveform_data || index >= prolink_waveform_length) return 0;
-  
+
   WaveformPoint& wp = prolink_waveform_data[index];
-  
+
   if (altWaveformColors) return getPioneerColorRGB(wp.color);
 
   uint8_t low = wp.b, mid = wp.g, high = wp.r;

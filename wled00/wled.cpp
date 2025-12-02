@@ -639,12 +639,7 @@ void background_loop_nonblocking(void* pvParameters) {
   }
 }
 
-void WLED::loop() {
-  static bool raised_priority = true;
-  if (!raised_priority) {
-    vTaskPrioritySet(NULL, configMAX_PRIORITIES - 9);
-    raised_priority = true;
-  }
+void WLED::loop() { // loopTask
   #ifdef WLED_DEBUG
   // esp_log_level_set("*",ESP_LOG_VERBOSE);
   static unsigned long maxUsermodMillis = 0;
@@ -1482,9 +1477,9 @@ void WLED::setup() {
     "BG_Blocking",     // Name
     24000,            // Stack size in words
     NULL,             // Parameters
-    24,                // Priority
+    1,                // Priority
     NULL,             // Task handle (optional)
-    1                 // Core ID (0 or 1)
+    0                 // Core ID (0 or 1)
   );
 
   xTaskCreatePinnedToCore(
@@ -1492,9 +1487,9 @@ void WLED::setup() {
     "Background",     // Name
     24000,            // Stack size in words
     NULL,             // Parameters
-    24,                // Priority
+    1,                // Priority
     NULL,             // Task handle (optional)
-    1                 // Core ID (0 or 1)
+    0                 // Core ID (0 or 1)
   );
 
   //#endif
@@ -1746,6 +1741,7 @@ void WLED::initInterfaces()
     ddp.begin(false, DDP_DEFAULT_PORT);
     if (udpConnected && udpRgbPort != udpPort) udpRgbConnected = rgbUdp.begin(udpRgbPort);
   }
+  vTaskDelay(pdMS_TO_TICKS(500));
   interfacesInited = true;
   wasConnected = true;
 }
