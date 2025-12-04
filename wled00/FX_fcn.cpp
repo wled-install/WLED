@@ -1816,7 +1816,11 @@ void WS2812FX::service() {
   now = nowUp + timebase;
   unsigned long elapsed = nowUp - _lastServiceShow;
   //if (_suspend) return;
+  
+  #ifndef WLED_USE_ETHERNET_ONLY
   if (elapsed < 2) return;                                                       // keep wifi alive
+  #endif
+
   if ( !_triggered && (_targetFps != FPS_UNLIMITED) && (_targetFps != FPS_UNLIMITED_AC)) {
     if (elapsed < MIN_SHOW_DELAY) return;                                        // WLEDMM too early for service - delivers higher fps
   }

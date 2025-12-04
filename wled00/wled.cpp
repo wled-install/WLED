@@ -648,8 +648,11 @@ void WLED::loop() { // loopTask
   static uint16_t avgStripMillis = 0;
   #endif
 
-  if (!interfacesInited || strip.getBrightness() == 0) delay(10); // TroyHacks: burn some loop in case there's nothing else to do.
-
+  if (!interfacesInited || strip.getBrightness() == 0) {
+    taskYIELD();  // Just yield, don't sleep
+    return;  // Skip the rest of the loop
+  }
+  
   if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
 
     #ifdef WLED_DEBUG
@@ -750,7 +753,7 @@ void WLED::loop() { // loopTask
   esp_task_wdt_reset();
   #endif
 
-  vTaskDelay(1);
+  // vTaskDelay(1);
 
 } // end main loop
   
