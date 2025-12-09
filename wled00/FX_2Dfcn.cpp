@@ -31,6 +31,13 @@ void WS2812FX::setUpMatrix() {
       }
     }
 
+    uint32_t candidateSize = Segment::maxWidth * Segment::maxHeight;
+
+    // only update if larger than current
+    if (candidateSize > ledmapMaxSize) {
+      ledmapMaxSize = candidateSize;
+    }
+
     // safety check
     if (Segment::maxWidth <= 1 || Segment::maxHeight <= 1) {
       DEBUG_PRINTF("2D Bounds error. %d x %d\n", Segment::maxWidth, Segment::maxHeight);
@@ -43,7 +50,7 @@ void WS2812FX::setUpMatrix() {
       return;
     }
 
-    USER_PRINTF("setUpMatrix %d x %d\n", Segment::maxWidth, Segment::maxHeight);
+    USER_PRINTF("setUpMatrix: %d x %d", Segment::maxWidth, Segment::maxHeight);
 
     // Check if mapping table is necessary
     bool needLedMap = (loadedLedmap > 0);
@@ -71,7 +78,7 @@ void WS2812FX::setUpMatrix() {
       uint32_t size = max(ledmapMaxSize, uint32_t(Segment::maxWidth * Segment::maxHeight));
 
       if (size > customMappingTableSize) {
-        USER_PRINTF("setUpMatrix customMappingTable alloc %u from %u\n", size, customMappingTableSize);
+        USER_PRINTF("setUpMatrix: customMappingTable alloc %u from %u\n", size, customMappingTableSize);
 
         if (customMappingTable != nullptr) {
           customMappingTable = (uint32_t*)reallocf(customMappingTable, sizeof(uint32_t) * size);
@@ -163,7 +170,7 @@ void WS2812FX::setUpMatrix() {
         if (isIdentity) {
           free(customMappingTable);
           customMappingTable = nullptr;
-          USER_PRINTF("customMappingTable is identity - dropping %u bytes.\n", customMappingTableSize * sizeof(uint32_t));
+          USER_PRINTF("setUpMatrix: customMappingTable is identity - dropping %u bytes.\n", customMappingTableSize * sizeof(uint32_t));
           customMappingTableSize = 0;
           customMappingSize = 0;
           loadedLedmap = 0;
@@ -173,7 +180,7 @@ void WS2812FX::setUpMatrix() {
         // Memory allocation error
         customMappingTableSize = 0;
         customMappingSize = 0;
-        USER_PRINTLN(F("Ledmap alloc error."));
+        USER_PRINTLN(F("setUpMatrix: customMappingTable alloc error."));
         errorFlag = ERR_LOW_MEM;
         isMatrix = false;
         panels = 0;

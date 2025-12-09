@@ -114,11 +114,7 @@ void Segment::allocLeds() {
   if ((size > 0) && (!ledsrgb || size > ledsrgbSize)) {    //softhack dont allocate zero bytes
     USER_PRINTF("allocLeds (%d,%d to %d,%d), %u from %u\n", start, startY, stop, stopY, size, ledsrgb?ledsrgbSize:0);
     if (ledsrgb) free(ledsrgb);   // we need a bigger buffer, so free the old one first
-    #if defined(ARDUINO_ARCH_ESP32)
     ledsrgb = (CRGB*) heap_caps_calloc_prefer(size, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
-    #else
-    ledsrgb = (CRGB*)calloc(size, 1);
-    #endif
     ledsrgbSize = ledsrgb?size:0;
     if (ledsrgb == nullptr) {
       USER_PRINTLN("allocLeds failed!!");
@@ -1676,13 +1672,6 @@ void WS2812FX::enumerateLedmaps() {
     char fileName[33] = {'\0'};       // WLEDMM ensure termination
     snprintf_P(fileName, sizeof(fileName), PSTR("/ledmap%d.json"), i);
     bool isFile = WLED_FS.exists(fileName);
-
-    #ifndef ESP8266
-    if (ledmapNames[i-1]) { //clear old name
-      delete[] ledmapNames[i-1];
-      ledmapNames[i-1] = nullptr;
-    }
-    #endif
 
     if (isFile) {
       ledMaps |= 1 << i;
