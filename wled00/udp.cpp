@@ -1,4 +1,6 @@
 #include "wled.h"
+#include "lwip/udp.h"
+#include "lwip/ip_addr.h"
 
 /*
  * UDP sync notifier / Realtime / Hyperion / TPM2.NET
@@ -624,38 +626,44 @@ void sendSysInfoUDP()
 
 
 /*********************************************************************************************\
- * Art-Net, DDP, E131 output - work in progress
+ * Art-Net, DDP, E1.31 output
 \*********************************************************************************************/
 
-#define DDP_HEADER_LEN 10
-#define DDP_SYNCPACKET_LEN 10
+// Protocol constants
+#define DDP_HEADER_LEN          10
+#define DDP_MAX_DATALEN         1440  // Max payload per packet (480 RGB or 360 RGBW pixels)
 
-#define DDP_FLAGS1_VER 0xc0  // version mask
-#define DDP_FLAGS1_VER1 0x40 // version=1
-#define DDP_FLAGS1_PUSH 0x01
-#define DDP_FLAGS1_QUERY 0x02
-#define DDP_FLAGS1_REPLY 0x04
-#define DDP_FLAGS1_STORAGE 0x08
-#define DDP_FLAGS1_TIME 0x10
+#define E131_HEADER_LEN         126
+#define E131_MAX_DATALEN        512   // DMX universe limit
 
-#define DDP_ID_DISPLAY 1
-#define DDP_ID_CONFIG 250
-#define DDP_ID_STATUS 251
+#define ARTNET_HEADER_LEN       18
+#define ARTNET_MAX_DATALEN      512   // DMX universe limit
 
-// 1440 channels per packet
-#define DDP_CHANNELS_PER_PACKET 1440 // 480 leds
+// DDP flags
+#define DDP_FLAGS1_VER          0xc0
+#define DDP_FLAGS1_VER1         0x40
+#define DDP_FLAGS1_PUSH         0x01
+#define DDP_FLAGS1_QUERY        0x02
+#define DDP_FLAGS1_REPLY        0x04
+#define DDP_FLAGS1_STORAGE      0x08
+#define DDP_FLAGS1_TIME         0x10
 
-//
-// Send real time UDP updates to the specified client
-//
-// type   - protocol type (0=DDP, 1=E1.31, 2=ArtNet)
-// client - the IP address to send to
-// length - the number of pixels
-// buffer - a buffer of at least length*4 bytes long
-// isRGBW - true if the buffer contains 4 components per pixel
+#define DDP_ID_DISPLAY          1
+#define DDP_ID_CONFIG           250
+#define DDP_ID_STATUS           251
 
-static       size_t sequenceNumber = 0; // this needs to be shared across all outputs
-static const byte   ART_NET_HEADER[12] PROGMEM = {0x41,0x72,0x74,0x2d,0x4e,0x65,0x74,0x00,0x00,0x50,0x00,0x0e};
+// Direct ip4_addr_t creation for E1.31 multicast
+static inline void e131MulticastAddr(uint16_t universe, ip4_addr_t* addr) {
+  IP4_ADDR(addr, 239, 255, (universe >> 8) & 0xFF, universe & 0xFF);
+}
+
+// For sending packets (still need IPAddress)
+static inline IPAddress e131MulticastIP(uint16_t universe) {
+  return IPAddress(239, 255, (universe >> 8) & 0xFF, universe & 0xFF);
+}
+
+static       size_t sequenceNumber = 0;
+static const byte   ART_NET_HEADER[12] PROGMEM = { 0x41,0x72,0x74,0x2d,0x4e,0x65,0x74,0x00,0x00,0x50,0x00,0x0e };
 
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 extern "C" {
@@ -663,366 +671,488 @@ extern "C" {
 }
 #endif
 
-uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(uint8_t type, IPAddress client, uint32_t length, uint8_t* buffer_in, uint8_t bri, bool isRGBW, uint8_t outputs, uint16_t leds_per_output, uint8_t fps_limit, uint8_t color_order) {
+// ═══════════════════════════════════════════════════════════════════════════════
+// Shared pixel processing - handles brightness, color order, and pixel remapping
+// ═══════════════════════════════════════════════════════════════════════════════
+static inline void IRAM_ATTR processPixelData(
+  uint8_t* dest,
+  const uint8_t* src,
+  uint_fast16_t packetSize,
+  uint_fast32_t bufferOffset,
+  uint8_t bri,
+  bool isRGBW,
+  uint8_t color_order
+) {
+  const uint8_t bpp = isRGBW ? 4 : 3;
 
-  if (!(apActive || interfacesInited) || !client[0] || !length) return 1;  // network not initialised or dummy/unset IP address  031522 ajn added check for ap
+  #ifdef WLEDMM_REMAP_AT_OUTPUT
+  uint32_t* mappingTable = strip.getCustomMappingTable();
+  const bool hasMappingTable = (mappingTable != nullptr);
+  const bool needsColorReorder = (color_order != COL_ORDER_RGB);
+  const bool fullBrightness = (bri == 255);
 
-  // For some reason, this is faster outside of the case block...
-  //
-#ifdef ESP32
-  static byte* packet_buffer = (byte*)heap_caps_calloc_prefer(530, sizeof(byte), 2, MALLOC_CAP_DEFAULT, MALLOC_CAP_SPIRAM);
-#else
-  static byte* packet_buffer = (byte*)calloc(530, sizeof(byte));
-#endif
-  if (packet_buffer[0] != 0x41) memcpy(packet_buffer, ART_NET_HEADER, 12); // copy in the Art-Net header if it isn't there already
+  // Color order lookup
+  uint8_t r_idx = 0, g_idx = 1, b_idx = 2;
+  switch (color_order) {
+  case COL_ORDER_GRB: r_idx = 1; g_idx = 0; b_idx = 2; break;
+  case COL_ORDER_BRG: r_idx = 1; g_idx = 2; b_idx = 0; break;
+  case COL_ORDER_RBG: r_idx = 0; g_idx = 2; b_idx = 1; break;
+  case COL_ORDER_BGR: r_idx = 2; g_idx = 1; b_idx = 0; break;
+  case COL_ORDER_GBR: r_idx = 1; g_idx = 0; b_idx = 2; break;
+  default: break;  // RGB
+  }
 
-  switch (type) {
-  case 0: // DDP
-  {
-    WiFiUDP ddpUdp;
-
-    // calculate the number of UDP packets we need to send
-    size_t channelCount = length * (isRGBW ? 4 : 3); // 1 channel for every R,G,B value
-    size_t packetCount = ((channelCount - 1) / DDP_CHANNELS_PER_PACKET) + 1;
-
-    // there are 3 channels per RGB pixel
-    uint32_t channel = 0; // TODO: allow specifying the start channel
-    // the current position in the buffer
-    size_t bufferOffset = 0;
-
-    for (size_t currentPacket = 0; currentPacket < packetCount; currentPacket++) {
-      if (sequenceNumber > 15) sequenceNumber = 0;
-
-      if (!ddpUdp.beginPacket(client, DDP_DEFAULT_PORT)) {  // port defined in ESPAsyncE131.h
-        DEBUG_PRINTLN(F("DDP WiFiUDP.beginPacket returned an error"));
-        return 1; // problem
+  // Fast path: no mapping, no color reorder
+  if (!hasMappingTable && !needsColorReorder) {
+    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    p4_mul16x16(dest, &bri, (packetSize >> 4) + 1, (uint8_t*)(src + bufferOffset));
+    return;
+    #else
+    if (fullBrightness) {
+      memcpy(dest, src + bufferOffset, packetSize);
+    } else {
+      for (uint_fast16_t i = 0; i < packetSize; i += bpp) {
+        dest[i] = (src[bufferOffset + i] * bri) >> 8;
+        dest[i + 1] = (src[bufferOffset + i + 1] * bri) >> 8;
+        dest[i + 2] = (src[bufferOffset + i + 2] * bri) >> 8;
+        if (isRGBW) dest[i + 3] = (src[bufferOffset + i + 3] * bri) >> 8;
       }
+    }
+    return;
+    #endif
+  }
 
-      // the amount of data is AFTER the header in the current packet
-      size_t packetSize = DDP_CHANNELS_PER_PACKET;
+  // Slow path: mapping and/or color reorder
+  const uint16_t numPixels = packetSize / bpp;
+  const uint32_t startPixel = bufferOffset / bpp;
 
-      uint8_t flags = DDP_FLAGS1_VER1;
-      if (currentPacket == (packetCount - 1U)) {
-        // last packet, set the push flag
-          // TODO: determine if we want to send an empty push packet to each destination after sending the pixel data
-          flags = DDP_FLAGS1_VER1 | DDP_FLAGS1_PUSH;
-          if (channelCount % DDP_CHANNELS_PER_PACKET) {
-            packetSize = channelCount % DDP_CHANNELS_PER_PACKET;
-          }
-        }
+  for (uint_fast16_t i = 0; i < numPixels; ++i) {
+    const uint8_t* pixel;
+    if (hasMappingTable) {
+      pixel = src + (mappingTable[startPixel + i] * bpp);
+    } else {
+      pixel = src + bufferOffset + (i * bpp);
+    }
 
-        // write the header
-        /*0*/ddpUdp.write(flags);
-        /*1*/ddpUdp.write(sequenceNumber++ & 0x0F); // sequence may be unnecessary unless we are sending twice (as requested in Sync settings)
-        /*2*/ddpUdp.write(isRGBW ?  DDP_TYPE_RGBW32 : DDP_TYPE_RGB24);
-        /*3*/ddpUdp.write(DDP_ID_DISPLAY);
-        // data offset in bytes, 32-bit number, MSB first
-        /*4*/ddpUdp.write(0xFF & (channel >> 24));
-        /*5*/ddpUdp.write(0xFF & (channel >> 16));
-        /*6*/ddpUdp.write(0xFF & (channel >>  8));
-        /*7*/ddpUdp.write(0xFF & (channel      ));
-        // data length in bytes, 16-bit number, MSB first
-        /*8*/ddpUdp.write(0xFF & (packetSize >> 8));
-        /*9*/ddpUdp.write(0xFF & (packetSize     ));
+    if (fullBrightness) {
+      dest[r_idx] = pixel[0];
+      dest[g_idx] = pixel[1];
+      dest[b_idx] = pixel[2];
+      if (isRGBW) dest[3] = pixel[3];
+    } else {
+      dest[r_idx] = (pixel[0] * bri) >> 8;
+      dest[g_idx] = (pixel[1] * bri) >> 8;
+      dest[b_idx] = (pixel[2] * bri) >> 8;
+      if (isRGBW) dest[3] = (pixel[3] * bri) >> 8;
+    }
+    dest += bpp;
+  }
 
-        // write the colors, the write write(const uint8_t *buffer, size_t size)
-        // function is just a loop internally too
-        for (size_t i = 0; i < packetSize; i += (isRGBW?4:3)) {
-          ddpUdp.write(scale8(buffer_in[bufferOffset++], bri)); // R
-          ddpUdp.write(scale8(buffer_in[bufferOffset++], bri)); // G
-          ddpUdp.write(scale8(buffer_in[bufferOffset++], bri)); // B
-          if (isRGBW) ddpUdp.write(scale8(buffer_in[bufferOffset++], bri)); // W
-        }
-
-        if (!ddpUdp.endPacket()) {
-          DEBUG_PRINTLN(F("DDP WiFiUDP.endPacket returned an error"));
-          return 1; // problem
-        }
-
-        channel += packetSize;
-      }
-    } break;
-
-    case 1: //E1.31
-    {
-    } break;
-    case 2: //Art-Net
-    {
-      if (length != outputs * leds_per_output) {
-        delay(100);
-        USER_PRINTLN("Art-Net isn't set correctly. Check length, outputs, and LEDs per output.");
-        return 1;
-      }
-      static unsigned long artnetlimiter = micros() + (1000000 / fps_limit);
-
-      long time_to_wait = artnetlimiter - micros();
-
-      if (time_to_wait > 0) {
-
-        if (ArtNetSkipFrame) {
-          return 0;
-        }
-
-        // If we have a big gap (>2ms), yield to OS to keep WiFi/Net stack happy
-        // This prevents the "Oversleeping" issue of vTaskDelay
-        while (time_to_wait > 2000) {
-          vTaskDelay(1);
-          time_to_wait = artnetlimiter - micros();
-        }
-
-        // If we have a tiny gap (<2ms), just burn cycles (Busy Wait)
-        // This is extremely precise and ensures we hit 45 FPS exactly
-        while (artnetlimiter > micros()) {
-          asm volatile("nop");
-        }
-      }
-
-      /*
-      WLED rendering Art-Net data considers itself to be 1 hardware output with many universes - but
-      many Art-Net controllers like the H807SA can be manually set to "X universes per output" or in
-      some cases "X channels per port" - which is the same thing, just expressed differently.
-
-      We need to know the LEDs per output so we can break the pixel data across physically attached universes.
-
-      The H807SA obeys the "510 channels for RGB" rule like WLED and xLights - some other controllers do not care,
-      but we're not supporting those here. If you run into one of these, override ARTNET_CHANNELS_PER_PACKET to 512.
-      */
-
-      #ifdef ARTNET_TIMER
-      uint_fast16_t datatotal = 0;
-      uint_fast16_t packetstotal = 0;
-      #endif
-      unsigned long timer = micros();
-
-      static AsyncUDP artnetudp;// AsyncUDP so we can just blast packets.
-
-      const uint_fast16_t ARTNET_CHANNELS_PER_PACKET = isRGBW ? 512 : 510; // 512/4=128 RGBW LEDs, 510/3=170 RGB LEDs
-
-      #ifdef WLEDMM_REMAP_AT_OUTPUT
-      uint32_t* mappingTable = strip.getCustomMappingTable();
-      uint32_t mappingTableSize = strip.getCustomMappingTableSize();
-      const uint8_t my_bytes_per_pixel = isRGBW ? 4 : 3;
-      const bool hasMappingTable = (mappingTable != nullptr);
-      const bool needsColorReorder = (color_order != COL_ORDER_RGB);
-      const bool fullBrightness = (bri == 255);
-
-      // Pre-build color order LUT (do this once at setup, not per frame)
-      // For now, inline the offsets based on color_order
-      uint8_t r_idx, g_idx, b_idx;
-      switch (color_order) {
-      case COL_ORDER_GRB: r_idx = 1; g_idx = 0; b_idx = 2; break;
-      case COL_ORDER_RGB: default: r_idx = 0; g_idx = 1; b_idx = 2; break;
-      case COL_ORDER_BRG: r_idx = 1; g_idx = 2; b_idx = 0; break;
-      case COL_ORDER_RBG: r_idx = 0; g_idx = 2; b_idx = 1; break;
-      case COL_ORDER_BGR: r_idx = 2; g_idx = 1; b_idx = 0; break;
-      case COL_ORDER_GBR: r_idx = 1; g_idx = 0; b_idx = 2; break;
-      }
-      #endif
-
-      uint_fast32_t bufferOffset = 0;
-      uint_fast16_t hardware_output_universe = 0;
-
-      sequenceNumber++;
-
-      if (sequenceNumber == 0 || sequenceNumber > 255) sequenceNumber = 1;
-
-      for (uint_fast16_t hardware_output = 0; hardware_output < outputs; hardware_output++) {
-
-        if (bufferOffset > length * (isRGBW ? 4 : 3)) {
-          // This stop is reached if we don't have enough pixels for the defined Art-Net output.
-          return 1; // stop when we hit end of LEDs
-        }
-
-        uint_fast16_t channels_remaining = leds_per_output * (isRGBW ? 4 : 3);
-
-        while (channels_remaining > 0) {
-
-          uint_fast16_t packetSize = ARTNET_CHANNELS_PER_PACKET;
-
-          if (channels_remaining < ARTNET_CHANNELS_PER_PACKET) {
-            packetSize = channels_remaining;
-            channels_remaining = 0;
-          } else {
-            channels_remaining -= packetSize;
-          }
-
-          #ifdef ARTNET_TIMER
-          packetstotal++;
-          // Add Layer 2 Overhead:
-          // packetSize + 18 (ArtNet) + 8 (UDP) + 20 (IP) + 14 (Eth) + 4 (FCS) = +46 bytes
-          datatotal += packetSize + 18 + 46;
-          #endif
-
-          // set the parts of the Art-Net packet header that change:
-          packet_buffer[12] = sequenceNumber;
-          // packet_buffer[13] = 0; // "The physical input port from which DMX512 data was input. This field is used by the receiving device to discriminate between packets with identical Port-Address that have been generated by different input ports and so need to be merged."
-          packet_buffer[14] = hardware_output_universe;
-          packet_buffer[15] = hardware_output_universe >> 8; // needed for universes > 255
-          packet_buffer[16] = packetSize >> 8;
-          packet_buffer[17] = packetSize;
-
-          #ifdef ARTNET_TESTING_ZEROS
-          bri = 0; // Set all brightness to 0 but keep all calculations the same and keep sending packets.
-          #endif
-
-          #ifdef WLEDMM_REMAP_AT_OUTPUT
-
-          // Fast path: no mapping, no color reorder - use SIMD or memcpy
-          if (!hasMappingTable && !needsColorReorder) {
-            #if defined(CONFIG_IDF_TARGET_ESP32P4)
-            p4_mul16x16(packet_buffer + 18, &bri, (packetSize >> 4) + 1, buffer_in + bufferOffset);
-            #else
-            if (fullBrightness) {
-              memcpy(packet_buffer + 18, buffer_in + bufferOffset, packetSize);
-            } else {
-              for (uint_fast16_t i = 0; i < packetSize; i += my_bytes_per_pixel) {
-                packet_buffer[i + 18] = (buffer_in[bufferOffset + i] * bri) >> 8;
-                packet_buffer[i + 19] = (buffer_in[bufferOffset + i + 1] * bri) >> 8;
-                packet_buffer[i + 20] = (buffer_in[bufferOffset + i + 2] * bri) >> 8;
-                if (isRGBW) packet_buffer[i + 21] = (buffer_in[bufferOffset + i + 3] * bri) >> 8;
-              }
-            }
-            #endif
-          } else {
-
-            uint16_t packetNumPixels = packetSize / my_bytes_per_pixel;
-            uint32_t startPixel = bufferOffset / my_bytes_per_pixel;
-            uint8_t* dest = packet_buffer + 18;
-
-            if (fullBrightness) {
-              if (hasMappingTable) {
-                for (uint_fast16_t i = 0; i < packetNumPixels; ++i) {
-                  uint32_t mappedIdx = mappingTable[startPixel + i];
-                  const uint8_t* src = buffer_in + (mappedIdx * my_bytes_per_pixel);
-                  dest[r_idx] = src[0];
-                  dest[g_idx] = src[1];
-                  dest[b_idx] = src[2];
-                  if (isRGBW) dest[3] = src[3];
-                  dest += my_bytes_per_pixel;
-                }
-              } else {
-                // No mapping, just color reorder
-                const uint8_t* src = buffer_in + bufferOffset;
-                for (uint_fast16_t i = 0; i < packetNumPixels; ++i) {
-                  dest[r_idx] = src[0];
-                  dest[g_idx] = src[1];
-                  dest[b_idx] = src[2];
-                  if (isRGBW) dest[3] = src[3];
-                  dest += my_bytes_per_pixel;
-                  src += my_bytes_per_pixel;
-                }
-              }
-            } else {
-              if (hasMappingTable) {
-                for (uint_fast16_t i = 0; i < packetNumPixels; ++i) {
-                  uint32_t mappedIdx = mappingTable[startPixel + i];
-                  const uint8_t* src = buffer_in + (mappedIdx * my_bytes_per_pixel);
-                  dest[r_idx] = (src[0] * bri) >> 8;
-                  dest[g_idx] = (src[1] * bri) >> 8;
-                  dest[b_idx] = (src[2] * bri) >> 8;
-                  if (isRGBW) dest[3] = (src[3] * bri) >> 8;
-                  dest += my_bytes_per_pixel;
-                }
-              } else {
-                const uint8_t* src = buffer_in + bufferOffset;
-                for (uint_fast16_t i = 0; i < packetNumPixels; ++i) {
-                  dest[r_idx] = (src[0] * bri) >> 8;
-                  dest[g_idx] = (src[1] * bri) >> 8;
-                  dest[b_idx] = (src[2] * bri) >> 8;
-                  if (isRGBW) dest[3] = (src[3] * bri) >> 8;
-                  dest += my_bytes_per_pixel;
-                  src += my_bytes_per_pixel;
-                }
-              }
-            }
-          }
-          #else
-          uint8_t* buffer = buffer_in;
-          #if defined(CONFIG_IDF_TARGET_ESP32P4)
-          p4_mul16x16(packet_buffer + 18, &bri, (packetSize >> 4) + 1, buffer + bufferOffset);
-          #else
-          if (bri == 255) { // speed hack - don't adjust brightness if full brightness
-            memcpy(packet_buffer + 18, buffer + bufferOffset, packetSize);
-          } else {
-            for (uint_fast16_t i = 0; i < packetSize; i += (isRGBW ? 4 : 3)) {
-              // set brightness values in the packet - seems slightly faster than scale8()?
-              // for some reason, doing 3 (or 4) at a time is 200 micros faster than 1 at a time.
-              packet_buffer[i + 18] = (buffer_in[bufferOffset + i] * bri) >> 8;
-              packet_buffer[i + 19] = (buffer_in[bufferOffset + i + 1] * bri) >> 8;
-              packet_buffer[i + 20] = (buffer_in[bufferOffset + i + 2] * bri) >> 8;
-              if (isRGBW) packet_buffer[i + 21] = (buffer_in[bufferOffset + i + 3] * bri) >> 8;
-            }
-          }
-          #endif
-          #endif
-
-          bufferOffset += packetSize;
-
-          if (!artnetudp.writeTo(packet_buffer, packetSize + 18, client, ARTNET_DEFAULT_PORT)) {
-            DEBUG_PRINTLN(F("Art-Net artnetudp.writeTo() returned an error"));
-            return 1; // borked
-          }
-          hardware_output_universe++;
-        }
-      }
-
-      // Send Art-Net sync. Just reuse the packet and adjust.
-      // This should get re-written on the next run.
-      // After the first sync packet, and assuming 1 sync packet every 4 
-      // seconds at least, should keep Art-Net nodes in synchronous mode.
-
-      // This is very much untested and generally not needed unless you 
-      // have several Art-Net devices being broadcast t  , and should only
-      // be called in that situation. 
-
-      #ifdef ARTNET_SYNC_ENABLED
-
-        // This block sends Art-Net "ArtSync" packets. Can't do this with AsyncUDP because it doesn't support source port binding.
-        // Tested on Art-Net qualifier software but not on real hardware with known support for ArtSync.
-        // Doesn't seem to do anything on my gear, so it's disabled. 
-
-        // packet_buffer[8]  = 0x00; // ArtSync opcode low byte (low byte is same as ArtDmx, 0x00)
-      packet_buffer[9] = 0x52; // ArtSync opcode high byte
-      packet_buffer[12] = 0x00; // Aux1 - Transmit as 0. This is normally the sequence number in ArtDMX packets.
-      // packet_buffer[13] = 0x00; // Aux2 - Transmit as 0 - this should be 0 anyway in the packet already
-
-      #ifdef ARTNET_SYNC_STRICT
-      WiFiUDP artnetsync;
-      artnetsync.begin(ETH.localIP(), ARTNET_DEFAULT_PORT);
-      artnetsync.beginPacket(IPADDR_BROADCAST, ARTNET_DEFAULT_PORT);
-      artnetsync.write(packet_buffer, 14);
-
-      if (!artnetsync.endPacket()) {
-        DEBUG_PRINTLN(F("Art-Net Sync Broadcast Strict returned an error"));
-        return 1; // borked
-        }
-        #else
-        if (!artnetudp.broadcastTo(packet_buffer,14,ARTNET_DEFAULT_PORT)) {
-          DEBUG_PRINTLN(F("Art-Net Sync Broadcast returned an error"));
-          return 1; // borked
-        }
-        #endif
-        packet_buffer[9]  = ART_NET_HEADER[9];  // reset ArtSync opcode high byte
-
-        #ifdef ARTNET_TIMER
-        packetstotal++;
-        datatotal += packetSize + 18 + 46;
-        #endif
-      
-      #endif
-
-      artnetlimiter = timer + (1000000/fps_limit);
-
-      // This is the proper stop if pixels = Art-Net output.
-      
-      #ifdef ARTNET_TIMER
-      float mbps = (float)(datatotal * 8) / (float)(micros() - timer);
-      // the "micros()" calc is just to limit the print to a more random debug output so it doesn't overwhelm the terminal
-      if (micros() % 100 < 3)USER_PRINTF("UDP for %u pixels took %lu micros. %u data in %u total packets. %2.2f mbit/sec at %u FPS.\n", length, micros() - timer, datatotal, packetstotal, mbps, strip.getFps());
-      #endif
-    
-      break;
+  #else
+  // No WLEDMM_REMAP_AT_OUTPUT - simple path
+  #if defined(CONFIG_IDF_TARGET_ESP32P4)
+  p4_mul16x16(dest, &bri, (packetSize >> 4) + 1, (uint8_t*)(src + bufferOffset));
+  #else
+  if (bri == 255) {
+    memcpy(dest, src + bufferOffset, packetSize);
+  } else {
+    for (uint_fast16_t i = 0; i < packetSize; i += bpp) {
+      dest[i] = (src[bufferOffset + i] * bri) >> 8;
+      dest[i + 1] = (src[bufferOffset + i + 1] * bri) >> 8;
+      dest[i + 2] = (src[bufferOffset + i + 2] * bri) >> 8;
+      if (isRGBW) dest[i + 3] = (src[bufferOffset + i + 3] * bri) >> 8;
     }
   }
+  #endif
+  #endif
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Main broadcast function
+// type: 0=DDP, 1=E1.31, 2=Art-Net
+// ═══════════════════════════════════════════════════════════════════════════════
+uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
+  uint8_t type,
+  IPAddress client,
+  uint32_t length,
+  uint8_t* buffer_in,
+  uint8_t bri,
+  bool isRGBW,
+  uint8_t outputs,
+  uint16_t leds_per_output,
+  uint8_t fps_limit,
+  uint8_t color_order,
+  bool e131_multicast
+) {
+  if (fps_limit < 1 || fps_limit > 120) fps_limit = 60;
+
+  if (!(apActive || interfacesInited) || !length) return 1;
+  if (!e131_multicast && !client[0]) return 1;  // Unicast requires valid IP
+
+  const uint8_t bpp = isRGBW ? 4 : 3;
+  const size_t totalChannels = length * bpp;
+  const char* protocolName = (type == 0) ? "DDP" : (type == 1) ? "E1.31" : "Art-Net";
+
+  // Validate output configuration
+  if (length != outputs * leds_per_output) {
+    delay(100);
+    USER_PRINTF("%s config mismatch: length=%u but outputs=%u * leds_per_output=%u = %u\n",
+      protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
+    return 1;
+  }
+
+  // Packet buffer sized for DDP (largest: 10 + 1440 = 1450 bytes)
+  #ifdef ESP32
+  static byte* packet_buffer = (byte*)heap_caps_calloc_prefer(DDP_HEADER_LEN + DDP_MAX_DATALEN, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT | MALLOC_CAP_DMA, MALLOC_CAP_DEFAULT, MALLOC_CAP_SPIRAM);
+  #else
+  static byte* packet_buffer = (byte*)calloc(DDP_HEADER_LEN + DDP_MAX_DATALEN, sizeof(byte));
+  #endif
+
+  // FPS limiting
+  static unsigned long frame_limiter = 0;
+  if (fps_limit > 0) {
+    long time_to_wait = frame_limiter - micros();
+    if (time_to_wait > 0) {
+      if (RealtimeSkipFrame) return 0;  // Frame skip for all protocols
+
+      while (time_to_wait > 2000) {
+        vTaskDelay(1);
+        time_to_wait = frame_limiter - micros();
+      }
+      while ((long)(frame_limiter - micros()) > 0) {
+        // asm volatile("nop");
+      }
+    }
+  }
+
+  unsigned long timer = micros();
+
+  #ifdef REALTIME_OUTPUT_TIMER
+  uint_fast32_t datatotal = 0;
+  uint_fast16_t packetstotal = 0;
+  uint16_t headerLen = (type == 0) ? DDP_HEADER_LEN : (type == 1) ? E131_HEADER_LEN : ARTNET_HEADER_LEN;
+  #endif
+
+  switch (type) {
+
+  // ═══════════════════════════════════════════════════════════════════
+  // DDP - Distributed Display Protocol
+  // Efficiency: 94.9% | Header: 10 bytes | Max payload: 1440 bytes
+  // ═══════════════════════════════════════════════════════════════════
+  case 0: {
+    static AsyncUDP ddpUdp;
+
+    const uint16_t maxChannels = (DDP_MAX_DATALEN / bpp) * bpp;
+    const size_t packetCount = ((totalChannels - 1) / maxChannels) + 1;
+
+    uint32_t channel = 0;
+    size_t bufferOffset = 0;
+
+    sequenceNumber++;
+    if (sequenceNumber > 15) sequenceNumber = 1;
+
+    for (size_t pkt = 0; pkt < packetCount; pkt++) {
+      size_t remaining = totalChannels - bufferOffset;
+      size_t packetSize = (remaining < maxChannels) ? remaining : maxChannels;
+
+      uint8_t flags = DDP_FLAGS1_VER1;
+      if (pkt == packetCount - 1) flags |= DDP_FLAGS1_PUSH;
+
+      // DDP Header
+      packet_buffer[0] = flags;
+      packet_buffer[1] = sequenceNumber;
+      packet_buffer[2] = isRGBW ? DDP_TYPE_RGBW32 : DDP_TYPE_RGB24;
+      packet_buffer[3] = DDP_ID_DISPLAY;
+      packet_buffer[4] = (channel >> 24) & 0xFF;
+      packet_buffer[5] = (channel >> 16) & 0xFF;
+      packet_buffer[6] = (channel >> 8) & 0xFF;
+      packet_buffer[7] = channel & 0xFF;
+      packet_buffer[8] = (packetSize >> 8) & 0xFF;
+      packet_buffer[9] = packetSize & 0xFF;
+
+      processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in,
+        packetSize, bufferOffset, bri, isRGBW, color_order);
+
+      if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN,
+        client, DDP_DEFAULT_PORT)) {
+        DEBUG_PRINTLN(F("DDP writeTo error"));
+        return 1;
+      }
+
+      #ifdef REALTIME_OUTPUT_TIMER
+      packetstotal++;
+      datatotal += packetSize + DDP_HEADER_LEN + 46;  // +46 for UDP/IP/Eth overhead
+      #endif
+
+      bufferOffset += packetSize;
+      channel += packetSize;
+    }
+    break;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // E1.31 (sACN) - Streaming ACN
+  // Efficiency: 72.7% | Header: 126 bytes | Max payload: 512 bytes
+  // Supports unicast and multicast (239.255.x.x per universe)
+  // ═══════════════════════════════════════════════════════════════════
+  case 1: {
+    static AsyncUDP e131Udp;
+    static uint8_t e131_cid[16] = { 0 };
+    static bool cid_init = false;
+
+    // Multicast group management
+    static bool multicast_joined = false;
+    static uint16_t joined_start = 0, joined_count = 0;
+
+    if (!cid_init) {
+      uint8_t mac[6];
+      Network.localMAC(mac);
+      memcpy(e131_cid, mac, 6);
+      memcpy(e131_cid + 6, "WLED", 4);
+      cid_init = true;
+    }
+
+    const uint16_t maxChannels = isRGBW ? 512 : 510;
+    const size_t packetCount = ((totalChannels - 1) / maxChannels) + 1;
+
+    // Join/leave multicast groups as needed
+    if (e131_multicast) {
+      if (!multicast_joined || joined_start != 1 || joined_count != packetCount) {
+        ip4_addr_t mcast_addr;
+
+        for (uint16_t u = joined_start; u < joined_start + joined_count; u++) {
+          e131MulticastAddr(u, &mcast_addr);
+          igmp_leavegroup(IP4_ADDR_ANY4, &mcast_addr);
+        }
+        for (uint16_t u = 1; u <= packetCount; u++) {
+          e131MulticastAddr(u, &mcast_addr);
+          igmp_joingroup(IP4_ADDR_ANY4, &mcast_addr);
+        }
+        joined_start = 1;
+        joined_count = packetCount;
+        multicast_joined = true;
+      }
+    }
+
+    size_t bufferOffset = 0;
+    uint16_t universe = 1;
+
+    sequenceNumber = (sequenceNumber + 1) & 0xFF;
+    if (sequenceNumber == 0) sequenceNumber = 1;
+
+    // Build static E1.31 header portions
+    packet_buffer[0] = 0x00; packet_buffer[1] = 0x10;
+    packet_buffer[2] = 0x00; packet_buffer[3] = 0x00;
+    memcpy(packet_buffer + 4, "ASC-E1.17\0\0\0", 12);
+
+    packet_buffer[18] = 0x00; packet_buffer[19] = 0x00;
+    packet_buffer[20] = 0x00; packet_buffer[21] = 0x04;
+
+    memcpy(packet_buffer + 22, e131_cid, 16);
+
+    packet_buffer[40] = 0x00; packet_buffer[41] = 0x00;
+    packet_buffer[42] = 0x00; packet_buffer[43] = 0x02;
+
+    memset(packet_buffer + 44, 0, 64);
+    strcpy((char*)(packet_buffer + 44), "WLED");
+
+    packet_buffer[108] = 100;
+    packet_buffer[109] = 0x00; packet_buffer[110] = 0x00;
+    packet_buffer[112] = 0x00;
+
+    packet_buffer[117] = 0x02;
+    packet_buffer[118] = 0xA1;
+    packet_buffer[119] = 0x00; packet_buffer[120] = 0x00;
+    packet_buffer[121] = 0x00; packet_buffer[122] = 0x01;
+    packet_buffer[125] = 0x00;
+
+    for (size_t pkt = 0; pkt < packetCount; pkt++) {
+      size_t remaining = totalChannels - bufferOffset;
+      size_t packetSize = (remaining < maxChannels) ? remaining : maxChannels;
+
+      uint16_t rootLen = 110 + packetSize;
+      packet_buffer[16] = 0x70 | ((rootLen >> 8) & 0x0F);
+      packet_buffer[17] = rootLen & 0xFF;
+
+      uint16_t framingLen = 88 + packetSize;
+      packet_buffer[38] = 0x70 | ((framingLen >> 8) & 0x0F);
+      packet_buffer[39] = framingLen & 0xFF;
+
+      uint16_t dmpLen = 11 + packetSize;
+      packet_buffer[115] = 0x70 | ((dmpLen >> 8) & 0x0F);
+      packet_buffer[116] = dmpLen & 0xFF;
+
+      uint16_t propCount = packetSize + 1;
+      packet_buffer[123] = (propCount >> 8) & 0xFF;
+      packet_buffer[124] = propCount & 0xFF;
+
+      packet_buffer[111] = sequenceNumber;
+      packet_buffer[113] = (universe >> 8) & 0xFF;
+      packet_buffer[114] = universe & 0xFF;
+
+      processPixelData(packet_buffer + E131_HEADER_LEN, buffer_in,
+        packetSize, bufferOffset, bri, isRGBW, color_order);
+
+      IPAddress dest = e131_multicast ? e131MulticastIP(universe) : client;
+
+      if (!e131Udp.writeTo(packet_buffer, packetSize + E131_HEADER_LEN,
+        dest, E131_DEFAULT_PORT)) {
+        DEBUG_PRINTLN(F("E1.31 writeTo error"));
+        return 1;
+      }
+
+      #ifdef REALTIME_OUTPUT_TIMER
+      packetstotal++;
+      datatotal += packetSize + E131_HEADER_LEN + 46;
+      #endif
+
+      bufferOffset += packetSize;
+      universe++;
+    }
+
+    #ifdef E131_SYNC_ENABLED
+    if (e131_multicast && packetCount > 1) {
+      packet_buffer[20] = 0x00; packet_buffer[21] = 0x08;
+      packet_buffer[16] = 0x70; packet_buffer[17] = 33;
+      packet_buffer[38] = 0x70; packet_buffer[39] = 11;
+      packet_buffer[40] = 0x00; packet_buffer[41] = 0x00;
+      packet_buffer[42] = 0x00; packet_buffer[43] = 0x01;
+      packet_buffer[44] = sequenceNumber;
+      packet_buffer[45] = 0xF9; packet_buffer[46] = 0xFF;
+      packet_buffer[47] = 0x00; packet_buffer[48] = 0x00;
+
+      e131Udp.writeTo(packet_buffer, 49, e131MulticastAddress(63999), E131_DEFAULT_PORT);
+
+      #ifdef REALTIME_OUTPUT_TIMER
+      packetstotal++;
+      datatotal += 49 + 46;
+      #endif
+
+      packet_buffer[20] = 0x00; packet_buffer[21] = 0x04;
+      packet_buffer[42] = 0x00; packet_buffer[43] = 0x02;
+    }
+    #endif
+    break;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Art-Net (Optimized: Connected Mode)
+  // Efficiency: 85.9% | Header: 18 bytes | Max payload: 512 bytes
+  // ═══════════════════════════════════════════════════════════════════
+  case 2: {
+    // 1. Setup the socket
+    static AsyncUDP artnetUdp;
+    static bool isConnected = false;
+    static IPAddress lastClient = IPAddress(0, 0, 0, 0);
+
+    // If we haven't connected yet, OR the destination IP changed...
+    if (!isConnected || lastClient != client) {
+      // ...connect to the specific IP and Port ONCE.
+      if (artnetUdp.connect(client, ARTNET_DEFAULT_PORT)) {
+        isConnected = true;
+        lastClient = client;
+        DEBUG_PRINTLN(F("Art-Net Connected (Fast Mode)"));
+      } else {
+        return 1; // Failed to bind
+      }
+    }
+    // Initialize Art-Net header once
+    if (packet_buffer[0] != 'A') {
+      memcpy(packet_buffer, ART_NET_HEADER, 12);
+    }
+
+    const uint16_t maxChannels = isRGBW ? 512 : 510;
+
+    uint_fast32_t bufferOffset = 0;
+    uint_fast16_t universe = 0;
+
+    sequenceNumber = (sequenceNumber + 1) & 0xFF;
+    if (sequenceNumber == 0) sequenceNumber = 1;
+
+    for (uint_fast16_t output = 0; output < outputs; output++) {
+      uint_fast16_t channels_remaining = leds_per_output * bpp;
+
+      while (channels_remaining > 0) {
+        uint_fast16_t packetSize = (channels_remaining < maxChannels)
+          ? channels_remaining : maxChannels;
+        channels_remaining -= packetSize;
+
+        packet_buffer[12] = sequenceNumber;
+        packet_buffer[13] = 0;
+        packet_buffer[14] = universe & 0xFF;
+        packet_buffer[15] = (universe >> 8) & 0xFF;
+        packet_buffer[16] = (packetSize >> 8) & 0xFF;
+        packet_buffer[17] = packetSize & 0xFF;
+
+        #ifdef REALTIME_TESTING_ZEROS
+        uint8_t test_bri = 0;
+        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in,
+          packetSize, bufferOffset, test_bri, isRGBW, color_order);
+        #else
+        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in,
+          packetSize, bufferOffset, bri, isRGBW, color_order);
+        #endif
+
+        if (!artnetUdp.write(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+          USER_PRINTLN(F("Art-Net writeTo error"));
+          return 1;
+        }
+
+        #ifdef REALTIME_OUTPUT_TIMER
+        packetstotal++;
+        datatotal += packetSize + ARTNET_HEADER_LEN + 46;
+        #endif
+
+        bufferOffset += packetSize;
+        universe++;
+      }
+    }
+
+    #ifdef ARTNET_SYNC_ENABLED
+    packet_buffer[9] = 0x52;
+    packet_buffer[12] = 0x00;
+    #ifdef ARTNET_SYNC_STRICT
+    WiFiUDP artnetsync;
+    artnetsync.begin(ETH.localIP(), ARTNET_DEFAULT_PORT);
+    artnetsync.beginPacket(IPADDR_BROADCAST, ARTNET_DEFAULT_PORT);
+    artnetsync.write(packet_buffer, 14);
+    if (!artnetsync.endPacket()) {
+      DEBUG_PRINTLN(F("Art-Net Sync Strict error"));
+      return 1;
+    }
+    #else
+    if (!artnetUdp.broadcastTo(packet_buffer, 14, ARTNET_DEFAULT_PORT)) {
+      DEBUG_PRINTLN(F("Art-Net Sync error"));
+      return 1;
+    }
+    #endif
+
+    #ifdef REALTIME_OUTPUT_TIMER
+    packetstotal++;
+    datatotal += 14 + 46;
+    #endif
+
+    packet_buffer[9] = ART_NET_HEADER[9];
+    #endif
+    break;
+  }
+
+  default:
+    return 1;
+}
+
+if (fps_limit > 0) {
+    frame_limiter = timer + (1000000 / fps_limit);
+  }
+
+  #ifdef REALTIME_OUTPUT_TIMER
+  if (datatotal > 0 && (micros() % 100 < 3)) {
+    unsigned long elapsed = micros() - timer;
+    float mbps = (float)(datatotal * 8) / (float)elapsed;
+    USER_PRINTF("%s: %u pixels, %lu us, %u bytes in %u pkts, %.2f Mbit/s @ %u FPS\n",
+      protocolName, length, elapsed, datatotal, packetstotal, mbps, strip.getFps());
+  }
+  #endif
+
   return 0;
 }

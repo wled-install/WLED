@@ -767,8 +767,10 @@ WLED_GLOBAL bool doCloseFile _INIT(false);
 
 #ifdef ARTNET_SKIP_FRAME
 WLED_GLOBAL bool ArtNetSkipFrame _INIT(true);
+WLED_GLOBAL bool RealtimeSkipFrame _INIT(true);
 #else 
 WLED_GLOBAL bool ArtNetSkipFrame _INIT(false);
+WLED_GLOBAL bool RealtimeSkipFrame _INIT(false);
 #endif
 
 #ifndef ARTNET_PRIORITY

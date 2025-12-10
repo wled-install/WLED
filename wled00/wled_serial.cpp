@@ -141,6 +141,7 @@ void handleSerial() {
       Serial.print("WLED"); Serial.write(' '); Serial.println(VERSION);
     } else if (next == 'F') {
       ArtNetSkipFrame = !ArtNetSkipFrame;
+      RealtimeSkipFrame = !RealtimeSkipFrame;
       USER_PRINTF("Art-Net Skip-Frame is now %s.\n", ArtNetSkipFrame ? "ON" : "OFF");
     } else if (next == 'f') {
       USER_PRINTF("FPS: %d\n", strip.getFps());

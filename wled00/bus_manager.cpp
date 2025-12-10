@@ -582,7 +582,7 @@ void IRAM_ATTR BusNetwork::show() {
   if (!_valid || !canShow()) return;
   if (_len != _outputs * _leds_per_output) return;
   _broadcastLock = true;
-  realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _fps_limit, _colorOrder);
+  realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _fps_limit, _colorOrder, false);
   _broadcastLock = false;
 }
 
