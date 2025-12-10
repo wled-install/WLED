@@ -31,13 +31,6 @@ void WS2812FX::setUpMatrix() {
       }
     }
 
-    uint32_t candidateSize = Segment::maxWidth * Segment::maxHeight;
-
-    // only update if larger than current
-    if (candidateSize > ledmapMaxSize) {
-      ledmapMaxSize = candidateSize;
-    }
-
     // safety check
     if (Segment::maxWidth <= 1 || Segment::maxHeight <= 1) {
       DEBUG_PRINTF("2D Bounds error. %d x %d\n", Segment::maxWidth, Segment::maxHeight);
@@ -50,7 +43,7 @@ void WS2812FX::setUpMatrix() {
       return;
     }
 
-    USER_PRINTF("setUpMatrix: %d x %d", Segment::maxWidth, Segment::maxHeight);
+    USER_PRINTF("setUpMatrix: %d x %d\n", Segment::maxWidth, Segment::maxHeight);
 
     // Check if mapping table is necessary
     bool needLedMap = (loadedLedmap > 0);

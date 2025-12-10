@@ -9130,7 +9130,7 @@ uint16_t mode_2DPaintbrush() {
 } // mode_2DPaintbrush()
 static const char _data_FX_MODE_2DPAINTBRUSH[] PROGMEM = "Paintbrush ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
-uint16_t IRAM_ATTR mode_GEQPPA() {
+uint16_t mode_GEQPPA() {
   #ifdef SOC_PPA_SUPPORTED
   // Author: @TroyHacks
   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
@@ -9412,7 +9412,7 @@ float quantize16(float value) {
     return roundf(value * 16.0f) / 16.0f;
 }
 
-uint16_t IRAM_ATTR mode_PPA_TESTBED() {
+uint16_t mode_PPA_TESTBED() {
   #ifdef SOC_PPA_SUPPORTED // always for PPA effects
 
   static unsigned long imagelimiter = micros()+(1000000/max(uint8_t(1),SEGMENT.custom1));
@@ -9933,7 +9933,7 @@ void drawSmartSection(LGFX_Sprite& fb, String text, int32_t x, int32_t& cursor_y
   }
 }
 
-uint16_t IRAM_ATTR mode_PRO_LINK() {
+uint16_t mode_PRO_LINK() {
   #if defined(SOC_PPA_SUPPORTED) && defined(USERMOD_PIONEER_PROLINK)
 
   // --- External Variables ---

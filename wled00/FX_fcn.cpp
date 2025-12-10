@@ -260,7 +260,7 @@ void Segment::deallocateData() {
   */
 void Segment::resetIfRequired() {
   if (reset) {
-    if (ledsrgb && !Segment::_globalLeds) { free(ledsrgb); ledsrgb = nullptr; ledsrgbSize=0;} // WLEDMM segment has changed, so we need a fresh buffer.
+    if (ledsrgb && !Segment::_globalLeds) { free(ledsrgb); ledsrgb = nullptr; ledsrgbSize = 0; } // WLEDMM segment has changed, so we need a fresh buffer.
     if (transitional && _t) { transitional = false; delete _t; _t = nullptr; }
     deallocateData();
     next_time = 0; step = 0; call = 0; aux0 = 0; aux1 = 0;
@@ -1696,7 +1696,7 @@ void WS2812FX::finalizeInit(void)
 {
   //reset segment runtimes
   // suspendStripService = true; // WLEDMM avoid running effects on an incomplete strip
-  for (segment &seg : _segments) {
+  for (segment& seg : _segments) {
     seg.markForReset();
     seg.resetIfRequired();
   }
@@ -1824,7 +1824,6 @@ void WS2812FX::service() {
 #endif
     // reset the segment runtime data if needed
     seg.resetIfRequired();
-
     if (!seg.isActive()) continue;
     if (!seg.on && !seg.transitional) continue;    // WLEDMM skip disabled segments, unless a crossfade is ongoing
 
