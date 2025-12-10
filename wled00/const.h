@@ -247,19 +247,20 @@
 #define TYPE_P9813               53
 #define TYPE_LPD6803             54
 
+#define TYPE_PARLIO_RGB          60
+#define TYPE_PARLIO_RGBW         61
+
+//Network types (master broadcast) (80-85)
+#define TYPE_NET_ARTNET_RGB      80            // network ArtNet RGB bus (master broadcast bus)
+#define TYPE_NET_DDP_RGB         81            // network DDP RGB bus (master broadcast bus)
+#define TYPE_NET_E131_RGB        82            // network E1.31/sCAN RGB bus (master broadcast bus)
+#define TYPE_NET_ARTNET_RGBW     83            // network ArtNet RGBW bus (master broadcast bus)
+#define TYPE_NET_DDP_RGBW        84            // network DDP RGBW bus (master broadcast bus)
+#define TYPE_NET_E131_RGBW       85            // network E1.31/sCAN RGBW bus (master broadcast bus)
+
 // WLEDMM additional types
 #define TYPE_HUB75MATRIX         100 // 100 - 110
 // WLEDMM caution - do not use bus types > 127
-
-//Network types (master broadcast) (80-95)
-#define TYPE_NET_DDP_RGB         80            //network DDP RGB bus (master broadcast bus)
-#define TYPE_NET_E131_RGB        81            //network E131 RGB bus (master broadcast bus, unused)
-#define TYPE_NET_ARTNET_RGB      82            //network ArtNet RGB bus (master broadcast bus)
-#define TYPE_NET_ARTNET_RGBW     83            //network ArtNet RGB bus (master broadcast bus)
-#define TYPE_NET_DDP_RGBW        88            //network DDP RGBW bus (master broadcast bus)
-
-#define TYPE_PARLIO_RGB         90
-#define TYPE_PARLIO_RGBW        91
 
 #define IS_DIGITAL(t) (((t) & 0x10) || ((t)==TYPE_HUB75MATRIX)) //digital are 16-31 and 48-63 // WLEDMM added HUB75
 #define IS_PWM(t)     ((t) > 40 && (t) < 46)

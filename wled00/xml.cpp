@@ -431,7 +431,7 @@ void getSettingsJS(AsyncWebServerRequest* request, byte subPage, char* dest) //W
       for (uint8_t i = 0; i < nPins; i++) {
         char lp[7];
         snprintf(lp, sizeof(lp), "L%u%u", i, s);
-        if (pinManager.isPinOk(pins[i]) || bus->getType() >= TYPE_NET_DDP_RGB) {
+        if (pinManager.isPinOk(pins[i]) || bus->getType() >= TYPE_NET_ARTNET_RGB) {
           sappend('v', lp, (pins[i] == 255 ? -1 : pins[i]));
         } else {
           USER_PRINTF("Rejecting pin %d of %d pins\n", pins[i], nPins);
