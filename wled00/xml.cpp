@@ -245,6 +245,17 @@ void appendGPIOinfo() {
   oappend(SET_F("d.max_parlio="));
   oappendi(SOC_PARLIO_RX_UNIT_MAX_DATA_WIDTH);
   oappend(SET_F(";"));
+
+  if (Network.isConnected()) //is connected
+  {
+    char s[32];
+    IPAddress localIP = Network.localIP();
+    sprintf(s, "%d,%d,%d,%d", localIP[0], localIP[1], localIP[2], localIP[3]);
+    oappend(SET_F("d.network_ip=["));
+    oappend(s);
+    oappend(SET_F("];"));
+  }
+
   #ifdef PARLIO_PINS
   oappend(SET_F("d.parlio_default_pins=["));
   constexpr uint8_t parlio_default_pins[] = { PARLIO_PINS };

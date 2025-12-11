@@ -250,187 +250,191 @@
           return len * (bytesPerPixel * 2); // ESP32 RMT/I2S usually double buffered
         }
         return len * bytesPerPixel;
-      }
+          }
 
-      if (typeDef.cat === 3) return 5; // Analog uses negligible mem
-      if (typeDef.cat === 4) return len * 3; // Network (usually just buffer)
+          if (typeDef.cat === 3) return 5; // Analog uses negligible mem
+          if (typeDef.cat === 4) return len * 3; // Network (usually just buffer)
 
-      return len * 3;
-    }
-    function isValidPositiveNumber(value) {
-      const num = Number(value);
-      return Number.isFinite(num) && num > 0;
-    }
+          return len * 3;
+        }
+        function isValidPositiveNumber(value) {
+          const num = Number(value);
+          return Number.isFinite(num) && num > 0;
+        }
 
-    function matchToOutputCount(n) {
-      if (n <= 1) return 1;
-      if (n <= 2) return 2;
-      if (n <= 4) return 4;
-      if (n <= 8) return 8;
-      return 16;
-    }
+        function matchToOutputCount(n) {
+          if (n <= 1) return 1;
+          if (n <= 2) return 2;
+          if (n <= 4) return 4;
+          if (n <= 8) return 8;
+          return 16;
+        }
 
-    function UI(change = false) {
-      let isRGBW = false, gRGBW = false, memu = 0;
+        function UI(change = false) {
+          let isRGBW = false, gRGBW = false, memu = 0;
 
-      var drops = document.querySelectorAll("select[name^='LT']");
+          var drops = document.querySelectorAll("select[name^='LT']");
 
-      drops.forEach(function (sel) {
-        // 1. Save the currently selected value so we don't lose it
-        var selectedVal = sel.value;
+          drops.forEach(function (sel) {
+            // 1. Save the currently selected value so we don't lose it
+            var selectedVal = sel.value;
 
-        // 2. Extract options into an array
-        var opts = Array.from(sel.options);
+            // 2. Extract options into an array
+            var opts = Array.from(sel.options);
 
-        // 3. Sort the array alphabetically by text
-        opts.sort(function (a, b) {
-          return a.text.localeCompare(b.text);
-        });
+            // 3. Sort the array alphabetically by text
+            opts.sort(function (a, b) {
+              return a.text.localeCompare(b.text);
+            });
 
-        // 4. Clear and re-append sorted options
-        sel.innerHTML = '';
-        opts.forEach(function (opt) {
-          sel.add(opt);
-        });
+            // 4. Clear and re-append sorted options
+            sel.innerHTML = '';
+            opts.forEach(function (opt) {
+              sel.add(opt);
+            });
 
-        // 5. Restore the selection
-        sel.value = selectedVal;
-      });
+            // 5. Restore the selection
+            sel.value = selectedVal;
+          });
 
-      // 1. Global FPS and Power Warnings
-      gId('ampwarning').style.display = (d.Sf.MA.value > 7200) ? 'inline' : 'none';
-      gId('fpsNone').style.display = ((d.Sf.FR.value == 0) || (d.Sf.FR.value > 249)) ? 'block' : 'none';
-      gId('fpsNoHelp').style.display = ((d.Sf.FR.value == 0) || (d.Sf.FR.value > 249)) ? 'none' : 'block';
-      gId('fpswarning').style.display = (d.Sf.FR.value > 79) || (d.Sf.FR.value == 0) ? 'block' : 'none';
-      gId('fpshelp1').style.display = ((d.Sf.FR.value > 90) && (d.Sf.FR.value < 132)) ? 'block' : 'none';
-      gId('fpshelp2').style.display = ((d.Sf.FR.value > 132) && (d.Sf.FR.value < 196)) ? 'block' : 'none';
-      gId('fpshelp3').style.display = (d.Sf.FR.value > 196) ? 'block' : 'none';
+          // 1. Global FPS and Power Warnings
+          gId('ampwarning').style.display = (d.Sf.MA.value > 7200) ? 'inline' : 'none';
+          gId('fpsNone').style.display = ((d.Sf.FR.value == 0) || (d.Sf.FR.value > 249)) ? 'block' : 'none';
+          gId('fpsNoHelp').style.display = ((d.Sf.FR.value == 0) || (d.Sf.FR.value > 249)) ? 'none' : 'block';
+          gId('fpswarning').style.display = (d.Sf.FR.value > 79) || (d.Sf.FR.value == 0) ? 'block' : 'none';
+          gId('fpshelp1').style.display = ((d.Sf.FR.value > 90) && (d.Sf.FR.value < 132)) ? 'block' : 'none';
+          gId('fpshelp2').style.display = ((d.Sf.FR.value > 132) && (d.Sf.FR.value < 196)) ? 'block' : 'none';
+          gId('fpshelp3').style.display = (d.Sf.FR.value > 196) ? 'block' : 'none';
 
-      // 2. ABL
-      const ablEnabled = gId('able').checked;
-      d.Sf.MA.min = ablEnabled ? 250 : 0;
-      if ((!ablEnabled) && !d.Sf.MA.value) d.Sf.MA.value = 0;
-      if (d.Sf.LA.value == 255) laprev = 12;
-      else if (d.Sf.LA.value > 0) laprev = d.Sf.LA.value;
+          // 2. ABL
+          const ablEnabled = gId('able').checked;
+          d.Sf.MA.min = ablEnabled ? 250 : 0;
+          if ((!ablEnabled) && !d.Sf.MA.value) d.Sf.MA.value = 0;
+          if (d.Sf.LA.value == 255) laprev = 12;
+          else if (d.Sf.LA.value > 0) laprev = d.Sf.LA.value;
 
-      // 3. Loop LED Outputs
-      var s = d.getElementsByTagName("select");
-      for (i = 0; i < s.length; i++) {
-        if (s[i].name.substring(0, 2) == "LT") {
-          var n = s[i].name.substring(2);
-          var t = parseInt(s[i].value, 10);
-          var typeDef = getLedDef(t);
+          // 3. Loop LED Outputs
+          var s = d.getElementsByTagName("select");
+          for (i = 0; i < s.length; i++) {
+            if (s[i].name.substring(0, 2) == "LT") {
+              var n = s[i].name.substring(2);
+              var t = parseInt(s[i].value, 10);
+              var typeDef = getLedDef(t);
 
-          // A. Labels
-          let p0Label = "GPIO:";
-          if (typeDef.isPar) p0Label = "Parallel IO Pins:";
-          else if (typeDef.isMatrix) p0Label = "Chain Length:";
-          else if (typeDef.cat === 4) p0Label = "IP Address:";
-          else if (typeDef.cat === 2) p0Label = "Data GPIO:";
-          else if (typeDef.cat === 3) p0Label = "GPIOs:";
+              // A. Labels
+              let p0Label = "GPIO:";
+              if (typeDef.isPar) p0Label = "Parallel IO Pins:";
+              else if (typeDef.isMatrix) p0Label = "Chain Length:";
+              else if (typeDef.cat === 4) p0Label = "IP Address:";
+              else if (typeDef.cat === 2) p0Label = "Data GPIO:";
+              else if (typeDef.cat === 3) p0Label = "GPIOs:";
 
-          gId("p0d" + n).innerHTML = p0Label + ((typeDef.isPar) ? "<br />" : "");
-          gId("p1d" + n).innerHTML = (typeDef.cat === 2) ? "Clk GPIO:" : "";
+              gId("p0d" + n).innerHTML = p0Label + ((typeDef.isPar) ? "<br />" : "");
+              gId("p1d" + n).innerHTML = (typeDef.cat === 2) ? "Clk GPIO:" : "";
 
-          // B. Memory
-          memu += getMem(t, n);
+              // B. Memory
+              memu += getMem(t, n);
 
-          // C. Pins Visibility & Logic
-          var loopmax = d.max_parlio ?? 4;
-          var color_el = d.getElementsByName("AO" + n)[0];
-          var coloroutputs = color_el ? Number(color_el.value) : 0;
-          var pins_nulled = 0;
-          coloroutputs = (Number(coloroutputs) === 0) ? loopmax : coloroutputs;
+              // C. Pins Visibility & Logic
+              var loopmax = d.max_parlio ?? 4;
+              var color_el = d.getElementsByName("AO" + n)[0];
+              var coloroutputs = color_el ? Number(color_el.value) : 0;
+              var pins_nulled = 0;
+              coloroutputs = (Number(coloroutputs) === 0) ? loopmax : coloroutputs;
 
-          for (p = 0; p < 17; p++) {
-            var LK = d.getElementsByName("L" + p + n)[0];
-            if (!LK) continue;
+              for (p = 0; p < 17; p++) {
+                var LK = d.getElementsByName("L" + p + n)[0];
+                if (!LK) continue;
 
-            let showPin = false;
-            if (typeDef.isMatrix) showPin = false;
-            else if (typeDef.isPar) showPin = (p < loopmax);
-            else if (typeDef.cat === 4) showPin = (p < 4); // Always show 4 for Network
-            else if (typeDef.cat === 2) showPin = (p < 2);
-            else if (typeDef.cat === 3) showPin = (p < (t - 40));
-            else showPin = (p === 0);
+                let showPin = false;
+                if (typeDef.isMatrix) showPin = false;
+                else if (typeDef.isPar) showPin = (p < loopmax);
+                else if (typeDef.cat === 4) showPin = (p < 4); // Always show 4 for Network
+                else if (typeDef.cat === 2) showPin = (p < 2);
+                else if (typeDef.cat === 3) showPin = (p < (t - 40));
+                else showPin = (p === 0);
 
-            if (showPin) {
-              LK.style.display = "inline";
-              LK.required = true;
-              if (typeDef.isPar) {
-                // Parallel Logic (unchanged)
-                LK.min = Number(-1); LK.max = Number(d.max_gpio);
-                if (Array.isArray(d.parlio_default_pins) && typeof d.parlio_default_pins[p] === "number") LK._defaultValue = d.parlio_default_pins[p];
-                if (p < matchToOutputCount(coloroutputs) && p >= coloroutputs) {
-                  LK.style.backgroundColor = "rgb(80,80,0)"; LK._prevValue = LK.value; LK.value = Number(-1); LK.disabled = true;
-                } else if (p < coloroutputs) {
-                  LK.style.backgroundColor = "rgb(0,69,0)";
-                  if (LK.disabled || LK.value.trim() === "" || (LK.disabled && Number(LK.value) < 0)) {
-                    let candidate = LK._prevValue;
+                if (showPin) {
+                  LK.style.display = "inline";
+                  LK.required = true;
+                  if (typeDef.isPar) {
+                    // Parallel Logic (unchanged)
+                    LK.min = Number(-1); LK.max = Number(d.max_gpio);
+                    if (Array.isArray(d.parlio_default_pins) && typeof d.parlio_default_pins[p] === "number") LK._defaultValue = d.parlio_default_pins[p];
+                    if (p < matchToOutputCount(coloroutputs) && p >= coloroutputs) {
+                      LK.style.backgroundColor = "rgb(80,80,0)"; LK._prevValue = LK.value; LK.value = Number(-1); LK.disabled = true;
+                    } else if (p < coloroutputs) {
+                      LK.style.backgroundColor = "rgb(0,69,0)";
+                      let candidate = LK.value;
+                      if (candidate === undefined || candidate === "" || Number(candidate) === -1) {
+                        candidate = LK._defaultValue;
+                      }
+                      if (Number(candidate) > Number(d.max_gpio)) {
+                        candidate = LK._defaultValue;
+                      }
+                      if (candidate !== undefined && candidate !== "" &&
+                        Array.isArray(d.rsvd) && !d.rsvd.includes(Number(candidate))) {
+                        LK.value = Number(candidate);
+                      } else {
+                        LK.value = -1;
+                      }
 
-                    // 1. If we have no history, or history is invalid (-1), load default.
-                    if (candidate === undefined || Number(candidate) === -1 || candidate === "") {
-                      candidate = Number(LK._defaultValue);
-                    }
-
-                    // 2. CRITICAL FIX: If the history (candidate) is an IP address (e.g. 168), it is > max_gpio.
-                    // Force it back to the default value.
-                    if (Number(candidate) > Number(d.max_gpio)) {
-                      candidate = Number(LK._defaultValue);
-                    }
-
-                    // 3. Check for reserved pins and apply
-                    if (candidate !== undefined && candidate !== "" && Array.isArray(d.rsvd) && !d.rsvd.includes(Number(candidate))) {
-                      LK.value = Number(candidate);
+                      LK.disabled = false;
+                      if (LK.style.color === "red") LK.style.color = "#fff";
                     } else {
-                      // If even the default is reserved/invalid, set to -1
-                      LK.value = Number(-1);
+                      LK.style.backgroundColor = ""; LK._prevValue = LK.value; LK.value = Number(-1); LK.disabled = true;
                     }
+                    LK.min = -1;
+                    if (LK.value == -1) { if (LK.disabled != true) pins_nulled++; LK.style.color = "#fff"; }
+                  } else {
+                    // Standard & Network Logic
+                    LK.style.backgroundColor = "";
                     LK.disabled = false;
-                    if (LK.style.color === "red") LK.style.color = "#fff";
+                    if (typeDef.cat === 4) {
+                      LK.min = 0;
+                      LK.max = 255;
+                      
+                      let defVal = "";
+
+                      // Only grab the IP from the array for the first 3 parts (0, 1, 2)
+                      if (p < 3 && Array.isArray(d.network_ip) && typeof d.network_ip[p] === "number") {
+                        defVal = d.network_ip[p];
+                      }
+
+                      LK._defaultValue = defVal;
+                      if (LK.value === "" || parseInt(LK.value) < 0) {
+                        LK.value = defVal;
+                      }
+
+                      LK.required = true;
+                    } else {
+                      LK.min = -1;
+                      LK.max = Number(d.max_gpio);
+                    }
                   }
                 } else {
-                  LK.style.backgroundColor = ""; LK._prevValue = LK.value; LK.value = Number(-1); LK.disabled = true;
-                }
-                LK.min = -1;
-                if (LK.value == -1) { if (LK.disabled != true) pins_nulled++; LK.style.color = "#fff"; }
-              } else {
-                // Standard & Network Logic
-                LK.style.backgroundColor = "";
-                LK.disabled = false;
-                if (typeDef.cat === 4) {
-                  LK.min = 0;
-                  LK.max = 255;
-                  if (LK.value === "" || parseInt(LK.value) < 0) LK.value = 0;
-                  LK.required = true;
-                } else {
-                  LK.min = -1;
-                  LK.max = Number(d.max_gpio);
+                  LK.style.display = "none";
+                  LK.required = false;
                 }
               }
-            } else {
-              LK.style.display = "none";
-              LK.required = false;
-            }
-          }
 
-          if (change) {
-            gId("rf" + n).checked = (gId("rf" + n).checked || t == 31);
-            if (typeDef.cat === 3) d.getElementsByName("LC" + n)[0].value = 1;
-          }
-          gId("rf" + n).onclick = (t == 31) ? (() => { return false }) : (() => { });
+              if (change) {
+                gId("rf" + n).checked = (gId("rf" + n).checked || t == 31);
+                if (typeDef.cat === 3) d.getElementsByName("LC" + n)[0].value = 1;
+              }
+              gId("rf" + n).onclick = (t == 31) ? (() => { return false }) : (() => { });
 
-          // RGBW Logic
-          let hasWhite = (typeDef.color.includes("W") && typeDef.color !== "W" && typeDef.color !== "WW/CW");
-          gRGBW |= isRGBW = hasWhite;
+              // RGBW Logic
+              let hasWhite = (typeDef.color.includes("W") && typeDef.color !== "W" && typeDef.color !== "WW/CW");
+              gRGBW |= isRGBW = hasWhite;
 
-          let isNet = (typeDef.cat === 4);
-          let isPar = (typeDef.isPar);
-          let isAna = (typeDef.cat === 3);
-          let isMat = (typeDef.isMatrix);
+              let isNet = (typeDef.cat === 4);
+              let isPar = (typeDef.isPar);
+              let isAna = (typeDef.cat === 3);
+              let isMat = (typeDef.isMatrix);
 
           // Visibilities
-          gId("co" + n).style.display = (isNet || isAna || isMat || isPar) ? "none" : "inline";
+          gId("co" + n).style.display = (isAna || isMat || isPar) ? "none" : "inline";
           gId("pbr4_" + n).style.display = (isPar && loopmax > 4) ? "inline" : "none";
           gId("pbr8_" + n).style.display = (isPar && loopmax > 8) ? "inline" : "none";
           gId("pbr12_" + n).style.display = (isPar && loopmax > 12) ? "inline" : "none";
@@ -446,12 +450,15 @@
 
           if (isPar) {
             d.getElementsByName("AO" + n)[0].max = d.max_parlio;
-            if (d.getElementsByName("AL" + n)[0].value > 1024) d.getElementsByName("AL" + n)[0].value = Number(1024);
+            d.getElementsByName("AL" + n)[0].value = Math.min(Number(d.getElementsByName("AL" + n)[0].value), 1024);
+            d.getElementsByName("SL" + n)[0].style.display = "none";
+            d.getElementsByName("CV" + n)[0].style.display = "none";
+            d.getElementsByName("RF" + n)[0].style.display = "none"; // coimment out if Parallel IO needs off-refresh
           }
           d.getElementsByName("AO" + n)[0].min = (isNet || isPar) ? 1 : -1;
           d.getElementsByName("AL" + n)[0].min = (isNet || isPar) ? 1 : -1;
           if (isPar) d.getElementsByName("AL" + n)[0].max = Number(1024);
-          if (isNet) d.getElementsByName("AL" + n)[0].max = maxL;
+          if (isNet) d.getElementsByName("AL" + n)[0].max = Number(maxL);
           d.getElementsByName("AF" + n)[0].min = (isNet) ? 1 : -1;
 
           // Warnings and Info
