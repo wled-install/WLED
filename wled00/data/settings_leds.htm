@@ -501,19 +501,43 @@
             else if (typeDef.name.includes("DDP")) netProtocol = "DDP";
 
             if (netProtocol) {
-              const chanPerPix = isRGBW ? 4 : 3;
-              const uniSize = Math.floor(512 / chanPerPix);
+              let chanPerPix = isRGBW ? 4 : 3;
+              let uniSize = Math.floor(512 / chanPerPix);
+              let universes_per_output = Math.ceil(leds_per_output / uniSize);
+              let max_leds_per_universe = uniSize;
+              let max_leds_per_output = max_leds_per_universe * 8;
+              let wled_universes = total_leds / uniSize;
               if (outputs > 1) {
-                gId("dig" + n + "W").innerHTML += `<br />Set your ${netProtocol} Hardware to ${Math.ceil(leds_per_output / uniSize)} universes per output.`;
-                if (fps_limit > 33333 / leds_per_output) gId("dig" + n + "W").innerHTML += "<br />FPS limit may be too high for WS281x pixels.";
+                if (universes_per_output <= 8) {
+                  gId("dig" + n + "W").innerHTML += `<br />Set your ${netProtocol} Hardware to ${universes_per_output} universes per output.`;
+                  if (universes_per_output > 6) gId("dig" + n + "W").innerHTML += `(6 may be your max)`;
+                } else {
+                  gId("dig" + n + "W").innerHTML += `<br />Your ${netProtocol} Hardware likely does not allow ${universes_per_output} universes per output.<br />A max of 6 universes is common, sometimes 8, some are 4.`;
+                }
+                if (universes_per_output <= 8) {
+                  if (isRGBW) {
+                    let max_fps = (Math.floor(25000 / leds_per_output)) - 1;
+                    if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for SK6812 pixels. (Suggest max ${max_fps})`;
+                  } else {
+                    let max_fps = (Math.floor(33333 / leds_per_output)) - 1;
+                    if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for WS281x pixels. (Suggest max ${max_fps})`;
+                  }
+                }
               } else if (outputs == 1) {
-                gId("dig" + n + "W").innerHTML += `<br />WLED-style ${netProtocol} output enabled.`;
+                gId("dig" + n + "W").innerHTML += `<br />WLED/FPP-style ${netProtocol} output enabled.`;
+              } else if (outputs < 1) {
+                gId("dig" + n + "W").innerHTML += "<br />You need at least 1 output!";
               }
-            }
-            if (outputs < 1) gId("dig" + n + "W").innerHTML += "<br />You need at least 1 output!";
 
-            if (outputs * leds_per_output != total_leds) {
-              gId("dig" + n + "W").innerHTML += "<br />Length (" + total_leds + ") doesn't match Outputs * LEDs/Out (<span title='Click to fix' style='text-decoration:underline; cursor:pointer;' onclick=\"total_leds=Number(" + outputs * leds_per_output + ");d.getElementsByName('LC" + n + "')[0].value=" + (outputs * leds_per_output) + ";UI();\">" + (outputs * leds_per_output) + "</span>).";
+              if (outputs * leds_per_output != total_leds) {
+                gId(`dig${n}W`).innerHTML += `<br />Your Outputs * LEDs Per Output doesn't match Length (${outputs} * ${leds_per_output} != ${total_leds})<br />`;
+                if (universes_per_output <= 8 || outputs == 1) {
+                  gId(`dig${n}W`).innerHTML += `Fix Length: <span style="text-decoration:underline; cursor:pointer;"
+                  onclick="fix_total_leds=Number(${outputs * leds_per_output}); d.getElementsByName('LC${n}')[0].value=fix_total_leds;UI();">${outputs * leds_per_output} Length</span> = ${outputs} Outputs * ${leds_per_output} LEDs per Output<br />`;
+                } else {
+                  gId(`dig${n}W`).innerHTML += `Please correct your values, this will not work!`;
+                }
+              }
             }
           }
 

@@ -466,6 +466,11 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
       _UDPtype = 1;
       USER_PRINT("NET_E131_RGB");
       break;
+    case TYPE_NET_E131_RGBW:
+      _rgbw = true;
+      _UDPtype = 1;
+      USER_PRINT("NET_E131_RGBW");
+      break;
     default: // TYPE_NET_DDP_RGB / TYPE_NET_DDP_RGBW
       _rgbw = bc.type == TYPE_NET_DDP_RGBW;
       _UDPtype = 0;
@@ -1423,7 +1428,7 @@ int BusManager::add(BusConfig &bc) {
   slowMode = false;
 
   DEBUG_PRINTF("BusManager::add(bc.type=%u)\n", bc.type);
-  if (bc.type == TYPE_NET_ARTNET_RGB || bc.type == TYPE_NET_ARTNET_RGBW || bc.type == TYPE_NET_DDP_RGB || bc.type == TYPE_NET_DDP_RGBW) {
+  if (bc.type == TYPE_NET_ARTNET_RGB || bc.type == TYPE_NET_ARTNET_RGBW || bc.type == TYPE_NET_DDP_RGB || bc.type == TYPE_NET_DDP_RGBW || bc.type == TYPE_NET_E131_RGB || bc.type == TYPE_NET_E131_RGBW) {
     busses[numBusses] = new BusNetwork(bc, colorOrderMap);
   } else if (bc.type == TYPE_HUB75MATRIX) {
   #ifdef WLED_ENABLE_HUB75MATRIX

@@ -65,7 +65,7 @@ struct BusConfig {
     count = len; start = pstart; colorOrder = pcolorOrder; reversed = rev; skipAmount = skip; autoWhite = aw; frequency = clock_kHz;
     outputs = art_o; leds_per_output = art_l; fps_limit = art_f;
     uint8_t nPins = 1;                                                                 // default = only one pin (clockless LEDs like WS281x)
-    if ((type >= TYPE_NET_DDP_RGB) && (type < (TYPE_NET_DDP_RGB + 16))) nPins = 4;     // virtual network bus. 4 "pins" store IP address
+    if ((type >= TYPE_NET_ARTNET_RGB) && (type <= TYPE_NET_E131_RGBW)) nPins = 4;     // virtual network bus. 4 "pins" store IP address
     if (type == TYPE_PARLIO_RGB || TYPE_PARLIO_RGBW) nPins = SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH;     // Parallel IO needs up to SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH, which is 16 on the ESP32-P4
     else if ((type > 47) && (type < 63)) nPins = 2;                                    // (data + clock / SPI) busses - two pins
     else if (IS_PWM(type)) nPins = NUM_PWM_PINS(type);                                 // PWM needs 1..5 pins
@@ -169,7 +169,7 @@ class Bus {
     static  bool hasWhite(uint8_t type) {
       if ((type >= TYPE_WS2812_1CH && type <= TYPE_WS2812_WWA) || type == TYPE_SK6812_RGBW || type == TYPE_TM1814 || type == TYPE_UCS8904) return true; // digital types with white channel
       if (type > TYPE_ONOFF && type <= TYPE_ANALOG_5CH && type != TYPE_ANALOG_3CH) return true; // analog types with white channel
-      if (type == TYPE_NET_DDP_RGBW) return true; // network types with white channel
+      if (type == TYPE_NET_DDP_RGBW || type == TYPE_NET_ARTNET_RGBW || type == TYPE_NET_E131_RGBW) return true; // network types with white channel
       return false;
     }
     virtual bool hasCCT() const {
@@ -575,7 +575,7 @@ class BusManager {
 
     inline uint8_t getNumVirtualBusses() const {
       int j = 0;
-      for (int i=0; i<numBusses; i++) if (busses[i]->getType() >= TYPE_NET_DDP_RGB && busses[i]->getType() < 96) j++;
+      for (int i = 0; i < numBusses; i++) if (busses[i]->getType() >= TYPE_NET_ARTNET_RGB && busses[i]->getType() <= TYPE_NET_E131_RGBW) j++;
       return j;
     }
 };
