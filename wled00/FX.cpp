@@ -7863,58 +7863,55 @@ uint16_t mode_DJLight(void) {                   // Written by Stefan Petrick, Ad
   // No need to prevent from executing on single led strips, only mid will be set (mid = 0)
   const uint32_t mid = SEGLEN / 2;
 
-  um_data_t *um_data = getAudioData();
-  uint8_t *fftResult = (uint8_t*)um_data->u_data[2];
-  float volumeSmth    = *(float*)um_data->u_data[0];
+  um_data_t* um_data = getAudioData();
+  const uint8_t* __restrict__ fftResult = (uint8_t*)um_data->u_data[2];
+  const float volumeSmth = *(float*)um_data->u_data[0];
 
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
     SEGMENT.fill(BLACK);
   }
 
-  uint8_t secondHand = micros()/(256-SEGMENT.speed)/500+1 % 64;
-  if((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {   // WLEDMM allow run run at full speed
+  uint8_t secondHand = micros() / (256 - SEGMENT.speed) / 500 + 1 % 64;
+  if ((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {
     SEGENV.aux0 = secondHand;
 
-    CRGB color = CRGB(0,0,0);
-    // color = CRGB(fftResult[15]/2, fftResult[5]/2, fftResult[0]/2);   // formula from 0.13.x (10Khz): R = 3880-5120, G=240-340, B=60-100
-    if (!SEGENV.check1) {
-      color = CRGB(fftResult[12]/2, fftResult[3]/2, fftResult[1]/2);    // formula for 0.14.x  (22Khz): R = 3015-3704, G=216-301, B=86-129
-    } else {
-      // candy factory: an attempt to get more colors
-      color = CRGB(fftResult[11]/2 + fftResult[12]/4 + fftResult[14]/4, // red  : 2412-3704 + 4479-7106 
-                   fftResult[4]/2 + fftResult[3]/4,                     // green: 216-430
-                   fftResult[0]/4 + fftResult[1]/4 + fftResult[2]/4);   // blue:  46-216
-      if ((color.getLuma() < 96) && (volumeSmth >= 1.5f)) {             // enhance "almost dark" pixels with yellow, based on not-yet-used channels 
-        unsigned yello_g = (fftResult[5] + fftResult[6] + fftResult[7]) / 3;
-        unsigned yello_r = (fftResult[7] + fftResult[8] + fftResult[9] + fftResult[10]) / 4;
-        color.green += (uint8_t) yello_g / 2;
-        color.red += (uint8_t) yello_r / 2;
+    // Shift pixels first (before setting mid) - allows better pipelining
+    for (uint32_t i = SEGLEN - 1; i > mid; i--) SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i - 1));
+    for (uint32_t i = 0; i < mid; i++) SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i + 1));
+
+    CRGB color(0, 0, 0);
+
+    if (volumeSmth >= 1.0f) {  // Skip all color math for silence
+      const bool candyMode = SEGENV.check1;
+      const uint8_t f3 = fftResult[3];  // Used multiple times
+
+      if (!candyMode) {
+        color = CRGB(fftResult[12] >> 1, f3 >> 1, fftResult[1] >> 1);
+      } else {
+        color = CRGB((fftResult[11] >> 1) + (fftResult[12] >> 2) + (fftResult[14] >> 2),
+          (fftResult[4] >> 1) + (f3 >> 2),
+          (fftResult[0] >> 2) + (fftResult[1] >> 2) + (fftResult[2] >> 2));
+
+        if ((color.getLuma() < 96) && (volumeSmth >= 1.5f)) {
+          color.green += (fftResult[5] + fftResult[6] + fftResult[7]) / 6;
+          color.red += (fftResult[7] + fftResult[8] + fftResult[9] + fftResult[10]) >> 3;
+        }
       }
+
+      if (color.getLuma() > 32) {
+        CHSV hsvColor = rgb2hsv_approximate(color);
+        hsvColor.v = constrain(hsvColor.v, 48, 204);
+        hsvColor.s = max(hsvColor.s, candyMode ? (uint8_t)204 : (uint8_t)108);
+        color = hsvColor;
+      }
+
+      uint8_t fadeVal = map2(f3, 0, 255, 255, 4);
+      if (candyMode) fadeVal = min(fadeVal, (uint8_t)176);
+      color.fadeToBlackBy(fadeVal);
     }
 
-    if (volumeSmth < 1.0f) color = CRGB(0,0,0); // silence = black
-
-    // make colors less "pastel", by turning up color saturation in HSV space
-    if (color.getLuma() > 32) {                                      // don't change "dark" pixels
-      CHSV hsvColor = rgb2hsv_approximate(color);
-      hsvColor.v = min(max(hsvColor.v, (uint8_t)48), (uint8_t)204);  // 48 < brightness < 204
-      if (SEGENV.check1)
-        hsvColor.s = max(hsvColor.s, (uint8_t)204);                  // candy factory mode: strongly turn up color saturation (> 192)
-      else
-        hsvColor.s = max(hsvColor.s, (uint8_t)108);                  // normal mode: turn up color saturation to avoid pastels
-      color = hsvColor;
-    }
-    //if (color.getLuma() > 12) color.maximizeBrightness();          // for testing
-
-    //SEGMENT.setPixelColor(mid, color.fadeToBlackBy(map(fftResult[4], 0, 255, 255, 4)));     // 0.13.x  fade -> 180hz-260hz
-    uint8_t fadeVal = map2(fftResult[3], 0, 255, 255, 4);                                      // 0.14.x  fade -> 216hz-301hz
-    if (SEGENV.check1) fadeVal = constrain(fadeVal, 0, 176);  // "candy factory" mode - avoid complete fade-out
-    SEGMENT.setPixelColor(mid, color.fadeToBlackBy(fadeVal));
-
-    // if SEGLEN equals 1 these loops won't execute
-    for (uint32_t i = SEGLEN - 1; i > mid; i--)   SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i-1)); // move to the left
-    for (uint32_t i = 0; i < mid; i++)            SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i+1)); // move to the right
+    SEGMENT.setPixelColor(mid, color);
   }
 
   return FRAMETIME;
@@ -9151,7 +9148,7 @@ uint16_t mode_GEQPPA() {
   uint16_t box_mirror_x = SEGMENT.mirror;
   uint16_t box_mirror_y = SEGMENT.mirror_y;
   
-  //  if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
+   if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed  if (!SEGENV.allocateData(4)) return mode_static();
   if (SEGENV.call == 0) {
@@ -10264,6 +10261,170 @@ uint16_t mode_PRO_LINK() {
 }
 static const char _data_FX_MODE_PRO_LINK[] PROGMEM = "Pro Link ☾🐺@?1??,2???,3???,4???,5???,6???,7???,8????;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,o1=0,o2=0,o3=0";
 
+static LGFX_Sprite _djCircleSprite;
+
+uint16_t mode_DJLight_Circles(void) {
+  if (!SEGMENT.is2D()) return mode_DJLight();
+
+  const uint16_t cols = SEGMENT.virtualWidth();
+  const uint16_t rows = SEGMENT.virtualHeight();
+  const uint16_t qw = (cols + 1) / 2;
+  const uint16_t qh = (rows + 1) / 2;
+  const uint16_t maxRadius = min((uint16_t)(sqrtf(qw * qw + qh * qh) + 1), (uint16_t)255);
+
+  byte* busPixelData = nullptr;
+  uint32_t busPixelSize = 0;
+  Bus* bus = busses.getBus(0);
+  if (bus) {
+    busPixelData = bus->getPixelData();
+    busPixelSize = SEGMENT.length() * 3;
+    if (!busPixelData || busPixelSize == 0) return FRAMETIME;
+  } else {
+    return FRAMETIME;
+  }
+
+  struct DJCircleData {
+    uint32_t colorCache[256];
+    CRGB ringBuffer[256];
+    uint8_t ringHead;
+    uint16_t ringCount;
+  };
+
+  if (!SEGENV.allocateData(sizeof(DJCircleData))) return FRAMETIME;
+  DJCircleData* data = reinterpret_cast<DJCircleData*>(SEGENV.data);
+
+  if (SEGENV.call == 0) {
+    memset(data, 0, sizeof(DJCircleData));
+    _djCircleSprite.setColorDepth(24);
+  }
+
+  if (_djCircleSprite.getBuffer() != busPixelData) {
+    _djCircleSprite.setBuffer(busPixelData, cols, rows, 24);
+  }
+
+  um_data_t* um_data = getAudioData();
+  const uint8_t* __restrict__ fftResult = (uint8_t*)um_data->u_data[2];
+  const float volumeSmth = *(float*)um_data->u_data[0];
+
+  // Intensity: 0 = normal, 255 = maximum boost
+  const uint8_t boost = SEGMENT.intensity;
+
+  uint8_t secondHand = micros() / (256 - SEGMENT.speed) / 500 + 1 % 64;
+  if ((SEGMENT.speed > 254) || (SEGENV.aux0 != secondHand)) {
+    SEGENV.aux0 = secondHand;
+
+    CRGB color(0, 0, 0);
+    uint32_t color32 = 0;
+
+    if (volumeSmth >= 1.0f) {
+      const bool candyMode = SEGENV.check1;
+      const uint8_t f3 = fftResult[3];
+
+      if (!candyMode) {
+        color = CRGB(fftResult[12] >> 1, f3 >> 1, fftResult[1] >> 1);
+      } else {
+        color = CRGB((fftResult[11] >> 1) + (fftResult[12] >> 2) + (fftResult[14] >> 2),
+          (fftResult[4] >> 1) + (f3 >> 2),
+          (fftResult[0] >> 2) + (fftResult[1] >> 2) + (fftResult[2] >> 2));
+
+        if ((color.getLuma() < 96) && (volumeSmth >= 1.5f)) {
+          color.green += (fftResult[5] + fftResult[6] + fftResult[7]) / 6;
+          color.red += (fftResult[7] + fftResult[8] + fftResult[9] + fftResult[10]) >> 3;
+        }
+      }
+
+      if (color.getLuma() > 32) {
+        CHSV hsvColor = rgb2hsv_approximate(color);
+        hsvColor.v = constrain(hsvColor.v, 48, 204);
+        hsvColor.s = max(hsvColor.s, candyMode ? (uint8_t)204 : (uint8_t)108);
+        color = hsvColor;
+      }
+
+      uint8_t fadeVal = map2(f3, 0, 255, 255, 4);
+      if (candyMode) fadeVal = constrain(fadeVal, 0, 176);
+      color.fadeToBlackBy(fadeVal);
+
+      // Apply intensity boost
+      if (boost > 0) {
+        CHSV hsv = rgb2hsv_approximate(color);
+        hsv.s = qadd8(hsv.s, boost);                          // Boost saturation
+        hsv.v = qadd8(hsv.v, boost >> 1);                     // Boost brightness (half rate)
+        color = hsv;
+      }
+
+      color32 = ((uint32_t)color.r << 16) | ((uint32_t)color.g << 8) | color.b;
+    }
+
+    const uint8_t head = data->ringHead;
+    data->ringBuffer[head] = color;
+    data->colorCache[head] = color32;
+    data->ringHead = (head + 1) & 0xFF;
+    if (data->ringCount < maxRadius) data->ringCount++;
+
+    memset(busPixelData, 0, cols * rows * 3);
+
+    const uint16_t numCircles = min(data->ringCount, (uint16_t)maxRadius);
+    const CRGB* __restrict__ ringBuf = data->ringBuffer;
+    const uint32_t* __restrict__ colorBuf = data->colorCache;
+    const uint8_t ringHead = data->ringHead;
+
+    // Draw arcs in top-left quadrant (center at qw-1, qh-1)
+    for (int16_t r = numCircles; r > 0; r--) {
+      const uint8_t idx = (ringHead + 256 - r) & 0xFF;
+      if (ringBuf[idx].getLuma() > 2) {
+        _djCircleSprite.fillArc(qw - 1, qh - 1, r, r - 1, 180, 270, colorBuf[idx]);
+      }
+    }
+
+    ppa_srm_oper_config_t srm_config = {};
+    srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+    srm_config.in.block_offset_x = 0;
+    srm_config.in.block_offset_y = 0;
+    srm_config.in.buffer = busPixelData; // (uint8_t*)_djCircleSprite.getBuffer();
+    srm_config.out.buffer = busPixelData;
+    srm_config.out.buffer_size = busPixelSize;
+    srm_config.out.pic_w = cols;
+    srm_config.out.pic_h = rows;
+    srm_config.out.block_offset_x = 0;
+    srm_config.out.block_offset_y = 0;
+    srm_config.scale_x = 1;
+    srm_config.scale_y = 1;
+    srm_config.mirror_x = false;
+    srm_config.mirror_y = false;
+    srm_config.rgb_swap = 0;
+    srm_config.byte_swap = 0;
+    srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    srm_config.in.buffer = busPixelData;
+    srm_config.in.pic_w = cols;
+    srm_config.in.pic_h = rows;
+    srm_config.in.block_w = qw;
+    srm_config.in.block_h = qh;
+
+    srm_config.out.block_offset_x = qw;
+    srm_config.out.block_offset_y = 0;
+    srm_config.mirror_x = true;
+    srm_config.mirror_y = false;
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
+    srm_config.in.block_w = cols;
+    srm_config.out.block_offset_x = 0;
+    srm_config.out.block_offset_y = qh;
+    srm_config.mirror_x = false;
+    srm_config.mirror_y = true;
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
+  }
+
+  return FRAMETIME;
+}
+static const char _data_FX_MODE_DJLIGHT_CIRCLES[] PROGMEM = "DJ Light Circles@Speed,Vibrancy,,,,Candy Factory;;;2f;ix=0,m12=0,si=0";
+
 #endif // WLED_DISABLE_2D
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -10519,6 +10680,7 @@ void WS2812FX::setupEffectData() {
   addEffect(FX_MODE_GEQPPA, &mode_GEQPPA, _data_FX_MODE_GEQPPA); // audio
   addEffect(FX_MODE_PPA_TESTBED, &mode_PPA_TESTBED, _data_FX_MODE_PPA_TESTBED); // audio
   addEffect(FX_MODE_PRO_LINK, &mode_PRO_LINK, _data_FX_MODE_PRO_LINK); // audio
+  addEffect(FX_MODE_DJLIGHT_CIRCLES, &mode_DJLight_Circles, _data_FX_MODE_DJLIGHT_CIRCLES); // audio
   #endif
 
 #endif // WLED_DISABLE_2D
