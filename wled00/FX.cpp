@@ -8534,15 +8534,12 @@ uint16_t mode_2DAkemi(void) {
 
   if (SEGENV.call == 0) { SEGMENT.fill(BLACK); }
 
-  // --- Pre-calculate values before the loops ---
   uint16_t counter = (strip.now * ((SEGMENT.speed >> 2) + 2)) >> 8;
 
-  // Pre-calculate all color variations ONCE
   const CRGB baseFaceColor = SEGMENT.color_wheel(counter);
   const CRGB baseArmsColor = SEGCOLOR(1) > 0 ? SEGCOLOR(1) : 0xFFE0A0;
   const CRGB eyesMouthColor = SEGCOLOR(2) > 0 ? SEGCOLOR(2) : 0xFFFFFF;
 
-  // Use faster integer scaling instead of floats
   const uint8_t lightFactorInt = 40;  // 0.15 * 255
   const uint8_t normalFactorInt = 102; // 0.4 * 255
 
@@ -8552,7 +8549,6 @@ uint16_t mode_2DAkemi(void) {
   CRGB lightArmsColor = baseArmsColor; lightArmsColor.nscale8_video(lightFactorInt);
   CRGB normalArmsColor = baseArmsColor; normalArmsColor.nscale8_video(normalFactorInt);
 
-  // Cache audio data
   um_data_t *um_data = getAudioData();
   uint8_t fftResult[NUM_GEQ_CHANNELS] = {0};
   if (um_data && um_data->u_data) {
@@ -8596,7 +8592,6 @@ uint16_t mode_2DAkemi(void) {
     }
   }
 
-  // --- GEQ drawing loop (largely unchanged, but with cached um_data) ---
   if (um_data) {
     int xMax = cols / 8;
     for (int x = 0; x < xMax; x++) {
@@ -8607,10 +8602,8 @@ uint16_t mode_2DAkemi(void) {
       barHeight = constrain(barHeight, 0, (rows / 2) + 1);
 
       for (int y = 0; y < barHeight; y++) {
-        // SEGMENT.setPixelColorXY(x, rows / 2 - y, color);
-        // SEGMENT.setPixelColorXY(cols - 1 - x, rows / 2 - y, color);
-        busses.setPixelColorXY(x, rows / 2 - y, cols, color);
-        busses.setPixelColorXY(cols - 1 - x, rows / 2 - y, cols, color);
+        SEGMENT.setPixelColorXY(x, rows / 2 - y, color);
+        SEGMENT.setPixelColorXY(cols - 1 - x, rows / 2 - y, color);
       }
     }
   }
@@ -9148,7 +9141,7 @@ uint16_t mode_GEQPPA() {
   uint16_t box_mirror_x = SEGMENT.mirror;
   uint16_t box_mirror_y = SEGMENT.mirror_y;
   
-   if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
+  if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
 
   if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed  if (!SEGENV.allocateData(4)) return mode_static();
   if (SEGENV.call == 0) {
