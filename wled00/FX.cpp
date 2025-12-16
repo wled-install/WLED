@@ -38,6 +38,350 @@
 // WLEDMM replace abs8 by abs, as abs8 does not work for numbers >127
 #define abs8(x) abs(x)
 
+// ppa_effect_helper.h (or add to FX.h)
+
+// ppa_effect_helper.h (or add to FX.h)
+
+#ifdef SOC_PPA_SUPPORTED
+
+struct PPAEffectContext {
+  // Output buffers
+  uint8_t* effectBuffer;        // Where effect renders to
+  uint32_t effectBufferSize;
+  uint8_t* busPixelData;        // Final output to LEDs
+  uint32_t busPixelSize;
+
+  // Dimensions for rendering
+  uint16_t width;               // virtualWidth - render to this size
+  uint16_t height;              // virtualHeight - render to this size
+  uint16_t full_width;          // Full width after mirroring
+  uint16_t full_height;         // Full height after mirroring
+  uint16_t render_pic_w;        // pic_w for PPA operations
+  uint16_t render_pic_h;        // pic_h for PPA operations
+
+  // Segment position on bus
+  uint16_t start_x;             // SEGMENT.start
+  uint16_t start_y;             // SEGMENT.startY
+  uint16_t max_width;           // SEGMENT.maxWidth (bus width)
+  uint16_t max_height;          // SEGMENT.maxHeight (bus height)
+
+  // Segment options
+  bool transpose;
+  bool mirror_x;
+  bool mirror_y;
+  bool reverse_x;
+  bool reverse_y;
+
+  // State
+  bool needs_transform_buffer;
+  bool valid;
+};
+
+// Static buffer management (persists across calls)
+static uint8_t* _ppa_transform_buffer = nullptr;
+static uint32_t _ppa_transform_buffer_size = 0;
+
+// Initialize context - call at start of effect
+inline bool ppaEffectBegin(PPAEffectContext& ctx) {
+  // Get segment options
+  ctx.width = SEGMENT.virtualWidth();
+  ctx.height = SEGMENT.virtualHeight();
+  ctx.transpose = SEGMENT.transpose;
+  ctx.mirror_x = SEGMENT.mirror;
+  ctx.mirror_y = SEGMENT.mirror_y;
+  ctx.reverse_x = SEGMENT.reverse;
+  ctx.reverse_y = SEGMENT.reverse_y;
+
+  // Get segment position
+  ctx.start_x = SEGMENT.start;
+  ctx.start_y = SEGMENT.startY;
+  ctx.max_width = SEGMENT.maxWidth;
+  ctx.max_height = SEGMENT.maxHeight;
+
+  // Calculate full dimensions
+  ctx.full_width = ctx.mirror_x ? ctx.width * 2 : ctx.width;
+  ctx.full_height = ctx.mirror_y ? ctx.height * 2 : ctx.height;
+
+  // Get bus pixel data
+  Bus* bus = busses.getBus(0);
+  if (!bus) {
+    ctx.valid = false;
+    return false;
+  }
+
+  ctx.busPixelData = bus->getPixelData();
+  ctx.busPixelSize = ctx.max_width * ctx.max_height * 3;
+
+  if (ctx.busPixelData == nullptr || ctx.busPixelSize == 0) {
+    ctx.valid = false;
+    return false;
+  }
+
+  // Determine if we need transform buffer
+  ctx.needs_transform_buffer = ctx.transpose || ctx.mirror_x || ctx.mirror_y || ctx.reverse_x || ctx.reverse_y || ctx.start_x || ctx.start_y;
+
+  if (ctx.needs_transform_buffer) {
+    uint32_t needed = ctx.full_width * ctx.full_height * 3;
+    if (_ppa_transform_buffer_size != needed) {
+      if (_ppa_transform_buffer) heap_caps_free(_ppa_transform_buffer);
+      _ppa_transform_buffer = (uint8_t*)heap_caps_calloc(needed, 1,
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+      _ppa_transform_buffer_size = _ppa_transform_buffer ? needed : 0;
+    }
+    if (!_ppa_transform_buffer) {
+      ctx.valid = false;
+      return false;
+    }
+
+    ctx.effectBuffer = _ppa_transform_buffer;
+    ctx.effectBufferSize = _ppa_transform_buffer_size;
+    ctx.render_pic_w = ctx.full_width;
+    ctx.render_pic_h = ctx.full_height;
+  } else {
+    ctx.effectBuffer = ctx.busPixelData;
+    ctx.effectBufferSize = ctx.busPixelSize;
+    ctx.render_pic_w = ctx.max_width;
+    ctx.render_pic_h = ctx.max_height;
+  }
+
+  ctx.valid = true;
+  return true;
+}
+
+// Fill buffer with black - call after ppaEffectBegin
+inline void ppaEffectClear(PPAEffectContext& ctx) {
+  if (!ctx.valid) return;
+
+  ppa_fill_oper_config_t fill_config = {};
+  fill_config.out.buffer = ctx.effectBuffer;
+  fill_config.out.buffer_size = ctx.effectBufferSize;
+  fill_config.out.pic_w = ctx.render_pic_w;
+  fill_config.out.pic_h = ctx.render_pic_h;
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  if (ctx.needs_transform_buffer) {
+    // Clear entire transform buffer
+    fill_config.out.block_offset_x = 0;
+    fill_config.out.block_offset_y = 0;
+    fill_config.fill_block_w = ctx.full_width;
+    fill_config.fill_block_h = ctx.full_height;
+  } else {
+    // Clear only the segment area on bus
+    fill_config.out.block_offset_x = ctx.start_x;
+    fill_config.out.block_offset_y = ctx.start_y;
+    fill_config.fill_block_w = ctx.width;
+    fill_config.fill_block_h = ctx.height;
+  }
+
+  fill_config.fill_argb_color.r = 0;
+  fill_config.fill_argb_color.g = 0;
+  fill_config.fill_argb_color.b = 0;
+  fill_config.fill_argb_color.a = 0;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+}
+
+// Get a pre-configured fill config for rendering
+inline ppa_fill_oper_config_t ppaGetFillConfig(PPAEffectContext& ctx, ppa_fill_color_mode_t color_mode = PPA_FILL_COLOR_MODE_RGB888) {
+  ppa_fill_oper_config_t fill_config = {};
+  fill_config.out.buffer = ctx.effectBuffer;
+  fill_config.out.buffer_size = ctx.effectBufferSize;
+  fill_config.out.pic_w = ctx.render_pic_w;
+  fill_config.out.pic_h = ctx.render_pic_h;
+  fill_config.out.fill_cm = color_mode;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  // When rendering directly to bus (no transform buffer), offset by segment position
+  if (!ctx.needs_transform_buffer) {
+    fill_config.out.block_offset_x = ctx.start_x;
+    fill_config.out.block_offset_y = ctx.start_y;
+  } else {
+    fill_config.out.block_offset_x = 0;
+    fill_config.out.block_offset_y = 0;
+  }
+
+  fill_config.fill_block_w = ctx.width;
+  fill_config.fill_block_h = ctx.height;
+  fill_config.fill_argb_color.r = 0;
+  fill_config.fill_argb_color.g = 0;
+  fill_config.fill_argb_color.b = 0;
+  fill_config.fill_argb_color.a = 255;
+  return fill_config;
+}
+
+// Apply all transforms and copy to bus - call at end of effect
+inline void ppaEffectEnd(PPAEffectContext& ctx) {
+  if (!ctx.valid) return;
+
+  // Apply mirror transforms
+  if (ctx.mirror_x || ctx.mirror_y) {
+    ppa_srm_oper_config_t srm = {};
+    srm.in.buffer = ctx.effectBuffer;
+    srm.out.buffer = ctx.effectBuffer;
+    srm.out.buffer_size = ctx.effectBufferSize;
+    srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm.in.pic_w = ctx.full_width;
+    srm.in.pic_h = ctx.full_height;
+    srm.out.pic_w = ctx.full_width;
+    srm.out.pic_h = ctx.full_height;
+    srm.scale_x = 1;
+    srm.scale_y = 1;
+    srm.rgb_swap = 0;
+    srm.byte_swap = 0;
+    srm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    srm.mode = PPA_TRANS_MODE_BLOCKING;
+    srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+
+    srm.in.block_w = ctx.width;
+    srm.in.block_h = ctx.height;
+    srm.in.block_offset_x = 0;
+    srm.in.block_offset_y = 0;
+
+    if (ctx.mirror_x && ctx.mirror_y) {
+      // Apply reverse to source first if needed
+      if (ctx.reverse_x || ctx.reverse_y) {
+        srm.mirror_x = ctx.reverse_x;
+        srm.mirror_y = ctx.reverse_y;
+        srm.out.block_offset_x = ctx.width;
+        srm.out.block_offset_y = ctx.height;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = ctx.width;
+        srm.in.block_offset_y = ctx.height;
+        srm.mirror_x = false;
+        srm.mirror_y = false;
+        srm.out.block_offset_x = 0;
+        srm.out.block_offset_y = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = 0;
+        srm.in.block_offset_y = 0;
+      }
+
+      // Mirror to other quadrants
+      srm.mirror_x = true;
+      srm.mirror_y = false;
+      srm.out.block_offset_x = ctx.width;
+      srm.out.block_offset_y = 0;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+      srm.mirror_x = false;
+      srm.mirror_y = true;
+      srm.out.block_offset_x = 0;
+      srm.out.block_offset_y = ctx.height;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+      srm.mirror_x = true;
+      srm.mirror_y = true;
+      srm.out.block_offset_x = ctx.width;
+      srm.out.block_offset_y = ctx.height;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+    } else if (ctx.mirror_x) {
+      if (ctx.reverse_x || ctx.reverse_y) {
+        srm.mirror_x = ctx.reverse_x;
+        srm.mirror_y = ctx.reverse_y;
+        srm.out.block_offset_x = ctx.width;
+        srm.out.block_offset_y = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = ctx.width;
+        srm.in.block_offset_y = 0;
+        srm.mirror_x = false;
+        srm.mirror_y = false;
+        srm.out.block_offset_x = 0;
+        srm.out.block_offset_y = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = 0;
+        srm.in.block_offset_y = 0;
+      }
+
+      srm.mirror_x = true;
+      srm.mirror_y = false;
+      srm.out.block_offset_x = ctx.width;
+      srm.out.block_offset_y = 0;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+    } else if (ctx.mirror_y) {
+      if (ctx.reverse_x || ctx.reverse_y) {
+        srm.mirror_x = ctx.reverse_x;
+        srm.mirror_y = ctx.reverse_y;
+        srm.out.block_offset_x = 0;
+        srm.out.block_offset_y = ctx.height;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = 0;
+        srm.in.block_offset_y = ctx.height;
+        srm.mirror_x = false;
+        srm.mirror_y = false;
+        srm.out.block_offset_x = 0;
+        srm.out.block_offset_y = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+        srm.in.block_offset_x = 0;
+        srm.in.block_offset_y = 0;
+      }
+
+      srm.mirror_x = false;
+      srm.mirror_y = true;
+      srm.out.block_offset_x = 0;
+      srm.out.block_offset_y = ctx.height;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+    }
+  }
+
+  // Final output: copy from transform buffer to busPixelData at segment position
+  if (ctx.needs_transform_buffer) {
+    ppa_srm_oper_config_t srm = {};
+    srm.in.buffer = ctx.effectBuffer;
+    srm.in.pic_w = ctx.full_width;
+    srm.in.pic_h = ctx.full_height;
+    srm.in.block_w = ctx.full_width;
+    srm.in.block_h = ctx.full_height;
+    srm.in.block_offset_x = 0;
+    srm.in.block_offset_y = 0;
+    srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+    srm.out.buffer = ctx.busPixelData;
+    srm.out.buffer_size = ctx.busPixelSize;
+    srm.out.pic_w = ctx.max_width;
+    srm.out.pic_h = ctx.max_height;
+    srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+    srm.scale_x = 1;
+    srm.scale_y = 1;
+    srm.rgb_swap = 0;
+    srm.byte_swap = 0;
+    srm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    srm.mode = PPA_TRANS_MODE_BLOCKING;
+
+    if (ctx.transpose) {
+      // When transposed, the output dimensions are swapped
+      // Input is full_width x full_height (e.g., 128x192)
+      // Output position needs to account for rotation
+      srm.out.block_offset_x = ctx.start_x;
+      srm.out.block_offset_y = ctx.start_y;
+      srm.mirror_x = false;
+      srm.mirror_y = false;
+      srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+    } else {
+      // No transpose - copy to segment position with reverse if needed
+      srm.out.block_offset_x = ctx.start_x;
+      srm.out.block_offset_y = ctx.start_y;
+      srm.mirror_x = (ctx.reverse_x && !ctx.mirror_x && !ctx.mirror_y);
+      srm.mirror_y = (ctx.reverse_y && !ctx.mirror_x && !ctx.mirror_y);
+      srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+    }
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+  }
+}
+
+#endif // SOC_PPA_SUPPORTED
+
 // effect utility functions
 static uint8_t sin_gap(uint16_t in) {
   if (in & 0x100) return 0;
@@ -9120,113 +9464,507 @@ uint16_t mode_2DPaintbrush() {
 } // mode_2DPaintbrush()
 static const char _data_FX_MODE_2DPAINTBRUSH[] PROGMEM = "Paintbrush ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
+// uint16_t mode_GEQPPA() {
+//   #ifdef SOC_PPA_SUPPORTED
+
+//   if (!strip.isMatrix) return mode_static();
+
+//   const uint16_t width = SEGMENT.virtualWidth();
+//   const uint16_t height = SEGMENT.virtualHeight();
+//   static uint16_t pre_width = 0;
+//   static uint16_t pre_height = 0;
+//   static uint32_t renderbuffer_size = 0;
+//   static uint8_t* renderbuffer = nullptr;
+
+//   bool box_transpose = SEGMENT.transpose;
+//   bool box_mirror_x = SEGMENT.mirror;
+//   bool box_mirror_y = SEGMENT.mirror_y;
+//   bool box_reverse_x = SEGMENT.reverse;
+//   bool box_reverse_y = SEGMENT.reverse_y;
+
+//   if (!SEGENV.allocateData(4)) return mode_static();
+//   if (SEGENV.call == 0) {
+//     SEGMENT.setUpLeds();
+//   }
+
+//   byte* busPixelData = nullptr;
+//   uint32_t busPixelSize = 0;
+//   Bus* bus = busses.getBus(0);
+//   if (bus) {
+//     busPixelData = bus->getPixelData();
+//     busPixelSize = SEGMENT.maxWidth * SEGMENT.maxHeight * 3;
+//     if (busPixelData == NULL || busPixelSize == 0) return 1;
+//   } else {
+//     return 1;
+//   }
+
+//   // Calculate the full segment dimensions (before mirror halving)
+//   uint16_t full_width = box_mirror_x ? width * 2 : width;
+//   uint16_t full_height = box_mirror_y ? height * 2 : height;
+
+//   // Determine render target
+//   uint8_t* effectBuffer = busPixelData;
+//   uint32_t effectBufferSize = busPixelSize;
+//   static uint8_t* transform_buffer = nullptr;
+//   static uint32_t transform_buffer_size = 0;
+
+//   // Need separate buffer if transpose, mirror, OR reverse
+//   bool needs_transform_buffer = box_transpose || box_mirror_x || box_mirror_y || box_reverse_x || box_reverse_y;
+
+//   if (needs_transform_buffer) {
+//     uint32_t needed = full_width * full_height * 3;
+//     if (transform_buffer_size != needed) {
+//       if (transform_buffer) heap_caps_free(transform_buffer);
+//       transform_buffer = (uint8_t*)heap_caps_calloc(needed, 1,
+//         MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+//       transform_buffer_size = transform_buffer ? needed : 0;
+//     }
+//     if (!transform_buffer) return FRAMETIME;
+
+//     effectBuffer = transform_buffer;
+//     effectBufferSize = transform_buffer_size;
+//   }
+
+//   uint16_t render_pic_w = needs_transform_buffer ? full_width : SEGMENT.maxWidth;
+//   uint16_t render_pic_h = needs_transform_buffer ? full_height : SEGMENT.maxHeight;
+
+//   ppa_fill_oper_config_t fill_config = {};
+//   fill_config.out.buffer = effectBuffer;
+//   fill_config.out.buffer_size = effectBufferSize;
+//   fill_config.out.pic_w = render_pic_w;
+//   fill_config.out.pic_h = render_pic_h;
+//   fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+//   fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+//   fill_config.fill_block_w = width;
+//   fill_config.fill_block_h = height;
+//   fill_config.fill_argb_color.r = 0;
+//   fill_config.fill_argb_color.g = 0;
+//   fill_config.fill_argb_color.b = 0;
+//   fill_config.fill_argb_color.a = 0;
+
+//   // Fill the entire buffer black first
+//   if (needs_transform_buffer) {
+//     fill_config.fill_block_w = full_width;
+//     fill_config.fill_block_h = full_height;
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+//     fill_config.fill_block_w = width;
+//     fill_config.fill_block_h = height;
+//   } else if (!SEGMENT.check1) {
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+//   }
+
+//   if (SEGMENT.check1 && SEGMENT.intensity != 255) {
+
+//     if (SEGMENT.intensity == 0) return FRAMETIME;
+
+//     if (width != pre_width || height != pre_height) {
+//       if (renderbuffer != nullptr) {
+//         heap_caps_free(renderbuffer);
+//         renderbuffer = nullptr;
+//       }
+//       renderbuffer_size = width * height * 4;
+//       renderbuffer = (uint8_t*)heap_caps_calloc(renderbuffer_size, sizeof(byte),
+//         MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+//       pre_height = height;
+//       pre_width = width;
+//     }
+
+//     fill_config.out.buffer = renderbuffer;
+//     fill_config.out.buffer_size = renderbuffer_size;
+//     fill_config.out.pic_w = width;
+//     fill_config.out.pic_h = height;
+//     fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+//   }
+
+//   um_data_t* um_data = getAudioData();
+//   uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+
+//   uint8_t scaler = SEGMENT.check2 ? 2 : 1;
+
+//   for (int i = 0; i < 16; i++) {
+//     int x_start = (i * width) / (16 * scaler);
+//     int x_end = ((i + 1) * width) / (16 * scaler);
+//     int bar_width = x_end - x_start;
+
+//     int unscaled_bar_height = map8(fftResult[i], 0, height);
+//     int scaled_bar_height = unscaled_bar_height / scaler;
+
+//     if (bar_width == 0 || scaled_bar_height == 0) continue;
+
+//     fill_config.out.block_offset_x = x_start;
+//     fill_config.fill_block_w = bar_width;
+//     fill_config.out.block_offset_y = (height / scaler) - scaled_bar_height;
+//     fill_config.fill_block_h = scaled_bar_height;
+
+//     fill_config.fill_argb_color.r = beatsin8(60, 0, 255, i * 32, 0);
+//     fill_config.fill_argb_color.g = beatsin8(60, 0, 255, i * 32, 85);
+//     fill_config.fill_argb_color.b = beatsin8(60, 0, 255, i * 32, 170);
+//     fill_config.fill_argb_color.a = SEGMENT.intensity;
+
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+//   }
+
+//   if (SEGMENT.check2) {
+//     ppa_srm_oper_config_t srm_config = {};
+//     srm_config.in.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
+//     srm_config.out.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
+//     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+//     srm_config.in.block_offset_x = 0;
+//     srm_config.in.block_offset_y = 0;
+//     srm_config.in.buffer = fill_config.out.buffer;
+//     srm_config.out.buffer = fill_config.out.buffer;
+//     srm_config.out.buffer_size = fill_config.out.buffer_size;
+//     srm_config.in.pic_w = width;
+//     srm_config.in.pic_h = height;
+//     srm_config.out.pic_w = fill_config.out.pic_w;
+//     srm_config.out.pic_h = fill_config.out.pic_h;
+//     srm_config.out.block_offset_x = 0;
+//     srm_config.out.block_offset_y = 0;
+//     srm_config.scale_x = 1;
+//     srm_config.scale_y = 1;
+//     srm_config.mirror_x = false;
+//     srm_config.mirror_y = false;
+//     srm_config.rgb_swap = 0;
+//     srm_config.byte_swap = 0;
+//     srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//     srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+//     srm_config.in.block_w = width / scaler;
+//     srm_config.in.block_h = height / scaler;
+
+//     srm_config.out.block_offset_x = width / scaler;
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+//     srm_config.mirror_y = true;
+//     srm_config.out.block_offset_y = height / scaler;
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+//     srm_config.in.block_offset_y = 0;
+//     srm_config.in.block_offset_x = width / scaler;
+//     srm_config.in.block_h = height;
+//     srm_config.mirror_x = true;
+//     srm_config.out.block_offset_x = 0;
+//     srm_config.out.block_offset_y = 0;
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+//   }
+
+//   if (SEGMENT.check1 && SEGMENT.intensity != 255) {
+//     ppa_blend_oper_config_t blend_config = {};
+//     blend_config.in_bg.buffer = effectBuffer;
+//     blend_config.in_bg.pic_w = render_pic_w;
+//     blend_config.in_bg.pic_h = render_pic_h;
+//     blend_config.in_bg.block_w = width;
+//     blend_config.in_bg.block_h = height;
+//     blend_config.in_bg.block_offset_x = 0;
+//     blend_config.in_bg.block_offset_y = 0;
+//     blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+//     blend_config.in_fg.buffer = renderbuffer;
+//     blend_config.in_fg.pic_w = width;
+//     blend_config.in_fg.pic_h = height;
+//     blend_config.in_fg.block_w = width;
+//     blend_config.in_fg.block_h = height;
+//     blend_config.in_fg.block_offset_x = 0;
+//     blend_config.in_fg.block_offset_y = 0;
+//     blend_config.bg_rgb_swap = 0;
+//     blend_config.bg_byte_swap = 0;
+//     blend_config.fg_rgb_swap = 0;
+//     blend_config.fg_byte_swap = 0;
+//     blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+//     blend_config.out.buffer = effectBuffer;
+//     blend_config.out.buffer_size = effectBufferSize;
+//     blend_config.out.pic_w = render_pic_w;
+//     blend_config.out.pic_h = render_pic_h;
+//     blend_config.out.block_offset_x = 0;
+//     blend_config.out.block_offset_y = 0;
+//     blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+//     blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//     blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//     blend_config.bg_ck_en = false;
+//     blend_config.fg_ck_en = false;
+//     blend_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+//     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
+//   }
+
+//   // Apply mirror transforms
+//   if (box_mirror_x || box_mirror_y) {
+//     ppa_srm_oper_config_t srm = {};
+//     srm.in.buffer = effectBuffer;
+//     srm.out.buffer = effectBuffer;
+//     srm.out.buffer_size = effectBufferSize;
+//     srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+//     srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+//     srm.in.pic_w = full_width;
+//     srm.in.pic_h = full_height;
+//     srm.out.pic_w = full_width;
+//     srm.out.pic_h = full_height;
+//     srm.scale_x = 1;
+//     srm.scale_y = 1;
+//     srm.rgb_swap = 0;
+//     srm.byte_swap = 0;
+//     srm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//     srm.mode = PPA_TRANS_MODE_BLOCKING;
+//     srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+
+//     srm.in.block_w = width;
+//     srm.in.block_h = height;
+//     srm.in.block_offset_x = 0;
+//     srm.in.block_offset_y = 0;
+
+//     if (box_mirror_x && box_mirror_y) {
+//       // First: if reverse is needed, apply it to source by copying to a safe spot and back
+//       if (box_reverse_x || box_reverse_y) {
+//         // Copy source to bottom-right with reverse applied
+//         srm.mirror_x = box_reverse_x;
+//         srm.mirror_y = box_reverse_y;
+//         srm.out.block_offset_x = width;
+//         srm.out.block_offset_y = height;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Copy back to top-left (now reversed)
+//         srm.in.block_offset_x = width;
+//         srm.in.block_offset_y = height;
+//         srm.mirror_x = false;
+//         srm.mirror_y = false;
+//         srm.out.block_offset_x = 0;
+//         srm.out.block_offset_y = 0;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Reset source to top-left
+//         srm.in.block_offset_x = 0;
+//         srm.in.block_offset_y = 0;
+//       }
+
+//       // Now mirror from (possibly reversed) source to other quadrants
+//       // Copy to top-right (mirror X)
+//       srm.mirror_x = true;
+//       srm.mirror_y = false;
+//       srm.out.block_offset_x = width;
+//       srm.out.block_offset_y = 0;
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//       // Copy to bottom-left (mirror Y)
+//       srm.mirror_x = false;
+//       srm.mirror_y = true;
+//       srm.out.block_offset_x = 0;
+//       srm.out.block_offset_y = height;
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//       // Copy to bottom-right (mirror X and Y)
+//       srm.mirror_x = true;
+//       srm.mirror_y = true;
+//       srm.out.block_offset_x = width;
+//       srm.out.block_offset_y = height;
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//     } else if (box_mirror_x) {
+//       // First: if reverse is needed, apply it to source
+//       if (box_reverse_x || box_reverse_y) {
+//         // Copy source to right half with reverse applied
+//         srm.mirror_x = box_reverse_x;
+//         srm.mirror_y = box_reverse_y;
+//         srm.out.block_offset_x = width;
+//         srm.out.block_offset_y = 0;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Copy back to left half (now reversed)
+//         srm.in.block_offset_x = width;
+//         srm.in.block_offset_y = 0;
+//         srm.mirror_x = false;
+//         srm.mirror_y = false;
+//         srm.out.block_offset_x = 0;
+//         srm.out.block_offset_y = 0;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Reset source to left half
+//         srm.in.block_offset_x = 0;
+//         srm.in.block_offset_y = 0;
+//       }
+
+//       // Mirror from (possibly reversed) source to right half
+//       srm.mirror_x = true;
+//       srm.mirror_y = false;
+//       srm.out.block_offset_x = width;
+//       srm.out.block_offset_y = 0;
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//     } else if (box_mirror_y) {
+//       // First: if reverse is needed, apply it to source
+//       if (box_reverse_x || box_reverse_y) {
+//         // Copy source to bottom half with reverse applied
+//         srm.mirror_x = box_reverse_x;
+//         srm.mirror_y = box_reverse_y;
+//         srm.out.block_offset_x = 0;
+//         srm.out.block_offset_y = height;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Copy back to top half (now reversed)
+//         srm.in.block_offset_x = 0;
+//         srm.in.block_offset_y = height;
+//         srm.mirror_x = false;
+//         srm.mirror_y = false;
+//         srm.out.block_offset_x = 0;
+//         srm.out.block_offset_y = 0;
+//         ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+
+//         // Reset source to top half
+//         srm.in.block_offset_x = 0;
+//         srm.in.block_offset_y = 0;
+//       }
+
+//       // Mirror from (possibly reversed) source to bottom half
+//       srm.mirror_x = false;
+//       srm.mirror_y = true;
+//       srm.out.block_offset_x = 0;
+//       srm.out.block_offset_y = height;
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+//     }
+//   }
+
+//   // Final output: copy from transform buffer to busPixelData
+//   if (needs_transform_buffer) {
+//     if (box_transpose) {
+//       // Rotate 90° from transform buffer to bus
+//       ppa_srm_oper_config_t srm = {};
+//       srm.in.buffer = effectBuffer;
+//       srm.in.pic_w = full_width;
+//       srm.in.pic_h = full_height;
+//       srm.in.block_w = full_width;
+//       srm.in.block_h = full_height;
+//       srm.in.block_offset_x = 0;
+//       srm.in.block_offset_y = 0;
+//       srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+//       srm.out.buffer = busPixelData;
+//       srm.out.buffer_size = busPixelSize;
+//       srm.out.pic_w = SEGMENT.maxWidth;
+//       srm.out.pic_h = SEGMENT.maxHeight;
+//       srm.out.block_offset_x = 0;
+//       srm.out.block_offset_y = 0;
+//       srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+//       srm.scale_x = 1;
+//       srm.scale_y = 1;
+//       srm.mirror_x = false;
+//       srm.mirror_y = false;
+//       srm.rgb_swap = 0;
+//       srm.byte_swap = 0;
+//       srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+//       srm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//       srm.mode = PPA_TRANS_MODE_BLOCKING;
+
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+//     } else {
+//       // No transpose - copy with reverse applied if needed
+//       ppa_srm_oper_config_t srm = {};
+//       srm.in.buffer = effectBuffer;
+//       srm.in.pic_w = full_width;
+//       srm.in.pic_h = full_height;
+//       srm.in.block_w = full_width;
+//       srm.in.block_h = full_height;
+//       srm.in.block_offset_x = 0;
+//       srm.in.block_offset_y = 0;
+//       srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+//       srm.out.buffer = busPixelData;
+//       srm.out.buffer_size = busPixelSize;
+//       srm.out.pic_w = SEGMENT.maxWidth;
+//       srm.out.pic_h = SEGMENT.maxHeight;
+//       srm.out.block_offset_x = 0;
+//       srm.out.block_offset_y = 0;
+//       srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+//       srm.scale_x = 1;
+//       srm.scale_y = 1;
+//       // Apply reverse here if no mirror was done
+//       srm.mirror_x = (box_reverse_x && !box_mirror_x && !box_mirror_y);
+//       srm.mirror_y = (box_reverse_y && !box_mirror_x && !box_mirror_y);
+//       srm.rgb_swap = 0;
+//       srm.byte_swap = 0;
+//       srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+//       srm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+//       srm.mode = PPA_TRANS_MODE_BLOCKING;
+
+//       ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm));
+//     }
+//   }
+
+//   #endif
+//   return FRAMETIME;
+// } // mode_GEQPPA()
+// static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Ewowi Style,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
+
 uint16_t mode_GEQPPA() {
   #ifdef SOC_PPA_SUPPORTED
-  // Author: @TroyHacks
-  // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 
-  if (!strip.isMatrix) return mode_static(); // not a 2D set-up
+  if (!strip.isMatrix) return mode_static();
 
-  const uint16_t width = SEGMENT.virtualWidth();
-  const uint16_t height = SEGMENT.virtualHeight();
+  // Initialize PPA context
+  PPAEffectContext ctx;
+  if (!ppaEffectBegin(ctx)) return mode_static();
+
   static uint16_t pre_width = 0;
   static uint16_t pre_height = 0;
   static uint32_t renderbuffer_size = 0;
   static uint8_t* renderbuffer = nullptr;
 
-  uint16_t box_start_x = SEGMENT.start;
-  uint16_t box_start_y = SEGMENT.startY;
-  uint16_t box_stop_x = SEGMENT.stop;
-  uint16_t box_stop_y = SEGMENT.stopY;
-  uint16_t box_mirror_x = SEGMENT.mirror;
-  uint16_t box_mirror_y = SEGMENT.mirror_y;
-  
-  if (micros() % 100 < 3) USER_PRINTF("vWidth: %u vHeight: %u Width: %u Height: %u StartX: %u StartY: %u StopX: %u StopY: %u MaxX: %u MaxY: %u MirrorX: %u MirrorY: %u\n", width, height, SEGMENT.width(), SEGMENT.height(), box_start_x, box_start_y, box_stop_x, box_stop_y, SEGMENT.maxWidth, SEGMENT.maxHeight, box_mirror_x, box_mirror_y);
-
-  if (!SEGENV.allocateData(4)) return mode_static(); //allocation failed  if (!SEGENV.allocateData(4)) return mode_static();
+  if (!SEGENV.allocateData(4)) return mode_static();
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
   }
+  
+  // Get base fill config
+  ppa_fill_oper_config_t fill_config = ppaGetFillConfig(ctx);
 
-  byte* busPixelData = nullptr;
-  uint32_t busPixelSize = 0;
-  Bus* bus = busses.getBus(0);
-  if (bus) {
-    busPixelData = bus->getPixelData();
-    busPixelSize = SEGMENT.length() * 3;
-    if (busPixelData == NULL || busPixelSize == 0) return 1;
-  } else {
-    return 1;
-  }
+  // Clear buffer
+  // ppaEffectClear(ctx);
 
-
-  ppa_fill_oper_config_t fill_config = {};
-  fill_config.out.buffer = busPixelData;
-  fill_config.out.buffer_size = busPixelSize;
-  fill_config.out.pic_w = width;
-  fill_config.out.pic_h = height;
-  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
-  fill_config.mode = PPA_TRANS_MODE_BLOCKING; // PPA_TRANS_MODE_BLOCKING;
-  fill_config.fill_block_w = width;
-  fill_config.fill_block_h = height;
-  fill_config.fill_argb_color.r = 0;
-  fill_config.fill_argb_color.g = 0;
-  fill_config.fill_argb_color.b = 0;
-  fill_config.fill_argb_color.a = 0;
-
-  if (SEGMENT.check1 && SEGMENT.intensity != 255) { // allow overlay but at 255 we don't need transparcy
-
+  // Handle overlay mode
+  if (SEGMENT.check1 && SEGMENT.intensity != 255) {
     if (SEGMENT.intensity == 0) return FRAMETIME;
 
-    if (width != pre_width || height != pre_height) {
-
+    if (ctx.width != pre_width || ctx.height != pre_height) {
       if (renderbuffer != nullptr) {
-        free(renderbuffer);
+        heap_caps_free(renderbuffer);
         renderbuffer = nullptr;
       }
-
-      renderbuffer_size = width * height * 4;
-
-      renderbuffer = (uint8_t*)heap_caps_calloc(renderbuffer_size, sizeof(byte), MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
-
-      pre_height = height;
-      pre_width = width;
-
+      renderbuffer_size = ctx.width * ctx.height * 4;
+      renderbuffer = (uint8_t*)heap_caps_calloc(renderbuffer_size, sizeof(byte),
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+      pre_height = ctx.height;
+      pre_width = ctx.width;
     }
 
     fill_config.out.buffer = renderbuffer;
     fill_config.out.buffer_size = renderbuffer_size;
+    fill_config.out.pic_w = ctx.width;
+    fill_config.out.pic_h = ctx.height;
     fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
-
-  }
-  
-  if (!SEGMENT.check1) {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config)); // fill black
+    fill_config.fill_argb_color.a = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+  } else {
+    ppaEffectClear(ctx);
   }
 
+  // Get audio data
   um_data_t* um_data = getAudioData();
   uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
 
-  uint8_t scaler = SEGMENT.check2 ? 2 : 1;
+  uint8_t scaler = 1;
 
+  // Draw bars
   for (int i = 0; i < 16; i++) {
-
-    int x_start = (i * width) / (16 * scaler);
-    int x_end = ((i + 1) * width) / (16 * scaler);
+    int x_start = (i * ctx.width) / (16 * scaler);
+    int x_end = ((i + 1) * ctx.width) / (16 * scaler);
     int bar_width = x_end - x_start;
 
-    int unscaled_bar_height = map8(fftResult[i], 0, height);
+    int unscaled_bar_height = map8(fftResult[i], 0, ctx.height);
     int scaled_bar_height = unscaled_bar_height / scaler;
 
-    if (bar_width == 0 || scaled_bar_height == 0) {
-      continue;
-    }
+    if (bar_width == 0 || scaled_bar_height == 0) continue;
 
     fill_config.out.block_offset_x = x_start;
     fill_config.fill_block_w = bar_width;
-
-    fill_config.out.block_offset_y = (height / scaler) - scaled_bar_height;
+    fill_config.out.block_offset_y = (ctx.height / scaler) - scaled_bar_height;
     fill_config.fill_block_h = scaled_bar_height;
 
     fill_config.fill_argb_color.r = beatsin8(60, 0, 255, i * 32, 0);
@@ -9237,66 +9975,22 @@ uint16_t mode_GEQPPA() {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
   }
 
-  if (SEGMENT.check2) {
-
-    ppa_srm_oper_config_t srm_config = {};
-    srm_config.in.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
-    srm_config.out.srm_cm = ppa_srm_color_mode_t(fill_config.out.fill_cm);
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    srm_config.in.block_offset_x = 0;
-    srm_config.in.block_offset_y = 0;
-    srm_config.in.buffer = fill_config.out.buffer;
-    srm_config.out.buffer = fill_config.out.buffer;
-    srm_config.out.buffer_size = fill_config.out.buffer_size;
-    srm_config.in.pic_w = width;
-    srm_config.in.pic_h = height;
-    srm_config.out.pic_w = width;
-    srm_config.out.pic_h = height;
-    srm_config.out.block_offset_x = 0;
-    srm_config.out.block_offset_y = 0;
-    srm_config.scale_x = 1;
-    srm_config.scale_y = 1;
-    srm_config.mirror_x = false;
-    srm_config.mirror_y = false;
-    srm_config.rgb_swap = 0;
-    srm_config.byte_swap = 0;
-    srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-    srm_config.in.block_w = width / scaler;
-    srm_config.in.block_h = height / scaler;
-
-    srm_config.out.block_offset_x = width / scaler;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-    srm_config.mirror_y = true;
-    srm_config.out.block_offset_y = height / scaler;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-    srm_config.in.block_offset_y = 0;
-    srm_config.in.block_offset_x = width / scaler;
-    srm_config.in.block_h = height;
-    srm_config.mirror_x = true;
-    srm_config.out.block_offset_x = 0;
-    srm_config.out.block_offset_y = 0;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-
-  }
-
+  // Blend overlay if enabled
   if (SEGMENT.check1 && SEGMENT.intensity != 255) {
-
     ppa_blend_oper_config_t blend_config = {};
-    blend_config.in_bg.buffer = busPixelData;
-    blend_config.in_bg.pic_w = width;
-    blend_config.in_bg.pic_h = height;
-    blend_config.in_bg.block_w = width;
-    blend_config.in_bg.block_h = height;
+    blend_config.in_bg.buffer = ctx.effectBuffer;
+    blend_config.in_bg.pic_w = ctx.render_pic_w;
+    blend_config.in_bg.pic_h = ctx.render_pic_h;
+    blend_config.in_bg.block_w = ctx.width;
+    blend_config.in_bg.block_h = ctx.height;
     blend_config.in_bg.block_offset_x = 0;
     blend_config.in_bg.block_offset_y = 0;
     blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
     blend_config.in_fg.buffer = renderbuffer;
-    blend_config.in_fg.pic_w = width;
-    blend_config.in_fg.pic_h = height;
-    blend_config.in_fg.block_w = width;
-    blend_config.in_fg.block_h = height;
+    blend_config.in_fg.pic_w = ctx.width;
+    blend_config.in_fg.pic_h = ctx.height;
+    blend_config.in_fg.block_w = ctx.width;
+    blend_config.in_fg.block_h = ctx.height;
     blend_config.in_fg.block_offset_x = 0;
     blend_config.in_fg.block_offset_y = 0;
     blend_config.bg_rgb_swap = 0;
@@ -9304,10 +9998,10 @@ uint16_t mode_GEQPPA() {
     blend_config.fg_rgb_swap = 0;
     blend_config.fg_byte_swap = 0;
     blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
-    blend_config.out.buffer = busPixelData;
-    blend_config.out.buffer_size = busPixelSize;
-    blend_config.out.pic_w = width;
-    blend_config.out.pic_h = height;
+    blend_config.out.buffer = ctx.effectBuffer;
+    blend_config.out.buffer_size = ctx.effectBufferSize;
+    blend_config.out.pic_w = ctx.render_pic_w;
+    blend_config.out.pic_h = ctx.render_pic_h;
     blend_config.out.block_offset_x = 0;
     blend_config.out.block_offset_y = 0;
     blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
@@ -9318,15 +10012,15 @@ uint16_t mode_GEQPPA() {
     blend_config.mode = PPA_TRANS_MODE_BLOCKING;
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-
-    if (width != SEGMENT.maxWidth || height != SEGMENT.maxHeight)
-    ppa_srm_oper_config_t srm_config = {};
-
   }
+
+  // Apply all segment transforms and copy to output
+  ppaEffectEnd(ctx);
+
   #endif
   return FRAMETIME;
-} // mode_GEQPPA()
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Ewowi Style,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
+}
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Check 2,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
 
 #include <algorithm>
 #include <dirent.h>
