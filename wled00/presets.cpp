@@ -332,7 +332,9 @@ void savePreset(byte index, const char* pname, JsonObject sObj) {
     presetCache[index].isPlaylist = playlistSave; // playlistSave is set earlier
     String safeName = strip_unicode(saveName);
     strlcpy(presetCache[index].name, safeName.c_str(), sizeof(presetCache[index].name));
+    #if defined(CONFIG_SOC_PPA_SUPPORTED)
     update_screen_background = true;
+    #endif
   }
 }
 
@@ -345,7 +347,9 @@ void deletePreset(byte index) {
     presetCache[index].exists = false;
     presetCache[index].isPlaylist = false;
     presetCache[index].name[0] = '\0';
+    #if defined(CONFIG_SOC_PPA_SUPPORTED)
     update_screen_background = true;
+    #endif
   }
 }
 

@@ -1,6 +1,8 @@
 #include "wled.h"
 #include "ImageCacheManager.h"
+#if defined(SOC_USB_OTG_SUPPORTED)
 #include "esp_vfs_fat.h"
+#endif
 #include "palettes.h"
 
 #define JSON_PATH_STATE      1
@@ -973,8 +975,7 @@ void serializeInfo(JsonObject root)
     case REALTIME_MODE_DMX:      root["lm"] = F("DMX"); break;
   }
 
-  if (realtimeIP[0] == 0)
-  {
+  if (realtimeIP[0] == 0) {
     root[F("lip")] = "";
   } else {
     root[F("lip")] = realtimeIP.toString();
@@ -991,12 +992,12 @@ void serializeInfo(JsonObject root)
   root[F("cpalcount")] = strip.customPalettes.size(); //number of custom palettes
 
   JsonArray ledmaps = root.createNestedArray(F("maps"));
-  for (size_t i=0; i<WLED_MAX_LEDMAPS; i++) {
-    if ((ledMaps>>i) & 0x00000001U) {
+  for (size_t i = 0; i < WLED_MAX_LEDMAPS; i++) {
+    if ((ledMaps >> i) & 0x00000001U) {
       JsonObject ledmaps0 = ledmaps.createNestedObject();
       ledmaps0["id"] = i;
       #ifndef ESP8266
-      if (i && ledmapNames[i-1]) ledmaps0["n"] = ledmapNames[i-1];
+      if (i && ledmapNames[i - 1]) ledmaps0["n"] = ledmapNames[i - 1];
       #endif
     }
   }
@@ -1031,115 +1032,127 @@ void serializeInfo(JsonObject root)
 
     // --- Detailed Access Point (AP) Info ---
     wifi_ap_record_t ap_info;
-    // if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-    //   JsonObject ap_obj = wifi_obj.createNestedObject("ap");
-    //   ap_obj["ssid"] = (char*)ap_info.ssid;
-    //   ap_obj["bssid"] = Network.format_mac_address(ap_info.bssid);
-    //   ap_obj["rssi"] = ap_info.rssi;
-    //   ap_obj["signal"] = getSignalQuality(ap_info.rssi);
-    //   ap_obj["channel"] = ap_info.primary;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+      JsonObject ap_obj = wifi_obj.createNestedObject("ap");
+      ap_obj["ssid"] = (char*)ap_info.ssid;
+      ap_obj["bssid"] = Network.format_mac_address(ap_info.bssid);
+      ap_obj["rssi"] = ap_info.rssi;
+      ap_obj["signal"] = getSignalQuality(ap_info.rssi);
+      ap_obj["channel"] = ap_info.primary;
 
-    //   const char* authmode_str = "Unknown";
-    //   switch (ap_info.authmode) {
-    //   case WIFI_AUTH_OPEN: authmode_str = "Open"; break;
-    //   case WIFI_AUTH_WEP: authmode_str = "WEP"; break;
-    //   case WIFI_AUTH_WPA_PSK: authmode_str = "WPA-PSK"; break;
-    //   case WIFI_AUTH_WPA2_PSK: authmode_str = "WPA2-PSK"; break;
-    //   case WIFI_AUTH_WPA_WPA2_PSK: authmode_str = "WPA/WPA2-PSK"; break;
-    //   case WIFI_AUTH_WPA2_ENTERPRISE: authmode_str = "WPA2-Ent"; break;
-    //   case WIFI_AUTH_WPA3_PSK: authmode_str = "WPA3-PSK"; break;
-    //   case WIFI_AUTH_WPA2_WPA3_PSK: authmode_str = "WPA2/WPA3-PSK"; break;
-    //   default: break;
-    //   }
-    //   ap_obj["auth"] = authmode_str;
+      const char* authmode_str = "Unknown";
+      switch (ap_info.authmode) {
+      case WIFI_AUTH_OPEN: authmode_str = "Open"; break;
+      case WIFI_AUTH_WEP: authmode_str = "WEP"; break;
+      case WIFI_AUTH_WPA_PSK: authmode_str = "WPA-PSK"; break;
+      case WIFI_AUTH_WPA2_PSK: authmode_str = "WPA2-PSK"; break;
+      case WIFI_AUTH_WPA_WPA2_PSK: authmode_str = "WPA/WPA2-PSK"; break;
+      case WIFI_AUTH_WPA2_ENTERPRISE: authmode_str = "WPA2-Ent"; break;
+      case WIFI_AUTH_WPA3_PSK: authmode_str = "WPA3-PSK"; break;
+      case WIFI_AUTH_WPA2_WPA3_PSK: authmode_str = "WPA2/WPA3-PSK"; break;
+      default: break;
+      }
+      ap_obj["auth"] = authmode_str;
 
-    //   uint8_t protocol_bitmap = 0;
-    //   if (esp_wifi_get_protocol(WIFI_IF_STA, &protocol_bitmap) == ESP_OK) {
-    //     String protocols = "";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11B)  protocols += "B,";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11G)  protocols += "G,";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11N)  protocols += "N,";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_LR)   protocols += "LR,";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11AX) protocols += "AX,";
-    //     // A and AC are 5GHz only.
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11A)  protocols += "A,";
-    //     if (protocol_bitmap & WIFI_PROTOCOL_11AC) protocols += "AC,";
+      String protocols = "";
+      #if CONFIG_SOC_WIFI_HE_SUPPORT
+      wifi_protocols_t proto;
+      if (esp_wifi_get_protocols(WIFI_IF_STA, &proto) == ESP_OK) {
+        uint8_t all_proto = proto.ghz_2g | proto.ghz_5g;
+        if (all_proto & WIFI_PROTOCOL_11B)  protocols += "B,";
+        if (all_proto & WIFI_PROTOCOL_11G)  protocols += "G,";
+        if (all_proto & WIFI_PROTOCOL_11N)  protocols += "N,";
+        if (all_proto & WIFI_PROTOCOL_LR)   protocols += "LR,";
+        if (all_proto & WIFI_PROTOCOL_11AX) protocols += "AX,";
+        if (all_proto & WIFI_PROTOCOL_11A)  protocols += "A,";
+        if (all_proto & WIFI_PROTOCOL_11AC) protocols += "AC,";
+      }
+      #else
+      uint8_t protocol_bitmap = 0;
+      if (esp_wifi_get_protocol(WIFI_IF_STA, &protocol_bitmap) == ESP_OK) {
+        if (protocol_bitmap & WIFI_PROTOCOL_11B)  protocols += "B,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11G)  protocols += "G,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11N)  protocols += "N,";
+        if (protocol_bitmap & WIFI_PROTOCOL_LR)   protocols += "LR,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11AX) protocols += "AX,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11A)  protocols += "A,";
+        if (protocol_bitmap & WIFI_PROTOCOL_11AC) protocols += "AC,";
+      }
+      #endif
+      if (protocols.length() > 0) {
+        protocols.remove(protocols.length() - 1);
+      }
+      wifi_obj["protocols"] = protocols;
 
-    //     if (protocols.length() > 0) {
-    //       protocols.remove(protocols.length() - 1);
-    //     }
-    //     wifi_obj["protocols"] = protocols;
-    //   }
+      const char* bandwidth_str;
+      switch (ap_info.bandwidth) {
+      case WIFI_BW_HT40:   bandwidth_str = "40MHz"; break;
+      case WIFI_BW80:      bandwidth_str = "80MHz"; break;
+      case WIFI_BW160:     bandwidth_str = "160MHz"; break;
+      case WIFI_BW80_BW80: bandwidth_str = "80+80MHz"; break;
+      case WIFI_BW_HT20:
+      default:             bandwidth_str = "20MHz"; break;
+      }
+      ap_obj["bw"] = bandwidth_str;
 
-    //   const char* bandwidth_str;
-    //   switch (ap_info.bandwidth) {
-    //   case WIFI_BW_HT40:   bandwidth_str = "40MHz"; break;
-    //   case WIFI_BW80:      bandwidth_str = "80MHz"; break;
-    //   case WIFI_BW160:     bandwidth_str = "160MHz"; break;
-    //   case WIFI_BW80_BW80: bandwidth_str = "80+80MHz"; break;
-    //   case WIFI_BW_HT20:
-    //   default:             bandwidth_str = "20MHz"; break;
-    //   }
-    //   ap_obj["bw"] = bandwidth_str;
+      String phy_modes = "";
+      if (ap_info.phy_11b) phy_modes += "B,";
+      if (ap_info.phy_11g) phy_modes += "G,";
+      if (ap_info.phy_11n) phy_modes += "N,";
+      if (ap_info.phy_11ax) phy_modes += "AX,";
+      if (phy_modes.length() > 0) {
+        phy_modes.remove(phy_modes.length() - 1);
+      }
+      ap_obj["phy"] = phy_modes;
 
-    //   String phy_modes = "";
-    //   if (ap_info.phy_11b) phy_modes += "B,";
-    //   if (ap_info.phy_11g) phy_modes += "G,";
-    //   if (ap_info.phy_11n) phy_modes += "N,";
-    //   if (ap_info.phy_11ax) phy_modes += "AX,";
-    //   if (phy_modes.length() > 0) {
-    //     phy_modes.remove(phy_modes.length() - 1);
-    //   }
-    //   ap_obj["phy"] = phy_modes;
+      #ifndef CONFIG_IDF_TARGET_ESP32P4
+      wifi_phy_mode_t phymode;
 
-    //   #ifndef CONFIG_IDF_TARGET_ESP32P4
-    //   wifi_phy_mode_t phymode;
+      if (esp_wifi_sta_get_negotiated_phymode(&phymode) == ESP_OK) {
+        const char* mode_str = "Unknown";
+        switch (phymode) {
+        case WIFI_PHY_MODE_11B:  mode_str = "802.11b"; break;
+        case WIFI_PHY_MODE_11G:  mode_str = "802.11g"; break;
+          // HT modes are part of 802.11n (Wi-Fi 4)
+        case WIFI_PHY_MODE_HT20: mode_str = "802.11n (20MHz)"; break;
+        case WIFI_PHY_MODE_HT40: mode_str = "802.11n (40MHz)"; break;
+          // HE mode is part of 802.11ax (Wi-Fi 6)
+        case WIFI_PHY_MODE_HE20: mode_str = "802.11ax (20MHz)"; break;
+          // Add other modes as needed
+        case WIFI_PHY_MODE_LR:   mode_str = "Low Rate"; break;
+        default: break;
+        }
+        wifi_obj["mode"] = mode_str;
+      } else {
+        wifi_obj["mode"] = "Unknown Mode";
+      }
+      #else
+      #warning FIXME: Skipping over esp_wifi_sta_get_negotiated_phymode code on ESP32-P4 and making an informed assumption. Maybe update the embedded C6?
+      uint8_t local_protocol_bitmap = 0;
+      esp_wifi_get_protocol(WIFI_IF_STA, &local_protocol_bitmap);
 
-    //   if (esp_wifi_sta_get_negotiated_phymode(&phymode) == ESP_OK) {
-    //     const char* mode_str = "Unknown";
-    //     switch (phymode) {
-    //     case WIFI_PHY_MODE_11B:  mode_str = "802.11b"; break;
-    //     case WIFI_PHY_MODE_11G:  mode_str = "802.11g"; break;
-    //       // HT modes are part of 802.11n (Wi-Fi 4)
-    //     case WIFI_PHY_MODE_HT20: mode_str = "802.11n (20MHz)"; break;
-    //     case WIFI_PHY_MODE_HT40: mode_str = "802.11n (40MHz)"; break;
-    //       // HE mode is part of 802.11ax (Wi-Fi 6)
-    //     case WIFI_PHY_MODE_HE20: mode_str = "802.11ax (20MHz)"; break;
-    //       // Add other modes as needed
-    //     case WIFI_PHY_MODE_LR:   mode_str = "Low Rate"; break;
-    //     default: break;
-    //     }
-    //     wifi_obj["mode"] = mode_str;
-    //   } else {
-    //     wifi_obj["mode"] = "Unknown Mode";
-    //   }
-    //   #else
-    //   #warning FIXME: Skipping over esp_wifi_sta_get_negotiated_phymode code on ESP32-P4 and making an informed assumption. Maybe update the embedded C6?
-    //   uint8_t local_protocol_bitmap = 0;
-    //   esp_wifi_get_protocol(WIFI_IF_STA, &local_protocol_bitmap);
+      const char* mode_str = "Unknown";
 
-    //   const char* mode_str = "Unknown";
+      // Check from the best protocol downwards
+      if ((local_protocol_bitmap & WIFI_PROTOCOL_11AX) && ap_info.phy_11ax) {
+        mode_str = "802.11ax (Wi-Fi 6)";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11N) && ap_info.phy_11n) {
+        mode_str = "802.11n (Wi-Fi 4)";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11G) && ap_info.phy_11g) {
+        mode_str = "802.11g";
+      } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11B) && ap_info.phy_11b) {
+        mode_str = "802.11b";
+      }
+      wifi_obj["mode"] = mode_str;
+      #endif
 
-    //   // Check from the best protocol downwards
-    //   if ((local_protocol_bitmap & WIFI_PROTOCOL_11AX) && ap_info.phy_11ax) {
-    //     mode_str = "802.11ax (Wi-Fi 6)";
-    //   } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11N) && ap_info.phy_11n) {
-    //     mode_str = "802.11n (Wi-Fi 4)";
-    //   } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11G) && ap_info.phy_11g) {
-    //     mode_str = "802.11g";
-    //   } else if ((local_protocol_bitmap & WIFI_PROTOCOL_11B) && ap_info.phy_11b) {
-    //     mode_str = "802.11b";
-    //   }
-    //   wifi_obj["mode"] = mode_str;
-    //   #endif
-
-    //   if (ap_info.country.cc[0] != 0) {
-    //     char country_str[3];
-    //     strncpy(country_str, (const char*)ap_info.country.cc, 2);
-    //     country_str[2] = '\0';
-    //     ap_obj["country"] = country_str;
-    //   }
-    // }
+      if (ap_info.country.cc[0] != 0) {
+        char country_str[3];
+        strncpy(country_str, (const char*)ap_info.country.cc, 2);
+        country_str[2] = '\0';
+        ap_obj["country"] = country_str;
+      }
+    }
   }
 
   // --- Ethernet Section ---
@@ -1204,6 +1217,7 @@ void serializeInfo(JsonObject root)
     uint64_t usb_bytes_free = 0;
     const char* mount_path = "/usb0";
 
+    #if defined(SOC_USB_OTG_SUPPORTED)
     esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);
 
     if (result == ESP_OK) {
@@ -1212,6 +1226,7 @@ void serializeInfo(JsonObject root)
       usb_info["u"] = usb_bytes_used;
       usb_info["t"] = usb_bytes_total;
     }
+    #endif
   }
 
   root[F("ndc")] = nodeListEnabled ? (int)Nodes.size() : -1;

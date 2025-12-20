@@ -273,7 +273,7 @@ BusPwm::BusPwm(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
     deallocatePins(); return;
     }
     _pins[i] = currentPin; //store only after allocatePin() succeeds
-  #if defined(ESP8266) || defined (CONFIG_IDF_TARGET_ESP32P4)
+    #if defined(ESP8266) ||defined(CONFIG_IDF_TARGET_ARCH_RISCV)
     pinMode(_pins[i], OUTPUT);
     #else
     ledcSetup(_ledcStart + i, _frequency, 8);
@@ -393,7 +393,7 @@ void BusPwm::deallocatePins() {
   for (uint8_t i = 0; i < numPins; i++) {
     pinManager.deallocatePin(_pins[i], PinOwner::BusPwm);
     if (!pinManager.isPinOk(_pins[i])) continue;
-  #if defined(ESP8266) || defined (CONFIG_IDF_TARGET_ESP32P4)
+  #if defined(ESP8266) || defined (CONFIG_IDF_TARGET_ARCH_RISCV)
     digitalWrite(_pins[i], LOW); //turn off PWM interrupt
     #else
     if (_ledcStart < 16) ledcDetachPin(_pins[i]);

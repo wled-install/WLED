@@ -140,6 +140,8 @@ String PinManagerClass::getPinSpecialText(int gpio) {  // special purpose PIN in
     #elif defined(CONFIG_IDF_TARGET_ESP32C6)
       // ESP32-C6
       if (gpio > 11 && gpio < 14) return (F("USB (CDC) / JTAG"));
+    #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+      if (gpio == 13 || gpio == 14) return (F("USB/SDIO (usable)"));
     #elif defined(CONFIG_IDF_TARGET_ESP32P4)
       if (gpio >= 34 && gpio <= 38) return (F("(strapping pin)"));
       if (gpio == 26 || gpio == 27) return (F("Extra USB (usable)"));
@@ -151,7 +153,7 @@ String PinManagerClass::getPinSpecialText(int gpio) {  // special purpose PIN in
       //if (gpio == 12) return (F("(strapping pin - MTDI)"));
       //if (gpio == 15) return (F("(strapping pin - MTDO)"));
       //if (gpio > 11 && gpio < 16) return (F("(optional) JTAG debug probe"));
-      #if defined(BOARD_HAS_PSRAM) && !defined()
+      #if defined(BOARD_HAS_PSRAM) && !defined(CONFIG_IDF_TARGET_ARCH_RISCV)
         if (gpio == 16 || gpio == 17) return (F("(reserved) PSRAM"));
       #endif
       #if defined(ARDUINO_TTGO_T7_V14_Mini32) || defined(ARDUINO_LOLIN_D32_PRO) || defined(ARDUINO_ADAFRUIT_FEATHER_ESP32_V2)
@@ -811,6 +813,10 @@ bool PinManagerClass::isPinOk(byte gpio, bool output) const
     if (gpio > 21 && gpio < 33) return false;     // 22 to 32: not connected + SPI FLASH
     // JTAG: GPIO39-42 are usually used for inline debugging
     // GPIO46 is input only and pulled down
+  #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    // DevKit has 22 exposed GPIOs, but numbers up to 28.
+    // 0 to 15 then 23 to 28
+    if (gpio > 15 && gpio < 23) return false;     // Not exposed puins
   #elif defined(CONFIG_IDF_TARGET_ESP32P4)
     // strapping pins: 34,35,36,37,38
     // Hide all pins not available on connector except pins we need to assign to things later, like I2S

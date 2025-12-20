@@ -9,7 +9,9 @@
 #include "wled.h"
 #include "FX.h"
 #include "fcn_declare.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include <LovyanGFX.hpp>
+#endif
 #ifdef WLEDMM_FASTPATH
 #undef SEGMENT
 #undef SEGENV
@@ -9332,7 +9334,7 @@ uint16_t mode_GEQLASER(void) {
         if (rows-y > 0) SEGMENT.drawLine(linex,rows-y-1,*projector,horizon,ledColorTemp,false,depth); // left side perspective
       }
 
-      ledColorTemp = color_fade(ledColor,128,true);
+      ledColorTemp = color_fade(ledColor,64,true);
       if (heights[i] < rows-horizon && (*projector <=linex || *projector >= pPos)) { // draw if above horizon AND not directly under projector (special case later)
         if (rows-heights[i] > 1) {  // sanity check - avoid negative Y
           for (uint_fast8_t x=linex; x<=pPos;x++) {
@@ -10555,6 +10557,7 @@ struct WaveformPoint {
 // 1. Helper: Truncates a single string if it exceeds width
 //    Now accepts the framebuffer reference 'fb'
 // ---------------------------------------------------------
+#if defined(SOC_PPA_SUPPORTED)
 String truncateToWidth(LGFX_Sprite & fb, String text, int32_t max_w) {
   // Check width using the passed framebuffer
   if (fb.textWidth(text) <= max_w) {
@@ -10616,6 +10619,7 @@ void drawSmartSection(LGFX_Sprite& fb, String text, int32_t x, int32_t& cursor_y
     cursor_y += line_h;
   }
 }
+#endif
 
 uint16_t mode_PRO_LINK() {
   #if defined(SOC_PPA_SUPPORTED) && defined(USERMOD_PIONEER_PROLINK)
@@ -10948,9 +10952,12 @@ uint16_t mode_PRO_LINK() {
 }
 static const char _data_FX_MODE_PRO_LINK[] PROGMEM = "Pro Link ☾🐺@?1??,2???,3???,4???,5???,6???,7???,8????;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,o1=0,o2=0,o3=0";
 
+#if defined(SOC_PPA_SUPPORTED)
 static LGFX_Sprite _djCircleSprite;
+#endif
 
 uint16_t mode_DJLight_Circles(void) {
+  #if defined(SOC_PPA_SUPPORTED)
   if (!SEGMENT.is2D()) return mode_DJLight();
 
   const uint16_t cols = SEGMENT.virtualWidth();
@@ -11107,7 +11114,7 @@ uint16_t mode_DJLight_Circles(void) {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
 
   }
-
+  #endif
   return FRAMETIME;
 }
 static const char _data_FX_MODE_DJLIGHT_CIRCLES[] PROGMEM = "DJ Light Circles@Speed,Vibrancy,,,,Candy Factory;;;2f;ix=0,m12=0,si=0";

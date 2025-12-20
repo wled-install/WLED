@@ -45,6 +45,8 @@ extern "C" {
 #include "esp32c3/rom/spi_flash.h"
 #elif CONFIG_IDF_TARGET_ESP32C6
 #include "esp32c6/rom/spi_flash.h"
+#elif CONFIG_IDF_TARGET_ESP32C5
+#include "esp32c5/rom/spi_flash.h"
 #elif CONFIG_IDF_TARGET_ESP32H2
 #include "esp32h2/rom/spi_flash.h"
 #elif CONFIG_IDF_TARGET_ESP32P4
@@ -66,8 +68,10 @@ extern "C" {
   #include "esp32c2/rom/rtc.h"
 #elif CONFIG_IDF_TARGET_ESP32C3  // ESP32-C3
   #include "esp32c3/rom/rtc.h"
+#elif CONFIG_IDF_TARGET_ESP32C5  // ESP32-C6
+  #include "esp32c5/rom/rtc.h"
 #elif CONFIG_IDF_TARGET_ESP32C6  // ESP32-C6
-  #include "esp32c6/rom/rtc.h"
+#include "esp32c6/rom/rtc.h"
 #elif CONFIG_IDF_TARGET_ESP32H2  // ESP32-H2
   #include "esp32h2/rom/rtc.h"
 #elif CONFIG_IDF_TARGET_ESP32P4  // ESP32-P4

@@ -446,26 +446,78 @@ void clearEEPROM();
 #endif
 
 //wled_math.cpp
+void init_math();
+
+// WLEDMM: math functions inlined for speed
+
+// 16-bit, integer based Bhaskara I's sine approximation: 16*x*(pi - x) / (5*pi^2 - 4*x*(pi - x))
+// input is 16bit unsigned (0-65535), output is 16bit signed (-32767 to +32767)
+// optimized integer implementation by @dedehai
+inline int16_t sin16_t(uint16_t theta) {
+  int scale = 1;
+  if (theta > 0x7FFF) {
+    theta = 0xFFFF - theta;
+    scale = -1; // second half of the sine function is negative (pi - 2*pi)
+  }
+  uint32_t precal = theta * (0x7FFF - theta);
+  uint64_t numerator = (uint64_t)precal * (4 * 0x7FFF); // 64bit required
+  int32_t denominator = 1342095361 - precal; // 1342095361 is 5 * 0x7FFF^2 / 4
+  int16_t result = numerator / denominator;
+  return result * scale;
+}
+inline int16_t cos16_t(uint16_t theta) {
+  return sin16_t(theta + 0x4000); //cos(x) = sin(x+pi/2)
+}
+
+#if defined(ARDUINO_ARCH_ESP32)
+// WLEDMM: use pre-calculated lookup-table for sin8_t
+extern uint8_t sinT[256];    // wled_math.cpp
+inline uint8_t sin8_t(uint8_t theta) { return sinT[theta]; }
+#else
+// no LUT on 8266, to save 256 bytes of RAM
+inline uint8_t sin8_t(uint8_t theta) {
+  int32_t sin16 = sin16_t((uint16_t)theta * 257); // 255 * 257 = 0xFFFF
+  sin16 += 0x7FFF + 128; //shift result to range 0-0xFFFF, +128 for rounding
+  return min(sin16, int32_t(0xFFFF)) >> 8; // min performs saturation, and prevents overflow
+}
+#endif
+inline uint8_t cos8_t(uint8_t theta) {
+  return sin8_t(theta + 64); //cos(x) = sin(x+pi/2)
+}
+
 //float cos_t(float phi); // use float math
 //float sin_t(float phi);
 //float tan_t(float x);
-int16_t sin16_t(uint16_t theta);
-int16_t cos16_t(uint16_t theta);
-uint8_t sin8_t(uint8_t theta);
-uint8_t cos8_t(uint8_t theta);
 
 float sin_approx(float theta); // uses integer math (converted to float), accuracy +/-0.0015 (compared to sinf())
 float cos_approx(float theta);
 float tan_approx(float x);
-//float atan2_t(float y, float x);
-//float acos_t(float x);
-//float asin_t(float x);
-//template <typename T> T atan_t(T x);
-//float floor_t(float x);
-//float fmod_t(float num, float denom);
+#if defined(WLED_USE_UNREAL_MATH)
+float atan2_t(float y, float x);
+float acos_t(float x);
+float asin_t(float x);
+template <typename T> T atan_t(T x);
+float floor_t(float x);
+float fmod_t(float num, float denom);
+#endif
 #define sin_t sin_approx
 #define cos_t cos_approx
 #define tan_t tan_approx
+
+#if !defined(WLED_USE_UNREAL_MATH)
+#include <math.h>  // standard math functions. use a lot of flash
+#define atan2_t atan2f
+#define asin_t asinf
+#define acos_t acosf
+#define atan_t atanf
+#define fmod_t fmodf
+#define floor_t floorf
+#endif
+/*
+#define sin_t sinf
+#define cos_t cosf
+#define tan_t tanf
+*/
 
 #include <math.h>  // standard math functions. use a lot of flash
 #define atan2_t atan2f
@@ -485,6 +537,7 @@ void handleSerial();
 void updateBaudRate(uint32_t rate);
 bool canUseSerial(void);   // WLEDMM returns true if Serial can be used for debug output (i.e. not configured for other purpose)
 void serial_drain();
+void task_list();
 
 //wled_server.cpp
 bool isIp(String str);

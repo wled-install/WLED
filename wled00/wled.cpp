@@ -3,6 +3,9 @@ static const char *TAG = "WLED";
 #include "wled.h"
 #include "wled_ethernet.h"
 #include <Arduino.h>
+#if !defined(CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT)
+  #define CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT 0
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   #include "esp_ldo_regulator.h" // ESP32-P4 for higher GPIOS.
   esp_ldo_channel_handle_t ldo2 = NULL;
@@ -343,7 +346,7 @@ static const char *TAG = "WLED";
     #error please fix your build environment. only one CONFIG_IDF_TARGET may be defined
   #endif
   // make sure we have a supported CONFIG_IDF_TARGET_
-  #if !defined(CONFIG_IDF_TARGET_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3)  && !defined(CONFIG_IDF_TARGET_ESP32C6) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+  #if !defined(CONFIG_IDF_TARGET_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3)  && !defined(CONFIG_IDF_TARGET_ESP32C6) && !defined(CONFIG_IDF_TARGET_ESP32P4) && !defined(CONFIG_IDF_TARGET_ESP32C5) 
     #error please fix your build environment. No supported CONFIG_IDF_TARGET was defined
   #endif
   #if CONFIG_IDF_TARGET_ESP32_SOLO || CONFIG_IDF_TARGET_ESP32SOLO
@@ -595,9 +598,8 @@ void background_loop_nonblocking(void* pvParameters) {
     WLED::handleStatusLED();
     #endif
 
-    app_message_t msg;
-
     #ifdef SOC_USB_OTG_SUPPORTED
+    app_message_t msg;
     // Poll for messages without blocking
     if (xQueueReceive(app_queue, &msg, 0)) {
       switch (msg.id) {
@@ -649,8 +651,9 @@ void WLED::loop() { // loopTask
   #endif
 
   if (!interfacesInited || strip.getBrightness() == 0) {
-    taskYIELD();  // Just yield, don't sleep
-    return;  // Skip the rest of the loop
+    delay(10);
+    // taskYIELD();  // Just yield, don't sleep
+    // return;  // Skip the rest of the loop
   }
   
   if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
@@ -806,6 +809,8 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       interfacesInited = false;
       wifi_is_connected = false;
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+      wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
+      USER_PRINTF("Disconnected from %s, reason: %d\n", event->ssid, event->reason);
       USER_PRINTLN("Event: WiFi Lost Connection");
       interfacesInited = false;
       wifi_is_connected = false;
@@ -939,6 +944,8 @@ void WLED::setup() {
   #else  // 8266
   if (Serial) Serial.setTimeout(50);  // WLEDMM - only when serial is initialized
   #endif
+  
+  init_math();  // WLEDMM: pre-calculate some lookup tables
 
   bool fsinit = false;
   USER_PRINTLN(F("Mounting FS ..."));
@@ -989,30 +996,91 @@ void WLED::setup() {
         } else if (check == ESP_HOSTED_SLAVE_OTA_NOT_REQUIRED) {
           USER_PRINTLN("WiFi CoProcessor doesn't need upgrading!");
         }
+      #else
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_restore());
       #endif
-      esp_netif_init();
-      
-      sta_netif = esp_netif_create_default_wifi_sta();
-      ap_netif = esp_netif_create_default_wifi_ap();
+        esp_netif_init();
+        sta_netif = esp_netif_create_default_wifi_sta();
+        ap_netif = esp_netif_create_default_wifi_ap();
+        wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
+        esp_wifi_init(&wifi_initiation);
+        s_wifi_event_group = xEventGroupCreate();
+        if (s_wifi_event_group == NULL) {
+          USER_PRINTLN("FATAL: Failed to create WiFi event group!");
+        }
+        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
 
-      wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
-      esp_wifi_init(&wifi_initiation);
-      s_wifi_event_group = xEventGroupCreate();
-      if (s_wifi_event_group == NULL) {
-        USER_PRINTLN("FATAL: Failed to create WiFi event group!");
-      }
-      esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
-      esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
-      uint8_t wifi_protocols;
-      if (CONFIG_SLAVE_SOC_WIFI_HE_SUPPORT) {
-        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX);
-      } else {
-        wifi_protocols = (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N);
-      }
-      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol((wifi_interface_t)ESP_IF_WIFI_STA, wifi_protocols));
-      // esp_wifi_set_mode(WIFI_MODE_APSTA);
-      // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
-    #endif
+        wifi_country_t country = {
+          .cc = "US",
+          .schan = 1,
+          .nchan = 14,
+          .max_tx_power = 20,
+          .policy = WIFI_COUNTRY_POLICY_MANUAL
+        };
+        esp_wifi_set_country(&country);
+
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+
+        // Wait for WiFi to be fully ready
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Stop any auto-connection attempt
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        #if CONFIG_SOC_WIFI_HE_SUPPORT
+        wifi_band_mode_t band_mode;
+        esp_wifi_get_band_mode(&band_mode);
+        Serial.printf("Band mode: %d (1=2G, 2=5G, 3=AUTO)\n", band_mode);
+
+        wifi_protocols_t protocols;
+        esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
+        Serial.printf("2.4GHz protocols: 0x%02x\n", protocols.ghz_2g);
+        Serial.printf("5GHz protocols: 0x%02x\n", protocols.ghz_5g);
+        #endif
+
+        wifi_country_t country_check;
+        esp_wifi_get_country(&country_check);
+        Serial.printf("Country: %.2s, channels %d-%d\n",
+          country_check.cc, country_check.schan, country_check.schan + country_check.nchan - 1);
+
+        // Scan to see what networks are visible
+        wifi_scan_config_t scan_config = {
+          .ssid = NULL,
+          .bssid = NULL,
+          .channel = 0,
+          .show_hidden = true,
+          .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+          .scan_time = {
+            .active = {.min = 100, .max = 300 },
+          }
+        };
+
+        Serial.println("Starting scan...");
+        esp_err_t scan_err = esp_wifi_scan_start(&scan_config, true);
+        Serial.printf("Scan returned: %d\n", scan_err);
+
+        uint16_t ap_count = 0;
+        esp_wifi_scan_get_ap_num(&ap_count);
+
+        Serial.printf("Found %d APs:\n", ap_count);
+        if (ap_count > 0) {
+          wifi_ap_record_t* ap_list = (wifi_ap_record_t*)malloc(ap_count * sizeof(wifi_ap_record_t));
+          esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+
+          for (int i = 0; i < ap_count; i++) {
+            Serial.printf("  %-24s CH:%3d RSSI:%d %s\n",
+              ap_list[i].ssid,
+              ap_list[i].primary,
+              ap_list[i].rssi,
+              ap_list[i].primary >= 36 ? "(5GHz)" : "(2.4GHz)");
+          }
+          free(ap_list);
+        }
+        #endif
+
 
     #ifdef WLED_USE_ETHERNET
       // Initialize TCP/IP network interface
@@ -1092,7 +1160,9 @@ void WLED::setup() {
   #endif
 
   USER_PRINT(F("CPU:   ")); USER_PRINT(ESP.getChipModel());
+  #if !defined (CONFIG_IDF_TARGET_ESP32C5)
   USER_PRINT(F(" rev.")); USER_PRINT(ESP.getChipRevision());
+  #endif
   USER_PRINT(F(", ")); USER_PRINT(ESP.getChipCores()); USER_PRINT(F(" core(s)"));
   USER_PRINT(F(", ")); USER_PRINT(ESP.getCpuFreqMHz()); USER_PRINTLN(F("MHz."));
 
@@ -1213,30 +1283,6 @@ void WLED::setup() {
   pinManager.allocatePin(SOC_TX0, true, PinOwner::DebugOut);
   #endif
 
-  // #if defined(SOC_PARLIO_SUPPORTED) && defined(PARLIO) 
-  //   #ifndef PARLIO_PINS
-  //     #define PARLIO_PINS -1
-  //   #endif
-  //   constexpr int8_t tempPins[] = { PARLIO_PINS };  // You can define more than 16 here
-  //   constexpr int totalDefined = sizeof(tempPins) / sizeof(tempPins[0]);
-
-  //   managed_pin_type parlio_pins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
-  //   int allocatedCount = 0;
-
-  //   for (int i = 0; i < totalDefined && allocatedCount < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
-  //       byte gpio = tempPins[i];
-
-  //       // Try to allocate the pin
-  //       if (pinManager.allocatePin(gpio, true, PinOwner::Parallel_IO)) {
-  //           parlio_pins[allocatedCount++] = { static_cast<int8_t>(gpio), true };
-  //       }
-  //   }
-
-  //   // Fill remaining slots with -1 to mark unused
-  //   for (int i = allocatedCount; i < SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH; ++i) {
-  //       parlio_pins[i] = { -1, false };
-  //   }
-  // #endif
   #if defined(BOARD_HAS_PSRAM) && (defined(WLED_USE_PSRAM) || defined(WLED_USE_PSRAM_JSON))       // WLEDMM
   if (psramFound()) {  // OK use
     DEBUG_PRINT(F("Total PSRAM: ")); DEBUG_PRINT(ESP.getPsramSize()/1024); DEBUG_PRINTLN("kB");
@@ -1343,7 +1389,9 @@ void WLED::setup() {
     pinMode(STATUSLED, OUTPUT);
   }
 #endif
+  #if defined(CONFIG_IDF_TARGET_ESP32P4)
   esp_ldo_dump(stdout);
+  #endif
   DEBUG_PRINTLN(F("Initializing strip"));
   beginStrip();
   DEBUG_PRINT(F("heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
@@ -1477,8 +1525,8 @@ void WLED::setup() {
 
   xTaskCreatePinnedToCore(
     background_loop_blocking,  // Task function
-    "BG_Blocking",     // Name
-    24000,            // Stack size in words
+    "BG_Blocking",    // Name
+    4800,             // Stack size in words
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
@@ -1488,12 +1536,59 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
-    24000,            // Stack size in words
+    4800,             // Stack size in words
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
     0                 // Core ID (0 or 1)
   );
+
+  #define MAX_TASKS 30 // if you see "zero tasks" raise this number. If there's more tasks than this, you get NO tasks back.
+
+  TaskStatus_t taskStatusArray[MAX_TASKS];
+  UBaseType_t taskCount;
+  uint32_t totalRunTime;
+
+  taskCount = uxTaskGetSystemState(taskStatusArray, MAX_TASKS, &totalRunTime);
+
+  // Sort tasks first by Core ID, then by descending Run Time (CPU usage)
+  std::sort(taskStatusArray, taskStatusArray + taskCount, [](const TaskStatus_t& a, const TaskStatus_t& b) {
+    // Primary sort: Core ID (Core 0, then Core 1, then unassigned)
+    if (a.xCoreID != b.xCoreID) {
+      return a.xCoreID < b.xCoreID;
+    }
+    // Secondary sort: Run Time (higher usage first)
+    return a.ulRunTimeCounter > b.ulRunTimeCounter;
+    });
+
+  printf("Found %d tasks\n", taskCount);
+  printf("Name\t\tState\tPrio\tStack\tRun Time\tCPU %%\tCore\n");
+
+  for (UBaseType_t i = 0; i < taskCount; i++) {
+    TaskStatus_t* ts = &taskStatusArray[i];
+
+    const char* state;
+    switch (ts->eCurrentState) {
+    case eRunning:   state = "Running"; break;
+    case eReady:     state = "Ready"; break;
+    case eBlocked:   state = "Blocked"; break;
+    case eSuspended: state = "Suspended"; break;
+    case eDeleted:   state = "Deleted"; break;
+    default:         state = "Unknown"; break;
+    }
+
+    char cpu_percent[32];
+    snprintf(cpu_percent, sizeof(cpu_percent), "%5.2f%%", totalRunTime > 0 ? (100.0f * ts->ulRunTimeCounter) / totalRunTime : 0.0f);
+
+    printf("%-12s %-10s %4u\t%5u\t%10lu\t%s\t%2d\n",
+      ts->pcTaskName,
+      state,
+      ts->uxCurrentPriority,
+      ts->usStackHighWaterMark,
+      ts->ulRunTimeCounter,
+      cpu_percent,
+      ts->xCoreID == tskNO_AFFINITY ? -1 : ts->xCoreID);
+  }
 
   //#endif
   // WLEDMM end
@@ -1667,21 +1762,6 @@ void WLED::initConnection() {
     USER_PRINTF("Connecting to WiFi Station: \"%s\" with password \"%s\"\n", wifi_sta_config.sta.ssid, "********");
   }
 
-//   EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-//     WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-//     pdFALSE,
-//     pdFALSE,
-//     portMAX_DELAY);
-
-//   /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
-//   * happened. */
-//   if (bits & WIFI_CONNECTED_BIT) {
-//     USER_PRINTF("Connected to AP SSID:%s password:%s\n", clientSSID, clientPass);
-//   } else if (bits & WIFI_FAIL_BIT) {
-//     USER_PRINTF("Failed to connect to SSID:%s, password:%s\n", clientSSID, clientPass);
-//   } else {
-//     ESP_LOGE(TAG, "UNEXPECTED EVENT");
-//   }
 #endif
 
 #ifdef WLED_USE_ETHERNET

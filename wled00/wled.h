@@ -108,8 +108,8 @@
     #ifdef WLED_USE_ETHERNET
       #include <esp_eth.h>
     #endif
+    #include "nvs_flash.h"
     #ifdef CONFIG_IDF_TARGET_ESP32P4
-      #include "nvs_flash.h"
       #include <esp_hosted.h>
       #include "esp_hosted_ota.h"
       #include "esp_hosted_api_types.h"

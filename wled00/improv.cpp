@@ -10,7 +10,7 @@
   #define DIMPROV_PRINTF(x...)
 #endif
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ARCH_RISCV)
 #undef WLED_DISABLE_IMPROV_WIFISCAN
 #define WLED_DISABLE_IMPROV_WIFISCAN
 #endif
@@ -199,6 +199,8 @@ void sendImprovInfoResponse() {
       "esp8266"
     #elif CONFIG_IDF_TARGET_ESP32C3
       "esp32-c3"
+    #elif CONFIG_IDF_TARGET_ESP32C5
+    "esp32-c5"
     #elif CONFIG_IDF_TARGET_ESP32C6
       "esp32-c6"
     #elif CONFIG_IDF_TARGET_ESP32S2

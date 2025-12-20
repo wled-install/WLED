@@ -2387,7 +2387,7 @@ class AudioReactive : public Usermod {
             audioSyncEnabled = AUDIOSYNC_REC; // force udp sound receive mode
           break;
 
-        #if  !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        #if  !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ARCH_RISCV)
         // ADC over I2S is only possible on "classic" ESP32
         case 0:
         default:
@@ -2727,7 +2727,11 @@ class AudioReactive : public Usermod {
           // ... task creation logic ...
           if (audioSource)
             xTaskCreateUniversal(
+              #if defined(CONFIG_SOC_CPU_CORES_NUM) && CONFIG_SOC_CPU_CORES_NUM > 1
               FFTcode, "FFT", 8192, NULL, FFTTASK_PRIORITY, &FFT_Task, 1
+              #else 
+              FFTcode, "FFT", 8192, NULL, FFTTASK_PRIORITY, & FFT_Task, -1
+              #endif
             );
         }
       }
