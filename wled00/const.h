@@ -43,8 +43,8 @@
       #elif defined(CONFIG_IDF_TARGET_ESP32S3)  // 4 RMT, 8 LEDC, has 2 I2S but NPB does not support them ATM
       #define WLED_MAX_BUSSES 6               // will allow 4 digital & 2 analog
       #define WLED_MIN_VIRTUAL_BUSSES 4
-      #elif defined(CONFIG_IDF_TARGET_ESP32P4)  // becasue of framebuffer, for now we support 1 physical or 1 local bus
-      #define WLED_MAX_BUSSES 1               // will allow 4 digital & 2 analog
+      #elif defined(CONFIG_IDF_TARGET_ARCH_RISCV)  // becasue of framebuffer, for now we support 1 physical or 1 local bus
+      #define WLED_MAX_BUSSES 1               
       #define WLED_MIN_VIRTUAL_BUSSES 0
     #else
       #if defined(USERMOD_AUDIOREACTIVE)      // requested by @softhack007 https://github.com/blazoncek/WLED/issues/33

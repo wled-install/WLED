@@ -162,11 +162,15 @@ button {
 }
 
 .keytd {
+  width: 33%;
 	text-align: left;
+  white-space: nowrap;
 }
 
 .valtd {
+  width: 67%;
 	text-align: right;
+  white-space: nowrap;
 }
 
 .valtd i {

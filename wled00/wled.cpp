@@ -889,6 +889,62 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t
 }
 #endif
 
+void print_wifi_protocols(const char* prefix, uint16_t protocols) {
+  USER_PRINTF("%s: ", prefix);
+
+  bool first = true;
+
+  if (protocols & WIFI_PROTOCOL_11B) {
+    USER_PRINTF("802.11b");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_11G) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("802.11g");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_11N) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("802.11n");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_11A) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("802.11a");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_11AC) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("802.11ac");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_11AX) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("802.11ax");
+    first = false;
+  }
+  if (protocols & WIFI_PROTOCOL_LR) {
+    if (!first) USER_PRINTF(" | ");
+    USER_PRINTF("LR");
+    first = false;
+  }
+
+  if (first) {
+    USER_PRINTF("None");
+  }
+
+  USER_PRINTF(" (0x%02x)\n", protocols);
+}
+
+const char* wifi_band_mode_to_string(wifi_band_mode_t mode) {
+  switch (mode) {
+  case WIFI_BAND_MODE_2G_ONLY:   return "2.4GHz Only";
+  case WIFI_BAND_MODE_5G_ONLY:   return "5GHz Only";
+  case WIFI_BAND_MODE_AUTO:      return "Auto (2.4GHz/5GHz)";
+  default:                        return "Unknown";
+  }
+}
+
 void WLED::setup() {
 
   #ifdef WLED_DEBUG
@@ -1020,32 +1076,50 @@ void WLED::setup() {
         };
         esp_wifi_set_country(&country);
 
-        esp_wifi_set_mode(WIFI_MODE_APSTA);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+        // esp_wifi_set_mode(WIFI_MODE_APSTA);
+        // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
 
-        // Wait for WiFi to be fully ready
+        // // Wait for WiFi to be fully ready
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        // Stop any auto-connection attempt
-        esp_wifi_disconnect();
+        // // Stop any auto-connection attempt
+        // esp_wifi_disconnect();
         vTaskDelay(pdMS_TO_TICKS(100));
+        USER_PRINTLN("Checking WiFi Stuff");
 
-        #if CONFIG_SOC_WIFI_HE_SUPPORT
+        // #if CONFIG_SOC_WIFI_HE_SUPPORT
         wifi_band_mode_t band_mode;
         esp_wifi_get_band_mode(&band_mode);
-        Serial.printf("Band mode: %d (1=2G, 2=5G, 3=AUTO)\n", band_mode);
+        USER_PRINTF("Band mode: %s\n", wifi_band_mode_to_string(band_mode));
 
         wifi_protocols_t protocols;
         esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
-        Serial.printf("2.4GHz protocols: 0x%02x\n", protocols.ghz_2g);
-        Serial.printf("5GHz protocols: 0x%02x\n", protocols.ghz_5g);
+        print_wifi_protocols("2.4GHz protocols before set:", protocols.ghz_2g);
+        print_wifi_protocols("5GHz protocols before set:", protocols.ghz_5g);
         #endif
 
         wifi_country_t country_check;
         esp_wifi_get_country(&country_check);
-        Serial.printf("Country: %.2s, channels %d-%d\n",
-          country_check.cc, country_check.schan, country_check.schan + country_check.nchan - 1);
+        USER_PRINTF("Country: %.2s, channels %d-%d\n", country_check.cc, country_check.schan, country_check.schan + country_check.nchan - 1);
 
+        wifi_protocols_t xprotocols = {
+          .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
+          .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N
+        };
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocols(WIFI_IF_STA, &xprotocols));
+
+        wifi_bandwidths_t bw_config = {
+          .ghz_2g = WIFI_BW_HT40,
+          .ghz_5g = WIFI_BW_HT40,
+        };
+        esp_err_t err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bw_config);
+        USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
+
+        esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
+        print_wifi_protocols("2.4GHz protocols after set:", protocols.ghz_2g);
+        print_wifi_protocols("5GHz protocols after set:", protocols.ghz_5g);
+
+        #ifdef WLEDMM_SHOW_WIFI_SCAN
         // Scan to see what networks are visible
         wifi_scan_config_t scan_config = {
           .ssid = NULL,
@@ -1057,21 +1131,21 @@ void WLED::setup() {
             .active = {.min = 100, .max = 300 },
           }
         };
-
-        Serial.println("Starting scan...");
+        
+        USER_PRINTLN("Starting scan...");
         esp_err_t scan_err = esp_wifi_scan_start(&scan_config, true);
-        Serial.printf("Scan returned: %d\n", scan_err);
+        USER_PRINTF("Scan returned: %d\n", scan_err);
 
         uint16_t ap_count = 0;
         esp_wifi_scan_get_ap_num(&ap_count);
 
-        Serial.printf("Found %d APs:\n", ap_count);
+        USER_PRINTF("Found %d APs:\n", ap_count);
         if (ap_count > 0) {
           wifi_ap_record_t* ap_list = (wifi_ap_record_t*)malloc(ap_count * sizeof(wifi_ap_record_t));
           esp_wifi_scan_get_ap_records(&ap_count, ap_list);
 
           for (int i = 0; i < ap_count; i++) {
-            Serial.printf("  %-24s CH:%3d RSSI:%d %s\n",
+            USER_PRINTF("  %-24s CH:%3d RSSI:%d %s\n",
               ap_list[i].ssid,
               ap_list[i].primary,
               ap_list[i].rssi,
@@ -1080,6 +1154,7 @@ void WLED::setup() {
           free(ap_list);
         }
         #endif
+        // #endif
 
 
     #ifdef WLED_USE_ETHERNET
@@ -1536,59 +1611,12 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
-    4800,             // Stack size in words
+    4000,             // Stack size in words
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
     0                 // Core ID (0 or 1)
   );
-
-  #define MAX_TASKS 30 // if you see "zero tasks" raise this number. If there's more tasks than this, you get NO tasks back.
-
-  TaskStatus_t taskStatusArray[MAX_TASKS];
-  UBaseType_t taskCount;
-  uint32_t totalRunTime;
-
-  taskCount = uxTaskGetSystemState(taskStatusArray, MAX_TASKS, &totalRunTime);
-
-  // Sort tasks first by Core ID, then by descending Run Time (CPU usage)
-  std::sort(taskStatusArray, taskStatusArray + taskCount, [](const TaskStatus_t& a, const TaskStatus_t& b) {
-    // Primary sort: Core ID (Core 0, then Core 1, then unassigned)
-    if (a.xCoreID != b.xCoreID) {
-      return a.xCoreID < b.xCoreID;
-    }
-    // Secondary sort: Run Time (higher usage first)
-    return a.ulRunTimeCounter > b.ulRunTimeCounter;
-    });
-
-  printf("Found %d tasks\n", taskCount);
-  printf("Name\t\tState\tPrio\tStack\tRun Time\tCPU %%\tCore\n");
-
-  for (UBaseType_t i = 0; i < taskCount; i++) {
-    TaskStatus_t* ts = &taskStatusArray[i];
-
-    const char* state;
-    switch (ts->eCurrentState) {
-    case eRunning:   state = "Running"; break;
-    case eReady:     state = "Ready"; break;
-    case eBlocked:   state = "Blocked"; break;
-    case eSuspended: state = "Suspended"; break;
-    case eDeleted:   state = "Deleted"; break;
-    default:         state = "Unknown"; break;
-    }
-
-    char cpu_percent[32];
-    snprintf(cpu_percent, sizeof(cpu_percent), "%5.2f%%", totalRunTime > 0 ? (100.0f * ts->ulRunTimeCounter) / totalRunTime : 0.0f);
-
-    printf("%-12s %-10s %4u\t%5u\t%10lu\t%s\t%2d\n",
-      ts->pcTaskName,
-      state,
-      ts->uxCurrentPriority,
-      ts->usStackHighWaterMark,
-      ts->ulRunTimeCounter,
-      cpu_percent,
-      ts->xCoreID == tskNO_AFFINITY ? -1 : ts->xCoreID);
-  }
 
   //#endif
   // WLEDMM end
@@ -1659,7 +1687,9 @@ void WLED::initAP(bool resetAP)
   strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
   wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
   wifi_sta_config.sta.failure_retry_cnt = 5;
-  wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+  wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  wifi_sta_config.sta.pmf_cfg.capable = true;
+  wifi_sta_config.sta.pmf_cfg.required = true;  // PMF required for WPA3
   wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));

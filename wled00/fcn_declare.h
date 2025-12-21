@@ -284,6 +284,9 @@ int getSignalQuality(int rssi) __attribute__((const));
 void WiFiEvent(WiFiEvent_t event);
 #endif
 
+void print_wifi_protocols(const char* prefix, uint16_t protocols);
+const char* wifi_band_mode_to_string(wifi_band_mode_t mode);
+
 //um_manager.cpp
 typedef enum UM_Data_Types {
   UMT_BYTE = 0,

@@ -758,20 +758,20 @@ ${(() => {
 ${i.cache ? inforow("ImageCache", i.cache.s) : ""}
 ${i.cache && i.cache.f ? inforow("ImageCache Dir", i.cache.f.substring(0, i.cache.f.lastIndexOf('/'))) : ""}
 ${i.cache && i.cache.p > 0 ? inforow("ImageCache Size", i.cache.p + " KB") : ""}
-${theap>0?inforow("Heap ☾",((i.totalheap-i.freeheap)/1024).toFixed(0)+"/"+theap.toFixed(0)+" KB",", "+Math.round((i.totalheap-i.freeheap)/(10*theap))+"%"):inforow("Free heap",heap," KB")}  <!--WLEDMM different for 8266-->
-${i.minfreeheap?inforow("Max used heap ☾",((i.totalheap-i.minfreeheap)/1024).toFixed(0)+" KB",", "+Math.round((i.totalheap-i.minfreeheap)/(10*theap))+"%"):""} 
-${i.psram?inforow("PSRAM ☾",((i.tpram-i.psram)/1024).toFixed(0)+"/"+(i.tpram/1024).toFixed(0)+" KB",", "+((i.tpram-i.psram)*100.0/i.tpram).toFixed(1)+"%"):""} 
-${i.psusedram?inforow("Max used PSRAM ☾",((i.tpram-i.psusedram)/1024).toFixed(0)+" KB",", "+((i.tpram-i.psusedram)*100.0/i.tpram).toFixed(1)+"%"):""} 
-${i.freestack?inforow("Free stack ☾",(i.freestack/1024).toFixed(3)," KB"):""} <!--WLEDMM-->
+${theap > 0 ? inforow("Heap ☾", ((i.totalheap - i.freeheap) / 1024).toFixed(0) + "/" + theap.toFixed(0) + " KB", ", " + Math.round((i.totalheap - i.freeheap) / (10 * theap)) + "%") : inforow("Free heap", heap,"  KB")}  <!--WLEDMM different for 8266-->
+${i.minfreeheap ? inforow("Max used heap ☾", ((i.totalheap - i.minfreeheap) / 1024).toFixed(0) +" KB",", "+Math.round((i.totalheap-i.minfreeheap)/(10*theap))+"%"):""} 
+${i.psram ? inforow("PSRAM ☾", ((i.tpram - i.psram) / 1024).toFixed(0) + "/" + (i.tpram / 1024).toFixed(0) +" KB",", "+((i.tpram-i.psram)*100.0/i.tpram).toFixed(1)+"%"):""} 
+${i.psusedram ? inforow("Max used PSRAM ☾", ((i.tpram - i.psusedram) / 1024).toFixed(0) +" KB",", "+((i.tpram-i.psusedram)*100.0/i.tpram).toFixed(1)+"%"):""} 
+${i.freestack ? inforow("Free stack ☾",(i.freestack/1024).toFixed(3)," KB"):""} <!--WLEDMM-->
 <tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
-${i.tpram?inforow("PSRAM " + (i.psrmode?"("+i.psrmode+" mode) ":"") + " ☾",(i.tpram/1024/1024).toFixed(0)," MB"):inforow("NO PSRAM found.", "")}
-${i.e32flash?inforow("Flash mode "+i.e32flashmode+i.e32flashtext + " ☾",i.e32flash+" MB, "+i.e32flashspeed," Mhz"):""}
-${i.e32model?inforow(i.e32model + " ☾",i.e32cores +" core(s),"," "+i.e32speed+" Mhz"):""}
-${inforow("Environment",i.arch + " " + i.core + " (" + i.lwip + ")")}
+${i.tpram ? inforow("PSRAM " + (i.psrmode ? "(" + i.psrmode + " mode) " : "") + " ☾", (i.tpram / 1024 / 1024).toFixed(0), " MB") : inforow("No PSRAM found.", "")}
+${i.e32flash ? inforow("Flash mode " + i.e32flashmode + i.e32flashtext + " ☾", i.e32flash + " MB, " + i.e32flashspeed," Mhz"):""}
+${i.e32model ? inforow(i.e32model + " ☾", i.e32cores + " core(s),", " " + i.e32speed +" Mhz"):""}
+${inforow("Environment", i.arch + " " + i.core + " (" + i.lwip + ")")}
 <tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
-${i.e32code?inforow("Last ESP Restart ☾",i.e32code+" "+i.e32text):""}
-${i.e32core0code?inforow("Core0 rst reason ☾",i.e32core0code, " "+i.e32core0text):""}
-${i.e32core1code?inforow("Core1 rst reason ☾",i.e32core1code, " "+i.e32core1text):""}
+${i.e32code ? inforow("Last ESP Restart ☾",i.e32code+" "+i.e32text):""}
+${i.e32core0code ? inforow("Core0 rst reason  ☾",i.e32core0code, " "+i.e32core0text):""}
+${i.e32core1code ? inforow("Core1 rst reason  ☾",i.e32core1code, " "+i.e32core1text):""}
 <!-- WLEDMM end--> 
 </table>`;
 	gId('kv').innerHTML = cn;
@@ -837,10 +837,10 @@ function populateSegments(s)
 							`<option value="1" ${inst.m12==1?' selected':''}>Bar</option>`+
 							`<option value="2" ${inst.m12==2?' selected':''}>Arc</option>`+
 							`<option value="3" ${inst.m12==3?' selected':''}>Corner</option>`+
-							`<option value="4" ${inst.m12==4?' selected':''}>jMap ☾</option>`+
-							`<option value="5" ${inst.m12==5?' selected':''}>Circle ☾</option>`+
-							`<option value="6" ${inst.m12==6?' selected':''}>Block ☾</option>`+
-							`<option value="6" ${inst.m12==7?' selected':''}>PinWheel ☾</option>`+
+							`<option value="4" ${inst.m12==4?' selected':''}>jMap  ☾</option>`+
+							`<option value="5" ${inst.m12==5?' selected':''}>Circle  ☾</option>`+
+							`<option value="6" ${inst.m12==6?' selected':''}>Block  ☾</option>`+
+							`<option value="6" ${inst.m12==7?' selected':''}>PinWheel  ☾</option>`+
 							`</select></div>`+
 					`</div>`;
 		let sndSim = `<div data-snd="si" class="lbl-s hide">Sound sim<br>`+
@@ -851,7 +851,7 @@ function populateSegments(s)
 					`</div>`;
 		//WLEDMM ARTIFX
 		let fxName = eJson.find((o)=>{return o.id==selectedFx}).name;
-		let cusEff = `<button class="btn" onclick="toggleCEEditor('${inst.n?inst.n:"default"}', ${i})">ARTI-FX Editor ☾</button><br>`;
+		let cusEff = `<button class="btn" onclick="toggleCEEditor('${inst.n?inst.n:"default"}', ${i})">ARTI-FX Editor  ☾</button><br>`;
 		cn += `<div class="seg lstI ${i==s.mainseg ? 'selected' : ''} ${exp ? "expanded":""}" id="seg${i}" data-set="${inst.set}">`+
 				`<label class="check schkl">`+
 					`<input type="checkbox" id="seg${i}sel" onchange="selSeg(${i})" ${inst.sel ? "checked":""}>`+
@@ -937,7 +937,7 @@ function populateSegments(s)
 	gId('segutil2').style.display = "block"; // (segCount > 1) ? "block":"none"; // rsbtn parent // WLED-MM P4 Always show segment reset for production reasons. 
 
 	if (Array.isArray(li.maps) && li.maps.length>0) { //WLEDMM >0 instead of 1 to show also first ledmap. Attention: WLED AC has isM check, in MM Matrices are supported so do not check on isM
-		let cont = `Ledmap:&nbsp;<select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`; //WLEDMM remove <option value="" selected>Unchanged</option>
+		let cont = `Ledmap: <select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`; //WLEDMM remove <option value="" selected>Unchanged</option>
 		for (const k of (li.maps||[])) cont += `<option value="${k.id}"${(i>0 && ledmapNr==k.id)?" selected":""}>${k.id==0?'Default':(k.id<10?'ledmap'+k.id+'.json':ledmapFileNames[k.id-10])}</option>`; //WLEDMM set ledmap selected, use ledmapFileNames
 		cont += "</select></div>";
 		gId("ledmap").innerHTML = cont;
@@ -2592,7 +2592,7 @@ ${makePlSel(plJson[i].end?plJson[i].end:0, true)}
 	<span class="checkmark"></span>
 </label>`;
 		if (Array.isArray(lastinfo.maps) && lastinfo.maps.length>0) { //WLEDMM >0 instead of 1 to show also first ledmap. Attention: WLED AC has isM check, in MM Matrices are supported so do not check on isM
-			content += `<div class="lbl-l">Ledmap:&nbsp;<div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
+			content += `<div class="lbl-l">Ledmap: <div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
 			for (const k of (lastinfo.maps||[])) content += `<option value="${k.id}"${(i>0 && pJson[i].ledmap==k.id)?" selected":""}>${k.id==0?'Default':(k.id<10?'ledmap'+k.id+'.json':ledmapFileNames[k.id-10])}</option>`;
 			content += "</select></div></div>";
 		}
