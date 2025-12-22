@@ -688,3 +688,27 @@ char *cleanUpName(char *in) {
   
   return(in);
 }
+
+void dumpAllTaskHWMs(void) {
+  UBaseType_t num = uxTaskGetNumberOfTasks();
+  TaskStatus_t* tasks = (TaskStatus_t*)calloc(num, sizeof(TaskStatus_t));
+  if (!tasks) return;
+
+  UBaseType_t count = uxTaskGetSystemState(tasks, num, NULL);
+
+  USER_PRINT("\n=== Task High Water Marks ===\n");
+
+  for (UBaseType_t i = 0; i < count; i++) {
+    const char* name = tasks[i].pcTaskName;
+    UBaseType_t hwm = tasks[i].usStackHighWaterMark;
+
+    USER_PRINTF("%-16s HWM: %u words (%u bytes)\n",
+      name,
+      (unsigned)hwm,
+      (unsigned)(hwm * 4));
+  }
+
+  USER_PRINT("==============================\n\n");
+
+  free(tasks);
+}

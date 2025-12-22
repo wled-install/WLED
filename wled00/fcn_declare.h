@@ -395,6 +395,7 @@ void userConnected();
 void userLoop();
 
 //util.cpp
+void dumpAllTaskHWMs(void);
 int getNumVal(const String* req, uint16_t pos);
 void parseNumber(const char* str, byte* val, byte minv=0, byte maxv=255);
 bool getVal(JsonVariant elem, byte* val, byte minv=0, byte maxv=255);
@@ -468,14 +469,14 @@ inline int16_t sin16_t(uint16_t theta) {
   int16_t result = numerator / denominator;
   return result * scale;
 }
-inline int16_t cos16_t(uint16_t theta) {
+TCM_IRAM_ATTR inline int16_t cos16_t(uint16_t theta) {
   return sin16_t(theta + 0x4000); //cos(x) = sin(x+pi/2)
 }
 
 #if defined(ARDUINO_ARCH_ESP32)
 // WLEDMM: use pre-calculated lookup-table for sin8_t
-extern uint8_t sinT[256];    // wled_math.cpp
-inline uint8_t sin8_t(uint8_t theta) { return sinT[theta]; }
+TCM_DRAM_ATTR extern uint8_t sinT[256];    // wled_math.cpp
+TCM_IRAM_ATTR inline uint8_t sin8_t(uint8_t theta) { return sinT[theta]; }
 #else
 // no LUT on 8266, to save 256 bytes of RAM
 inline uint8_t sin8_t(uint8_t theta) {
@@ -484,7 +485,7 @@ inline uint8_t sin8_t(uint8_t theta) {
   return min(sin16, int32_t(0xFFFF)) >> 8; // min performs saturation, and prevents overflow
 }
 #endif
-inline uint8_t cos8_t(uint8_t theta) {
+TCM_IRAM_ATTR inline uint8_t cos8_t(uint8_t theta) {
   return sin8_t(theta + 64); //cos(x) = sin(x+pi/2)
 }
 
