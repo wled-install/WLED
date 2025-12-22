@@ -338,7 +338,7 @@ bool strip_uses_global_leds(void) __attribute__((pure));  // WLEDMM implemented 
 #define FX_MODE_2DPAINTBRUSH           196 // WLED-MM Paintbrush
 #define FX_MODE_2DSNOWFALL             197 // WLED-MM Snowfall
 #define FX_MODE_GEQPPA                 198
-#define FX_MODE_PPA_TESTBED            199
+#define FX_MODE_PPA_IMAGEPLAYER        199
 #define FX_MODE_PRO_LINK               200
 #define FX_MODE_DJLIGHT_CIRCLES        201
 #define MODE_COUNT                     202

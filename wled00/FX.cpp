@@ -10098,7 +10098,7 @@ float quantize16(float value) {
     return roundf(value * 16.0f) / 16.0f;
 }
 
-uint16_t mode_PPA_TESTBED() {
+uint16_t mode_PPA_IMAGEPLAYER() {
   #ifdef SOC_PPA_SUPPORTED // always for PPA effects
 
   static unsigned long imagelimiter = micros()+(1000000/max(uint8_t(1),SEGMENT.custom1));
@@ -10112,8 +10112,6 @@ uint16_t mode_PPA_TESTBED() {
 
   // Author: @TroyHacks
   // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-
-  // *** PLACEHOLDER FOR PPA TESTING ***
 
   unsigned long timer = micros();
   
@@ -10157,58 +10155,31 @@ uint16_t mode_PPA_TESTBED() {
 
   if (folder_path != last_folder_path) {
     last_folder_path = folder_path;
-    folder_size = ImageCacheManager::getInstance().getFolderSize(folder_path); 
-    USER_PRINTF("Playing Sequence: %s\n", folder_path.c_str());
+    folder_size = ImageCacheManager::getInstance().getFolderSizeFromDisk(folder_path);
+    frame = 0;  // Reset frame on folder change
+    USER_PRINTF("Playing Sequence: %s (%u frames)\n", folder_path.c_str(), folder_size);
   }
 
-  if (folder_size == 1) {
-    frame = 0;  // Always use frame 0
-  } else {
-    if (frame >= folder_size) frame = 0;
+  if (folder_size == 0) {
+    USER_PRINTLN("Empty sequence folder");
+    return FRAMETIME;
   }
 
-  ImageData* img = ImageCacheManager::getInstance().getImage(folder_path, frame);
+  if (frame >= folder_size) frame = 0;
+
+  ImageResult img = ImageCacheManager::getInstance().getImageStreaming(folder_path, frame);
 
   uint8_t* file_jpeg = NULL;
   size_t file_jpeg_size = 0;
 
-  if (img) {
-
-    file_jpeg = img->buffer;
-    file_jpeg_size = img->size;
-
-    if (img && folder_size > 1) {
-      frame++;
-      if (frame >= folder_size) frame = 0;
-    } else if (folder_size == 1) {
-      frame = 0;
-    }
-    
+  if (img.buffer && img.size > 0) {
+    file_jpeg = img.buffer;
+    file_jpeg_size = img.size;
   } else {
-    DEBUG_PRINTF("Could not get image %d from %s.", frame, folder_path.c_str());
+    USER_PRINTF("Could not get image %d from %s.\n", frame, folder_path.c_str());
+    return FRAMETIME;
   }
   
-  if (!file_jpeg || file_jpeg_size == 0) {
-    DEBUG_PRINTF("Cached image data missing for frame %d\n", frame);
-    frame = 0;
-    delay(500);
-    return 1;
-  }
-
-  if (file_jpeg == NULL) {
-    DEBUG_PRINTLN("NULL at JPEG pointer!");
-    delay(500);
-    return 0;
-  }
-
-  // jpeg_decoder_handle_t jpgd_handle;
-
-  // jpeg_decode_engine_cfg_t decode_eng_cfg = {
-  //   .timeout_ms = 40,
-  // };
-
-  // ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
-
   jpeg_decode_cfg_t decode_cfg_rgb = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB888,
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB,
@@ -10258,6 +10229,7 @@ uint16_t mode_PPA_TESTBED() {
   
   if (rx_bitmap == NULL) {
     USER_PRINTLN("Can't allocate received bitmap buffer!");
+    if (img.needs_free) free(img.buffer);
     return 1;
   }
 
@@ -10541,12 +10513,21 @@ uint16_t mode_PPA_TESTBED() {
 
   // if (micros() % 100 < 3) USER_PRINTF("Scale was %0.3f and %0.3f\n",srm_config.scale_x, srm_config.scale_y);
 
+  if (img.needs_free) {
+    free(img.buffer);
+  }
+
+  // Advance frame
+  if (folder_size > 1) {
+    frame++;
+  }
+
   imagelimiter = timer + (1000000/max(uint8_t(1),SEGMENT.custom1));
   #endif // PPA Required
   return FRAMETIME;
 
-} // mode_PPA_TESTBED)
-static const char _data_FX_MODE_PPA_TESTBED[] PROGMEM = "Image Player ☾🐺@Folder Picker,Fill (0==Bass),FPS Limit,Fade Colour,Transforms,Bass Scaler,Bass Flip,Enable Fill;!,,Peaks;!;2f;sx=0,ix=0,c1=30,c2=0,c3=0,o1=0,o2=0,o3=0";
+} // mode_PPA_IMAGEPLAYER)
+static const char _data_FX_MODE_PPA_IMAGEPLAYER[] PROGMEM = "Image Player ☾🐺@Folder Picker,Fill (0==Bass),FPS Limit,Fade Colour,Transforms,Bass Scaler,Bass Flip,Enable Fill;!,,Peaks;!;2f;sx=0,ix=0,c1=30,c2=0,c3=0,o1=0,o2=0,o3=0";
 
 struct WaveformPoint {
   uint8_t height;  // 0-127 amplitude
@@ -11372,7 +11353,7 @@ void WS2812FX::setupEffectData() {
 
   #ifdef CONFIG_SOC_PPA_SUPPORTED
   addEffect(FX_MODE_GEQPPA, &mode_GEQPPA, _data_FX_MODE_GEQPPA); // audio
-  addEffect(FX_MODE_PPA_TESTBED, &mode_PPA_TESTBED, _data_FX_MODE_PPA_TESTBED); // audio
+  addEffect(FX_MODE_PPA_IMAGEPLAYER, &mode_PPA_IMAGEPLAYER, _data_FX_MODE_PPA_IMAGEPLAYER); // audio
   addEffect(FX_MODE_PRO_LINK, &mode_PRO_LINK, _data_FX_MODE_PRO_LINK); // audio
   addEffect(FX_MODE_DJLIGHT_CIRCLES, &mode_DJLight_Circles, _data_FX_MODE_DJLIGHT_CIRCLES); // audio
   #endif

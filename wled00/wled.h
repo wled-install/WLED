@@ -148,6 +148,18 @@
 #include <Wire.h>
 #include <SPI.h>
 
+#ifndef TCM_IRAM_ATTR
+#define TCM_IRAM_ATTR
+#endif
+
+#ifndef FORCE_TCM_IRAM_ATTR
+#define FORCE_TCM_IRAM_ATTR
+#endif
+
+#ifndef TCM_DRAM_ATTR
+#define TCM_DRAM_ATTR
+#endif
+
 #include "src/dependencies/network/Network.h"
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
   #define Network WL_Network

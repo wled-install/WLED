@@ -510,6 +510,16 @@ void background_loop_blocking(void* pvParameters) {
 
     }
 
+    // static TickType_t lastPrint = 30000;
+
+    // if (xTaskGetTickCount() - lastPrint > pdMS_TO_TICKS(30000)) {
+    //   lastPrint = xTaskGetTickCount();
+    //   if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+    //     dumpAllTaskHWMs();
+    //     xSemaphoreGive(busMutex);
+    //   }
+    // }
+
     vTaskDelay(1);
 
   }
@@ -1096,7 +1106,6 @@ void WLED::setup() {
         esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
         print_wifi_protocols("2.4GHz protocols before set:", protocols.ghz_2g);
         print_wifi_protocols("5GHz protocols before set:", protocols.ghz_5g);
-        #endif
 
         wifi_country_t country_check;
         esp_wifi_get_country(&country_check);
@@ -1115,7 +1124,7 @@ void WLED::setup() {
         esp_err_t err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bw_config);
         USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
 
-        esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
+        esp_wifi_get_protocols(WIFI_IF_STA, &xprotocols);
         print_wifi_protocols("2.4GHz protocols after set:", protocols.ghz_2g);
         print_wifi_protocols("5GHz protocols after set:", protocols.ghz_5g);
 
@@ -1155,6 +1164,8 @@ void WLED::setup() {
         }
         #endif
         // #endif
+        #endif
+
 
 
     #ifdef WLED_USE_ETHERNET
@@ -1601,7 +1612,7 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_blocking,  // Task function
     "BG_Blocking",    // Name
-    4800,             // Stack size in words
+    6144,             // Stack size in words (was 24000)
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
@@ -1611,7 +1622,7 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
-    4000,             // Stack size in words
+    4800,             // Stack size in words (was 24000)
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
