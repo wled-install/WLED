@@ -183,10 +183,10 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
         if (i>16) break;
       }
 
-      uint16_t length = elm["len"] | 1;
+      uint32_t length = elm["len"] | 1;
       uint8_t colorOrder = (int)elm[F("order")]; // contains white channel swap option in upper nibble
-      uint8_t skipFirst = elm[F("skip")];
-      uint16_t start = elm["start"] | 0;
+      uint32_t skipFirst = elm[F("skip")];
+      uint32_t start = elm["start"] | 0;
       if (length==0 || start + length > MAX_LEDS) continue; // zero length or we reached max. number of LEDs, just stop
       uint8_t ledType = elm["type"] | TYPE_WS2812_RGB;
       bool reversed = elm["rev"];
@@ -194,8 +194,8 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
       uint16_t freqkHz = elm[F("freq")] | 0;  // will be in kHz for DotStar and Hz for PWM (not yet implemented fully)
       ledType |= refresh << 7; // hack bit 7 to indicate strip requires off refresh
       uint8_t AWmode = elm[F("rgbwm")] | RGBW_MODE_MANUAL_ONLY;
-      uint8_t outputs = elm["outputs"] | 1; // sanity check
-      uint16_t leds_per_output = elm["leds_per_output"] | length; // sanity check
+      uint32_t outputs = elm["outputs"] | 1; // sanity check
+      uint32_t leds_per_output = elm["leds_per_output"] | length; // sanity check
       uint8_t fps_limit = elm["fps_limit"] | 24; // sanity check
       if (fromFS) {
         BusConfig bc = BusConfig(ledType, pins, start, length, colorOrder, reversed, skipFirst, AWmode, freqkHz, outputs, leds_per_output, fps_limit);

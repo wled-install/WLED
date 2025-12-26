@@ -499,7 +499,7 @@ void Segment::handleTransition() {
   }
 }
 
-void Segment::setUp(uint16_t i1, uint16_t i2, uint8_t grp, uint8_t spc, uint16_t ofs, uint16_t i1Y, uint16_t i2Y) {
+void Segment::setUp(uint32_t i1, uint32_t i2, uint8_t grp, uint8_t spc, uint16_t ofs, uint16_t i1Y, uint16_t i2Y) {
   //return if neither bounds nor grouping have changed
   bool boundsUnchanged = (start == i1 && stop == i2);
   #ifndef WLED_DISABLE_2D
@@ -518,7 +518,7 @@ void Segment::setUp(uint16_t i1, uint16_t i2, uint8_t grp, uint8_t spc, uint16_t
     return;
   }
   if (i1 < Segment::maxWidth || (i1 >= Segment::maxWidth*Segment::maxHeight && i1 < strip.getLengthTotal())) start = i1; // Segment::maxWidth equals strip.getLengthTotal() for 1D
-  stop = i2 > Segment::maxWidth*Segment::maxHeight ? min(i2,strip.getLengthTotal()) : (i2 > Segment::maxWidth ? Segment::maxWidth : max((uint16_t)1,i2));  // WLEDMM: use native min/max
+  stop = i2 > Segment::maxWidth*Segment::maxHeight ? min(i2,strip.getLengthTotal()) : (i2 > Segment::maxWidth ? Segment::maxWidth : max((uint32_t)1,i2));  // WLEDMM: use native min/max
   startY = 0;
   stopY  = 1;
   #ifndef WLED_DISABLE_2D
@@ -850,12 +850,12 @@ static int getPinwheelLength(int vW, int vH) {
 #endif
 
 // 1D strip
-uint16_t Segment::calc_virtualLength() const {
+uint32_t Segment::calc_virtualLength() const {
 #ifndef WLED_DISABLE_2D
   if (is2D()) {
-    uint16_t vW = calc_virtualWidth();
-    uint16_t vH = calc_virtualHeight();
-    uint16_t vLen = vW * vH; // use all pixels from segment
+    uint32_t vW = calc_virtualWidth();
+    uint32_t vH = calc_virtualHeight();
+    uint32_t vLen = vW * vH; // use all pixels from segment
     switch (map1D2D) {
       case M12_pBar:
         vLen = vH;
@@ -891,8 +891,8 @@ uint16_t Segment::calc_virtualLength() const {
     return vLen;
   }
 #endif
-  uint16_t groupLen = groupLength();
-  uint16_t vLength = (length() + groupLen - 1) / groupLen;
+  uint32_t groupLen = groupLength();
+  uint32_t vLength = (length() + groupLen - 1) / groupLen;
   if (mirror && width() > 1) vLength = (vLength + 1) /2;  // divide by 2 if mirror, leave at least a single LED // WLEDMM bugfix for pseudo 2d strips
   return vLength;
 }
@@ -1738,7 +1738,7 @@ void WS2812FX::finalizeInit(void)
     _hasWhiteChannel |= bus->hasWhite();
     //refresh is required to remain off if at least one of the strips requires the refresh.
     _isOffRefreshRequired |= bus->isOffRefreshRequired();
-    uint16_t busEnd = bus->getStart() + bus->getLength();
+    uint32_t busEnd = bus->getStart() + bus->getLength();
     if (busEnd > _length) _length = busEnd;
     #ifdef ESP8266
     if ((!IS_DIGITAL(bus->getType()) || IS_2PIN(bus->getType()))) continue;
@@ -2165,14 +2165,14 @@ uint8_t WS2812FX::getActiveSegmentsNum(void) const {
   return c;
 }
 
-uint16_t WS2812FX::getLengthTotal(void) const {  // WLEDMM fast int types
-  uint_fast16_t len = Segment::maxWidth * Segment::maxHeight; // will be _length for 1D (see finalizeInit()) but should cover whole matrix for 2D
+uint32_t WS2812FX::getLengthTotal(void) const {  // WLEDMM fast int types
+  uint_fast32_t len = Segment::maxWidth * Segment::maxHeight; // will be _length for 1D (see finalizeInit()) but should cover whole matrix for 2D
   if (isMatrix && _length > len) len = _length; // for 2D with trailing strip
   return len;
 }
 
-uint16_t WS2812FX::getLengthPhysical(void) const {  // WLEDMM fast int types
-  uint_fast16_t len = 0;
+uint32_t WS2812FX::getLengthPhysical(void) const {  // WLEDMM fast int types
+  uint_fast32_t len = 0;
   for (unsigned b = 0; b < busses.getNumBusses(); b++) {   //  WLEDMM use native (fast) types
     Bus *bus = busses.getBus(b);
     auto btype = bus->getType();
@@ -2183,8 +2183,8 @@ uint16_t WS2812FX::getLengthPhysical(void) const {  // WLEDMM fast int types
 }
 
 //WLEDMM - getLengthPhysical plus plysical busses not supporting ABL (i.e. HUB75)
-uint16_t WS2812FX::getLengthPhysical2(void) const {
-  uint_fast16_t len = 0;
+uint32_t WS2812FX::getLengthPhysical2(void) const {
+  uint_fast32_t len = 0;
   for (unsigned b = 0; b < busses.getNumBusses(); b++) {
     Bus *bus = busses.getBus(b);
     auto btype = bus->getType();

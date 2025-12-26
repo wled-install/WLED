@@ -4,7 +4,7 @@
 
 
 //helper to get int value at a position in string
-int getNumVal(const String* req, uint16_t pos)
+int getNumVal(const String* req, uint32_t pos)
 {
   return req->substring(pos+3).toInt();
 }

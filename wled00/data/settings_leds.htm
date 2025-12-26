@@ -63,7 +63,7 @@
       return LED_TYPES[parseInt(id)] || { name: "Unknown", cat: 0, color: "RGB" };
     }
 
-    var d = document, laprev = 55, maxB = 1, maxV = 0, maxM = 4000, maxPB = 65535, maxL = 1333, maxLbquot = 0; //maximum bytes for LED allocation: 4kB for 8266, 32kB for 32
+    var d = document, laprev = 55, maxB = 1, maxV = 0, maxM = 4000, maxPB = 99999, maxL = 1333, maxLbquot = 0; //maximum bytes for LED allocation: 4kB for 8266, 32kB for 32
     d.um_p = [];
     d.rsvd = [];
     d.ro_gpio = [];

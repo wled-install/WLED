@@ -1688,7 +1688,8 @@ function drawSegmentView() {
 	}
 
 	//draw the ledmap
-	if (ledmapNr>=0 && ctx) { //WLEDMM: @Troy#2642 : include ledmap = 0 as default ledmap
+  let mapExists = lastinfo.maps && lastinfo.maps.some(m => m.id === ledmapNr);
+  if (ledmapNr >= 0 && mapExists && ctx) {
 		var fileName;
 		if (ledmapNr==0)
 			fileName = "ledmap.json"; //0 is ledmap.json, not ledmap0.json
@@ -2104,6 +2105,19 @@ function readState(s,command=false)
 //       - Defining SEGCOL(<i>) can override a specific palette using these values (e.g. Color Gradient)
 function setEffectParameters(idx)
 {
+  // DEBUG: Track fxdata state
+  console.log("setEffectParameters called:", {
+    idx: idx,
+    fxdataIsArray: Array.isArray(fxdata),
+    fxdataLength: fxdata?.length,
+    fxdataAtIdx: fxdata?.[idx],
+    hasRGB: hasRGB
+  });
+
+  if (!(Array.isArray(fxdata) && fxdata.length > idx)) {
+    console.error("FXDATA PROBLEM - early return!", { fxdata: fxdata });
+    return;
+  }
 	if (!(Array.isArray(fxdata) && fxdata.length>idx)) return;
 	var controlDefined = fxdata[idx].length;
 	var effectPar = fxdata[idx];

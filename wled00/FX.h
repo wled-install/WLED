@@ -357,9 +357,9 @@ typedef enum mapping1D2D {
 // segment, 72 bytes
 typedef struct Segment {
   public:
-    uint16_t start; // start index / start X coordinate 2D (left)
-    uint16_t stop;  // stop index / stop X coordinate 2D (right); segment is invalid if stop == 0
-    uint16_t offset;
+    uint32_t start; // start index / start X coordinate 2D (left)
+    uint32_t stop;  // stop index / stop X coordinate 2D (right); segment is invalid if stop == 0
+    uint32_t offset;
     uint8_t  speed;
     uint8_t  intensity;
     uint8_t  palette;
@@ -395,8 +395,8 @@ typedef struct Segment {
       bool    check2  : 1;        // checkmark 2
       bool    check3  : 1;        // checkmark 3
     };
-    uint16_t startY;  // start Y coodrinate 2D (top); there should be no more than 255 rows, but we cannot be sure.
-    uint16_t stopY;   // stop Y coordinate 2D (bottom); there should be no more than 255 rows, but we cannot be sure.
+    uint32_t startY;  // start Y coodrinate 2D (top); there should be no more than 255 rows, but we cannot be sure.
+    uint32_t stopY;   // stop Y coordinate 2D (bottom); there should be no more than 255 rows, but we cannot be sure.
     char *name = nullptr; // WLEDMM initialize to nullptr
 
     // runtime data
@@ -435,7 +435,7 @@ typedef struct Segment {
     uint8_t _brightness = 255; // final pixel brightness - including transitions and segment opacity
     uint16_t _2dWidth = 0;  // virtualWidth
     uint16_t _2dHeight = 0; // virtualHeight
-    uint16_t _virtuallength = 0; // virtualLength
+    uint32_t _virtuallength = 0; // virtualLength
 
     void setPixelColorXY_slow(int x, int y, uint32_t c); // set relative pixel within segment with color - full slow version
 #else
@@ -482,7 +482,7 @@ typedef struct Segment {
 
   public:
 
-    Segment(uint16_t sStart=0, uint16_t sStop=30) :
+    Segment(uint32_t sStart=0, uint32_t sStop=30) :
       start(sStart),
       stop(sStop),
       offset(0),
@@ -522,7 +522,7 @@ typedef struct Segment {
       //refreshLightCapabilities();
     }
 
-    Segment(uint16_t sStartX, uint16_t sStopX, uint16_t sStartY, uint16_t sStopY) : Segment(sStartX, sStopX) {
+    Segment(uint32_t sStartX, uint32_t sStopX, uint32_t sStartY, uint32_t sStopY) : Segment(sStartX, sStopX) {
       startY = sStartY;
       stopY  = sStopY;
     }
@@ -570,10 +570,10 @@ typedef struct Segment {
     inline bool     hasRGB(void)         const { return _isRGB; }
     inline bool     hasWhite(void)       const { return _hasW; }
     inline bool     isCCT(void)          const { return _isCCT; }
-    inline uint16_t width(void)          const { return (stop  > start)  ?  (stop - start)  : 0; } // segment width in physical pixels (length if 1D)
-    inline uint16_t height(void)         const { return (stopY > startY) ? (stopY - startY) : 0; } // segment height (if 2D) in physical pixels // WLEDMM make sure its always > 0
+    inline uint32_t width(void)          const { return (stop  > start)  ?  (stop - start)  : 0; } // segment width in physical pixels (length if 1D)
+    inline uint32_t height(void)         const { return (stopY > startY) ? (stopY - startY) : 0; } // segment height (if 2D) in physical pixels // WLEDMM make sure its always > 0
     inline uint32_t length(void)         const { return width() * height(); }     // segment length (count) in physical pixels // WLEDMM fishy ... need to double-check if this is correct
-    inline uint16_t groupLength(void)    const { return max(1, grouping + spacing); } // WLEDMM length = 0 could lead to div/0 in virtualWidth() and virtualHeight()
+    inline uint32_t groupLength(void)    const { return max(1, grouping + spacing); } // WLEDMM length = 0 could lead to div/0 in virtualWidth() and virtualHeight()
     inline uint8_t  getLightCapabilities(void) const { return _capabilities; }
 
     static size_t   getUsedSegmentData(void)    { return _usedSegmentData; } // WLEDMM size_t
@@ -582,7 +582,7 @@ typedef struct Segment {
     void    allocLeds(); //WLEDMM
     inline static const CRGBPalette16 &getCurrentPalette(void) { return Segment::_currentPalette; }
 
-    void    setUp(uint16_t i1, uint16_t i2, uint8_t grp=1, uint8_t spc=0, uint16_t ofs=UINT16_MAX, uint16_t i1Y=0, uint16_t i2Y=1);
+    void    setUp(uint32_t i1, uint32_t i2, uint8_t grp=1, uint8_t spc=0, uint16_t ofs=UINT16_MAX, uint16_t i1Y=0, uint16_t i2Y=1);
     bool    setColor(uint8_t slot, uint32_t c); //returns true if changed
     void    setCCT(uint16_t k);
     void    setOpacity(uint8_t o);
@@ -636,11 +636,11 @@ typedef struct Segment {
     void     setCurrentPalette(void);
 
     // 1D strip
-    uint16_t calc_virtualLength(void) const;
+    uint32_t calc_virtualLength(void) const;
 #ifndef WLEDMM_FASTPATH
-    inline uint16_t virtualLength(void) const {return calc_virtualLength();}
+    inline uint32_t virtualLength(void) const {return calc_virtualLength();}
 #else
-    inline uint16_t virtualLength(void) const {return _virtuallength;}
+    inline uint32_t virtualLength(void) const {return _virtuallength;}
 #endif
     void setPixelColor(uint32_t n, uint32_t c); // set relative pixel within segment with color
     inline void setPixelColor(uint32_t n, byte r, byte g, byte b, byte w = 0) { setPixelColor(n, RGBW32(r,g,b,w)); } // automatically inline
@@ -694,15 +694,15 @@ typedef struct Segment {
     inline uint16_t virtualWidth() const  { return(_2dWidth);}  // WLEDMM get pre-calculated virtualWidth
     inline uint16_t virtualHeight() const { return(_2dHeight);} // WLEDMM get pre-calculated virtualHeight
 
-    uint16_t calc_virtualWidth() const {
-      uint_fast16_t groupLen = groupLength();
-      uint_fast16_t vWidth = ((transpose ? height() : width()) + groupLen - 1) / groupLen;
+    uint32_t calc_virtualWidth() const {
+      uint_fast32_t groupLen = groupLength();
+      uint_fast32_t vWidth = ((transpose ? height() : width()) + groupLen - 1) / groupLen;
       if (mirror) vWidth = (vWidth + 1) /2;  // divide by 2 if mirror, leave at least a single LED
       return vWidth;
     }
-    uint16_t calc_virtualHeight() const {
-      uint_fast16_t groupLen = groupLength();
-      uint_fast16_t vHeight = ((transpose ? width() : height()) + groupLen - 1) / groupLen;
+    uint32_t calc_virtualHeight() const {
+      uint_fast32_t groupLen = groupLength();
+      uint_fast32_t vHeight = ((transpose ? width() : height()) + groupLen - 1) / groupLen;
       if (mirror_y) vHeight = (vHeight + 1) /2;  // divide by 2 if mirror, leave at least a single LED
       return vHeight;
     }
@@ -713,10 +713,16 @@ typedef struct Segment {
     void deletejMap(); //WLEDMM jMap
   
   #ifndef WLED_DISABLE_2D
-    [[gnu::hot]] inline uint16_t XY(uint_fast16_t x, uint_fast16_t y)  const  { // support function to get relative index within segment (for leds[]) // WLEDMM inline for speed
-      uint_fast16_t width  = max(uint16_t(1), virtualWidth());   // segment width in logical pixels  -- softhack007 avoid div/0
-      uint_fast16_t height = max(uint16_t(1), virtualHeight());  // segment height in logical pixels -- softhack007 avoid div/0
-      return (x%width) + (y%height) * width;
+    // [[gnu::hot]] inline uint32_t XY(uint_fast16_t x, uint_fast16_t y)  const  { // support function to get relative index within segment (for leds[]) // WLEDMM inline for speed
+    //   uint_fast16_t width  = max(uint16_t(1), virtualWidth());   // segment width in logical pixels  -- softhack007 avoid div/0
+    //   uint_fast16_t height = max(uint16_t(1), virtualHeight());  // segment height in logical pixels -- softhack007 avoid div/0
+    //   return (x%width) + (y%height) * width;
+    // }
+
+    [[gnu::hot]] inline uint32_t XY(uint_fast16_t x, uint_fast16_t y) const {
+      uint32_t width = max(uint16_t(1), virtualWidth());
+      uint32_t height = max(uint16_t(1), virtualHeight());
+      return (x % width) + (y % height) * width;
     }
 
 #ifdef WLEDMM_FASTPATH
@@ -984,14 +990,16 @@ class WS2812FX {  // 96 bytes
     uint16_t
       ablMilliampsMax,
       currentMilliamps,
+      getFps() const;
+
+    uint32_t
       getLengthPhysical(void) const,
       getLengthPhysical2(void) const, // WLEDMM total length including HUB75, network busses excluded
-      __attribute__((pure)) getLengthTotal(void) const, // will include virtual/nonexistent pixels in matrix //WLEDMM attribute added
-      getFps() const;
+      __attribute__((pure)) getLengthTotal(void) const; // will include virtual/nonexistent pixels in matrix //WLEDMM attribute added
 
     inline uint16_t getFrameTime(void)  const { return _frametime; }
     inline uint16_t getMinShowDelay(void)  const { return MIN_SHOW_DELAY; }
-    inline uint16_t getLength(void)  const { return _length; } // 2D matrix may have less pixels than W*H
+    inline uint32_t getLength(void)  const { return _length; } // 2D matrix may have less pixels than W*H
     inline uint16_t getTransition(void)  const { return _transitionDur; }
 
     uint32_t

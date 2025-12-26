@@ -95,8 +95,8 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
       }
     }
 
-    uint8_t colorOrder, type, skip, awmode, channelSwap, outputs, fps_limit;
-    uint16_t length, start, leds_per_output;
+    uint8_t colorOrder, type, awmode, channelSwap, fps_limit;
+    uint32_t length, start, leds_per_output, outputs, skip;
     #ifdef SOC_PARLIO_SUPPORTED
     uint8_t nPins = SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH;
     #else

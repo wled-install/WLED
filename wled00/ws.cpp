@@ -10,7 +10,7 @@ static volatile unsigned long wsLastLiveTime = 0;   // WLEDMM
 //uint8_t* wsFrameBuffer = nullptr;
 
 #if !defined(ARDUINO_ARCH_ESP32) || defined(WLEDMM_FASTPATH)   // WLEDMM
-#define WS_LIVE_INTERVAL_MAX 30
+#define WS_LIVE_INTERVAL_MAX 500
 #define WS_LIVE_INTERVAL_MIN 10
 #else
 #define WS_LIVE_INTERVAL_MAX 80
@@ -244,59 +244,100 @@ static void populatePixelData(uint8_t* buffer, size_t bufferSize, size_t headerS
   }
 }
 
-// --- Main function, now much cleaner and acting as a controller ---
 static bool sendLiveLedsWs(uint32_t wsClient) {
+  if (!busses.canAllShow()) return false;
   AsyncWebSocketClient* wsc = ws.client(wsClient);
-  if (!wsc || wsc->queueLength() > 0) return false; // Client invalid or busy
+  if (!wsc || wsc->queueLength() > 0) return false;
 
-  // Check for memory backoff period
-  static unsigned long memory_backoff_ts = 0;
-  if (memory_backoff_ts > 0 && millis() - memory_backoff_ts < LiveLedsWS::MEMORY_BACKOFF_MS) {
-    return false;
-  }
-  memory_backoff_ts = 0;
+  Bus* bus = busses.getBus(0);
+  if (!bus) return false;
 
-  const size_t totalLeds = strip.getLengthTotal();
-  if (totalLeds == 0) return false;
+  uint8_t* srcBuffer = bus->getPixelData();
+  if (!srcBuffer) return false;
 
-  const size_t samplingFactor = calculateSamplingFactor();
-  const size_t ledsToSend = totalLeds / samplingFactor;
-
-  // Determine header size and version based on strip type
-  const bool isMatrix =
   #ifndef WLED_DISABLE_2D
-    strip.isMatrix;
-#else
-    false;
-#endif
-  const size_t headerSize = isMatrix ? LiveLedsWS::HEADER_SIZE_2D : LiveLedsWS::HEADER_SIZE_1D;
+  if (strip.isMatrix) {
+    const uint16_t srcW = Segment::maxWidth;
+    const uint16_t srcH = Segment::maxHeight;
 
-  // Allocate buffer
-  const size_t bufSize = headerSize + ledsToSend * 3;
-  AsyncWebSocketBuffer wsBuf(bufSize);
-  if (!wsBuf) {
-    USER_PRINTF("WS buffer allocation failed (%u bytes).\n", bufSize);
-    errorFlag = ERR_LOW_WS_MEM;
-  #ifdef ARDUINO_ARCH_ESP32
-    memory_backoff_ts = millis(); // Suspend live preview
-  #endif
-    return false;
+    constexpr uint16_t MAX_PREVIEW_WIDTH = 64;
+    constexpr float MIN_SCALE = 0.1f;
+    constexpr float SCALE_STEP = 1.0f / 16.0f;
+
+    // Calculate scale, clamp to min, then truncate to PPA's actual precision
+    float scale = (srcW > MAX_PREVIEW_WIDTH) ? (float)MAX_PREVIEW_WIDTH / srcW : 1.0f;
+    if (scale < MIN_SCALE) scale = MIN_SCALE;
+    scale = floorf(scale / SCALE_STEP) * SCALE_STEP;  // Truncate to 1/16 step
+
+    // Calculate output dimensions from the truncated scale
+    const uint16_t dstW = MAX(1, (uint16_t)(srcW * scale));
+    const uint16_t dstH = MAX(1, (uint16_t)(srcH * scale));
+
+    const size_t headerSize = LiveLedsWS::HEADER_SIZE_2D;
+    const size_t pixelDataSize = dstW * dstH * 3;
+    const size_t bufSize = headerSize + pixelDataSize;
+
+    constexpr size_t CACHE_LINE = 64;
+    constexpr size_t PPA_BUF_SIZE = ((MAX_PREVIEW_WIDTH * MAX_PREVIEW_WIDTH * 3) + CACHE_LINE - 1) & ~(CACHE_LINE - 1);
+    static uint8_t* ppaBuffer = nullptr;
+
+    if (!ppaBuffer) {
+      ppaBuffer = (uint8_t*)heap_caps_aligned_alloc(CACHE_LINE, PPA_BUF_SIZE, MALLOC_CAP_INTERNAL);
+      if (!ppaBuffer) return false;
+    }
+
+    ppa_srm_oper_config_t srm_config = {};
+    srm_config.in.buffer = srcBuffer;
+    srm_config.in.pic_w = srcW;
+    srm_config.in.pic_h = srcH;
+    srm_config.in.block_w = srcW;
+    srm_config.in.block_h = srcH;
+    srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm_config.out.buffer = ppaBuffer;
+    srm_config.out.buffer_size = PPA_BUF_SIZE;
+    srm_config.out.pic_w = dstW;
+    srm_config.out.pic_h = dstH;
+    srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm_config.scale_x = scale;
+    srm_config.scale_y = scale;
+    srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    if (ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config) != ESP_OK) return false;
+
+    AsyncWebSocketBuffer wsBuf(bufSize);
+    if (!wsBuf) return false;
+
+    uint8_t* buffer = reinterpret_cast<uint8_t*>(wsBuf.data());
+    buffer[0] = LiveLedsWS::MESSAGE_ID;
+    buffer[1] = LiveLedsWS::VERSION_2D;
+    buffer[2] = dstW;
+    buffer[3] = dstH;
+    memcpy(buffer + headerSize, ppaBuffer, pixelDataSize);
+
+    wsc->binary(std::move(wsBuf));
+    return true;
   }
+  #endif
+
+  // 1D fallback
+  constexpr size_t MAX_LEDS_1D = 256;
+  const size_t totalLeds = strip.getLengthTotal();
+  const size_t step = MAX(1, (totalLeds + MAX_LEDS_1D - 1) / MAX_LEDS_1D);
+  const size_t ledsToSend = (totalLeds + step - 1) / step;
+
+  const size_t headerSize = LiveLedsWS::HEADER_SIZE_1D;
+  const size_t bufSize = headerSize + ledsToSend * 3;
+
+  AsyncWebSocketBuffer wsBuf(bufSize);
+  if (!wsBuf) return false;
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(wsBuf.data());
-
-  // Populate header
   buffer[0] = LiveLedsWS::MESSAGE_ID;
-  if (isMatrix) {
-    buffer[1] = LiveLedsWS::VERSION_2D;
-    buffer[2] = MIN(Segment::maxWidth / samplingFactor, 255);
-    buffer[3] = MIN(Segment::maxHeight / samplingFactor, 255);
-  } else {
-    buffer[1] = LiveLedsWS::VERSION_1D;
-  }
+  buffer[1] = LiveLedsWS::VERSION_1D;
 
-  // Populate pixel data
-  populatePixelData(buffer, bufSize, headerSize, samplingFactor);
+  for (size_t i = 0, dst = headerSize; i < totalLeds && dst < bufSize - 2; i += step, dst += 3) {
+    memcpy(buffer + dst, srcBuffer + (i * 3), 3);
+  }
 
   wsc->binary(std::move(wsBuf));
   return true;
@@ -304,7 +345,9 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
 
 void handleWs()
 {
-  if ((millis() - wsLastLiveTime) > (unsigned long)(max(WS_LIVE_INTERVAL_MIN, min((strip.getLengthTotal()/80), WS_LIVE_INTERVAL_MAX)))) //WLEDMM dynamic nr of peek frames per second
+  // if (!busses.canAllShow()) return;
+  if (strip.isUpdating()) return;
+  if ((millis() - wsLastLiveTime) > (unsigned long)(max((uint32_t)WS_LIVE_INTERVAL_MIN, min((strip.getLengthTotal() / 80), (uint32_t)WS_LIVE_INTERVAL_MAX)))) //WLEDMM dynamic nr of peek frames per second
   {
     ws.cleanupClients();
     bool success = true;

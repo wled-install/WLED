@@ -192,6 +192,7 @@ void WS2812FX::setUpMatrix() {
 void IRAM_ATTR __attribute__((hot)) WS2812FX::setPixelColorXY_fast(int x, int y, uint32_t col) //WLEDMM: IRAM_ATTR conditionally
 {
   uint_fast32_t index = y * Segment::maxWidth + x;
+
   #ifndef WLEDMM_REMAP_AT_OUTPUT
   if (this->customMappingTable != nullptr && index < this->customMappingSize) {
     index = customMappingTable[index];
@@ -307,8 +308,8 @@ void IRAM_ATTR __attribute__((hot)) Segment::setPixelColorXY_fast(int x, int y, 
   if (simpleSegment) return;   // WLEDMM shortcut when no mirroring needed
 
   // handle mirroring - minimum width/height is 1 !!!
-  const int_fast16_t wid_ = max(1,stop - start);
-  const int_fast16_t hei_ = max(1, stopY - startY);
+  const int_fast32_t wid_ = max((uint32_t)1,stop - start);
+  const int_fast32_t hei_ = max((uint32_t)1, stopY - startY);
   if (mirror) { //set the corresponding horizontally mirrored pixel
     if (transpose) strip.setPixelColorXY_fast(start + x, startY + hei_ - y - 1, scaled_col);
     else           strip.setPixelColorXY_fast(start + wid_ - x - 1, startY + y, scaled_col);
@@ -369,9 +370,9 @@ void IRAM_ATTR_YN Segment::setPixelColorXY(int x, int y, uint32_t col) //WLEDMM:
     return;
   }
 
-  const uint_fast16_t glen_ = groupLength(); // WLEDMM optimization
-  const uint_fast16_t wid_ = max(uint16_t(1), width());
-  const uint_fast16_t hei_ = max(uint16_t(1), height());
+  const uint_fast32_t glen_ = groupLength(); // WLEDMM optimization
+  const uint_fast32_t wid_ = max(uint32_t(1), width());
+  const uint_fast32_t hei_ = max(uint32_t(1), height());
 
   x *= glen_; // expand to physical pixels
   y *= glen_; // expand to physical pixels
@@ -380,7 +381,7 @@ void IRAM_ATTR_YN Segment::setPixelColorXY(int x, int y, uint32_t col) //WLEDMM:
   const int grp_ = grouping; // WLEDMM optimization
   for (int j = 0; j < grp_; j++) {   // groupping vertically
     for (int g = 0; g < grp_; g++) { // groupping horizontally
-      uint_fast16_t xX = (x+g), yY = (y+j);    //WLEDMM: use fast types
+      uint_fast32_t xX = (x+g), yY = (y+j);    //WLEDMM: use fast types
       if (xX >= wid_ || yY >= hei_) continue; // we have reached one dimension's end
 
       strip.setPixelColorXY(start + xX, startY + yY, col);

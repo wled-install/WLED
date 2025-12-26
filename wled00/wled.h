@@ -335,6 +335,7 @@ WLED_GLOBAL ppa_client_config_t ppa_blend_config _INIT_N(({ .oper_type = PPA_OPE
 WLED_GLOBAL ppa_client_handle_t ppa_fill_handle _INIT(NULL);
 WLED_GLOBAL ppa_client_config_t ppa_fill_config _INIT_N((({ .oper_type = PPA_OPERATION_FILL, .max_pending_trans_num = 1, .data_burst_length = PPA_DATA_BURST_LENGTH_128 })));
 WLED_GLOBAL ppa_client_handle_t ppa_srm_handle _INIT(NULL);
+WLED_GLOBAL ppa_client_handle_t preview_ppa_srm_handle _INIT(NULL);
 WLED_GLOBAL ppa_client_config_t ppa_srm_config _INIT_N((({ .oper_type = PPA_OPERATION_SRM, .max_pending_trans_num = 1, .data_burst_length = PPA_DATA_BURST_LENGTH_128 })));
 WLED_GLOBAL jpeg_decoder_handle_t jpgd_handle _INIT(NULL);
 WLED_GLOBAL jpeg_decode_engine_cfg_t decode_eng_cfg _INIT_N((({ .timeout_ms = 40, })));

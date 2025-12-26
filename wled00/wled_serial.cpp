@@ -178,6 +178,8 @@ void handleSerial() {
       forceReconnect = true;
     } else if (next == 'C') { // WLEDMM - task list display for developers
       task_list();
+    } else if (next == 'T') { // WLEDMM - task stack high water mark display for developers
+      dumpAllTaskHWMs();
     } else if (next == 'R') { // WLEDMM - force reboot via Serial
       Serial.print("Rebooting ");
       for (int i = 0;i < 5;i++) {

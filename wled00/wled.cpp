@@ -432,10 +432,10 @@ void background_loop_blocking(void* pvParameters) {
     #endif
 
 
-    if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-      usermods.loop();
-      xSemaphoreGive(busMutex);
-    }
+    // if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+      // usermods.loop();
+    //   xSemaphoreGive(busMutex);
+    // }
 
     #ifdef WLED_DEBUG
     usermodMillis = millis() - usermodMillis;
@@ -504,7 +504,7 @@ void background_loop_blocking(void* pvParameters) {
       if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
         handlePlaylist();
         handlePresets();
-        usermods.loop2();
+        // usermods.loop2(); // nothing does this.
         xSemaphoreGive(busMutex);
       }
 
@@ -553,8 +553,8 @@ void background_loop_nonblocking(void* pvParameters) {
     #ifdef WLED_ENABLE_DMX_INPUT
     dmxInput.update();
     #endif
-    userLoop();
-
+    // userLoop(); // this is 
+    usermods.loop();
     #ifdef WLED_DEBUG
     unsigned long usermodMillis = millis();
     #endif
@@ -602,7 +602,7 @@ void background_loop_nonblocking(void* pvParameters) {
       createEditHandler(false);
     }
 
-    handleWs();
+    // handleWs();
 
     #ifdef STATUSLED
     WLED::handleStatusLED();
@@ -760,6 +760,8 @@ void WLED::loop() { // loopTask
   }
   #endif        // WLED_DEBUG_HEAP
 
+  handleWs();
+  
   toki.resetTick();
 
   #if WLED_WATCHDOG_TIMEOUT > 0
@@ -1382,6 +1384,7 @@ void WLED::setup() {
   ESP_ERROR_CHECK(ppa_register_client(&ppa_blend_config, &ppa_blend_handle));
   ESP_ERROR_CHECK(ppa_register_client(&ppa_fill_config, &ppa_fill_handle));
   ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &ppa_srm_handle));
+  ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &preview_ppa_srm_handle));
   ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)

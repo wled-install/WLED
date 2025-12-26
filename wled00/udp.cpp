@@ -778,8 +778,8 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   uint8_t* buffer_in,
   uint8_t bri,
   bool isRGBW,
-  uint8_t outputs,
-  uint16_t leds_per_output,
+  uint32_t outputs,
+  uint32_t leds_per_output,
   uint8_t fps_limit,
   uint8_t color_order,
   bool e131_multicast
@@ -796,10 +796,20 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   // Validate output configuration
   if (length != outputs * leds_per_output) {
     delay(100);
-    USER_PRINTF("%s config mismatch: length=%u but outputs=%u * leds_per_output=%u = %u\n",
+    USER_PRINTF("%s config mismatch: length=%lu but outputs=%lu * leds_per_output=%lu = %lu\n",
       protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
     return 1;
   }
+
+  // if (strip.getLength() < length) {
+  //   length = strip.getLength();
+  //   USER_PRINTF("length == %lu strip.getLength() == %lu\n", length, strip.getLength());
+  // }
+
+  // if (SEGMENT.maxHeight * SEGMENT.maxWidth < length) {
+  //   length = SEGMENT.maxHeight * SEGMENT.maxWidth;
+  //   USER_PRINTF("length == %lu SEGMENT.maxWidth == %lu SEGMENT.maxHeight == %lu\n", length, SEGMENT.maxWidth, SEGMENT.maxHeight);
+  // }
 
   // Packet buffer sized for DDP (largest: 10 + 1440 = 1450 bytes)
   #ifdef ESP32
@@ -1149,7 +1159,7 @@ if (fps_limit > 0) {
   if (datatotal > 0 && (micros() % 100 < 3)) {
     unsigned long elapsed = micros() - timer;
     float mbps = (float)(datatotal * 8) / (float)elapsed;
-    USER_PRINTF("%s: %u pixels, %lu us, %u bytes in %u pkts, %.2f Mbit/s @ %u FPS\n",
+    USER_PRINTF("%s: %lu pixels, %lu us, %u bytes in %u pkts, %.2f Mbit/s @ %u FPS\n",
       protocolName, length, elapsed, datatotal, packetstotal, mbps, strip.getFps());
   }
   #endif

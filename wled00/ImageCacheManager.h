@@ -13,8 +13,7 @@
 
 enum class CacheStatus {
   IDLE,
-  PRELOADING_BG,
-  LOADING_DEMAND
+  PRELOADING_BG
 };
 
 typedef struct {
@@ -23,12 +22,11 @@ typedef struct {
   time_t mtime;
 } ImageData;
 
-// Result struct for streaming API
 struct ImageResult {
   uint8_t* buffer;
   size_t size;
-  bool from_cache;    // true if from PSRAM cache
-  bool needs_free;    // caller must free buffer if true
+  bool from_cache;
+  bool needs_free;
 };
 
 using psram_string = std::basic_string<char, std::char_traits<char>, PSRAM_Allocator<char>>;
@@ -41,16 +39,12 @@ class ImageCacheManager {
 public:
   static ImageCacheManager& getInstance();
 
-  // Original API (blocking)
-  void startPreload(const std::string& root_path);
-  ImageData* getImage(const std::string& folder_path, size_t index);
-  size_t getFolderSize(const std::string& folder_path);
-  void clearCache();
-
-  // New streaming API (non-blocking)
+  // Streaming API (non-blocking)
   ImageResult getImageStreaming(const std::string& folder_path, size_t index);
   size_t getFolderSizeFromDisk(const std::string& folder_path);
-
+  void clearCache();
+  void startPreload(const std::string& root_path);
+  
   // Status functions
   CacheStatus getStatus();
   psram_string getCurrentFile();
@@ -62,14 +56,14 @@ private:
   ImageCacheManager(const ImageCacheManager&) = delete;
   void operator=(const ImageCacheManager&) = delete;
 
-  static void _preloadTask(void* params);
   static void _backgroundSyncTask(void* params);
-  void _synchronizeFolder(const psram_string& folder_path, bool is_on_demand);
+  void _synchronizeFolder(const psram_string& folder_path);
   void _queueBackgroundSync(const psram_string& folder_path);
 
-  // File list management (lightweight, filenames only)
+  // File list management
   bool _ensureFileListCached(const psram_string& folder_path);
   psram_string _getFilenameByIndex(const psram_string& folder_path, size_t index);
+  ImageData* _getImageByIndex(const psram_string& folder_path, size_t index);
 
   // Main cache: folder -> (filename -> ImageData)
   psram_image_map image_cache;
@@ -80,17 +74,13 @@ private:
   // Pending folders for background sync
   psram_string_vector pending_sync_folders;
 
-  ImageData* _getImageByIndex(const psram_string& folder_path, size_t index);
-
   // Synchronization
   SemaphoreHandle_t cache_mutex;
-  SemaphoreHandle_t loader_mutex;
-  TaskHandle_t preload_task_handle;
+  TaskHandle_t sync_task_handle;
   volatile CacheStatus current_status;
   psram_string current_loading_file;
 
   // Resource management
   size_t psram_limit;
   size_t psram_used;
-  psram_string preload_root_path;
 };

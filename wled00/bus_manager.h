@@ -54,12 +54,13 @@ struct BusConfig {
   uint8_t skipAmount;
   bool refreshReq;
   uint8_t autoWhite;
-  uint8_t outputs, fps_limit;
-  uint16_t leds_per_output;
+  uint32_t outputs;
+  uint8_t fps_limit;
+  uint32_t leds_per_output;
 
   uint8_t pins[SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH];
   uint16_t frequency;
-  BusConfig(uint8_t busType, uint8_t* ppins, uint32_t pstart, uint32_t len = 1, uint8_t pcolorOrder = COL_ORDER_GRB, bool rev = false, uint8_t skip = 0, byte aw=RGBW_MODE_MANUAL_ONLY, uint16_t clock_kHz=0U, uint8_t art_o=1, uint16_t art_l=1, uint8_t art_f=30) {
+  BusConfig(uint8_t busType, uint8_t* ppins, uint32_t pstart, uint32_t len = 1, uint8_t pcolorOrder = COL_ORDER_GRB, bool rev = false, uint32_t skip = 0, byte aw=RGBW_MODE_MANUAL_ONLY, uint16_t clock_kHz=0U, uint32_t art_o=1, uint32_t art_l=1, uint8_t art_f=30) {
     refreshReq = (bool) GET_BIT(busType,7);
     type = busType & 0x7F;  // bit 7 may be/is hacked to include refresh info (1=refresh in off state, 0=no refresh)
     count = len; start = pstart; colorOrder = pcolorOrder; reversed = rev; skipAmount = skip; autoWhite = aw; frequency = clock_kHz;
@@ -74,16 +75,16 @@ struct BusConfig {
   }
 
   //validates start and length and extends total if needed // WLEDMM this function is not used anywhere
-  bool adjustBounds(uint16_t& total) {
-    if (!count) count = 1;
-    if (count > MAX_LEDS_PER_BUS) count = MAX_LEDS_PER_BUS;
-    if (start >= MAX_LEDS) return false;
-    //limit length of strip if it would exceed total permissible LEDs
-    if (start + count > MAX_LEDS) count = MAX_LEDS - start;
-    //extend total count accordingly
-    if (start + count > total) total = start + count;
-    return true;
-  }
+  // bool adjustBounds(uint16_t& total) {
+  //   if (!count) count = 1;
+  //   if (count > MAX_LEDS_PER_BUS) count = MAX_LEDS_PER_BUS;
+  //   if (start >= MAX_LEDS) return false;
+  //   //limit length of strip if it would exceed total permissible LEDs
+  //   if (start + count > MAX_LEDS) count = MAX_LEDS - start;
+  //   //extend total count accordingly
+  //   if (start + count > total) total = start + count;
+  //   return true;
+  // }
 };
 
 // Defines an LED Strip and its color ordering.
@@ -150,7 +151,7 @@ class Bus {
     virtual uint8_t  skippedLeds() const { return 0; }
     virtual uint16_t getFrequency() const { return 0U; }
     virtual uint8_t  get_fps_limit() const { return 0; }
-    virtual uint8_t  get_outputs() const { return 0; }
+    virtual uint16_t get_outputs() const { return 0; }
     virtual uint32_t get_leds_per_output() const { return 0; }
     inline  uint32_t getStart() const { return _start; }
     inline  void     setStart(uint32_t start) { _start = start; }
@@ -339,7 +340,7 @@ class BusNetwork : public Bus {
   public:
     BusNetwork(BusConfig &bc, const ColorOrderMap &com);
 
-    uint32_t getMaxPixels() const override { return 65536; };
+    uint32_t getMaxPixels() const override { return MAX_LEDS_PER_BUS; };
     bool hasRGB()  const { return true; }
     bool hasWhite()  const { return _rgbw; }
 
@@ -367,7 +368,7 @@ class BusNetwork : public Bus {
       return _fps_limit;
     }
 
-    uint8_t get_outputs() const override {
+    uint16_t get_outputs() const override {
       return _outputs;
     }
 
@@ -396,8 +397,8 @@ class BusNetwork : public Bus {
     byte                *_data;
     uint8_t             _colorOrder = COL_ORDER_RGB;
     uint8_t             _fps_limit;
-    uint8_t             _outputs;
-    uint16_t            _leds_per_output;
+    uint32_t             _outputs;
+    uint32_t            _leds_per_output;
     const ColorOrderMap &_colorOrderMap;
 };
 
@@ -429,7 +430,7 @@ public:
     return _len;
   }
 
-  uint8_t get_outputs() const {
+  uint16_t get_outputs() const {
     return _outputs;
   }
 

@@ -72,7 +72,7 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
   #ifndef WLED_DISABLE_2D
     // Serial.printf("before %d: %s %s %s %s\n", id, elem["start"].as<std::string>().c_str(), elem["stop"].as<std::string>().c_str(), elem["startY"].as<std::string>().c_str(), elem["stopY"].as<std::string>().c_str());
   if (strip.isMatrix && !elem["start"].isNull() && !elem["stop"].isNull() && elem["startY"].isNull() && elem["stopY"].isNull()) {
-    uint16_t start1=elem["start"], stop1=elem["stop"];
+    uint32_t start1=elem["start"], stop1=elem["stop"];
     elem["start"] = start1%Segment::maxWidth;
     elem["startY"]= Segment::maxWidth?(start1 / Segment::maxWidth):0;
     elem["stop"] = (stop1-1)%Segment::maxWidth + 1;
@@ -1203,9 +1203,6 @@ void serializeInfo(JsonObject root)
     break;
   case CacheStatus::PRELOADING_BG:
     cache_info["s"] = "Preloading";
-    break;
-  case CacheStatus::LOADING_DEMAND:
-    cache_info["s"] = "On-Demand Load";
     break;
   }
 
