@@ -41,7 +41,7 @@ static constexpr uint32_t PEER_TIMEOUT_MS = 5000;
 static constexpr uint32_t KEEPALIVE_INTERVAL_MS = 1500;
 static constexpr uint32_t PEER_CHECK_INTERVAL_MS = 2000;
 static constexpr uint32_t BEAT_FLASH_DURATION_MS = 300;
-static constexpr uint32_t STARTUP_DELAY_US = 1000000;  // 10 seconds in microseconds
+static constexpr uint32_t STARTUP_DELAY_US = 10 * 1000000;  // 10 seconds in microseconds
 
 static constexpr uint32_t WAVEFORM_COLLECT_MS = 1500;
 static constexpr uint32_t ARTWORK_COLLECT_MS = 5000;
@@ -209,11 +209,11 @@ private:
   int64_t startupTime = 0;
 
   // Settings
-  bool enabled = true;
-  bool enableDebug = false;
-  bool enableBeatFlash = false;
+  bool enabled = false;
+  bool enableDebug = true;
+  bool enableBeatFlash = true;
   bool enableRandomPreset = false;
-  bool enableHighResArtwork = true;
+  bool enableHighResArtwork = false;
   String playerIPOverride = "";
   uint8_t virtualDeckNumber = WLED_DEVICE_ID_DEFAULT;
 
