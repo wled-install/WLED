@@ -1615,7 +1615,7 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_blocking,  // Task function
     "BG_Blocking",    // Name
-    6144,             // Stack size in words (was 24000)
+    6244,             // Stack size in words (was 24000)
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
@@ -1625,7 +1625,7 @@ void WLED::setup() {
   xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
-    4800,             // Stack size in words (was 24000)
+    5000,             // Stack size in words (was 24000)
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)

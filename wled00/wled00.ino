@@ -76,7 +76,7 @@ void setup() {
     xTaskCreatePinnedToCore(
       wledCore0Entry,
       "wled_main",
-      16384,      // 16KB Stack (WLED loop usually needs ~4-5KB)
+      6000,      
       NULL,
       1,          // Priority 1 (Standard Arduino)
       NULL,
