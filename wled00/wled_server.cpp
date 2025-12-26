@@ -93,8 +93,24 @@ void createEditHandler(bool enable) {
   }
 }
 
-bool captivePortal(AsyncWebServerRequest *request)
-{
+// bool captivePortal(AsyncWebServerRequest *request)
+// {
+//   if (ON_STA_FILTER(request)) return false; //only serve captive in AP mode
+//   String hostH;
+//   if (!request->hasHeader("Host")) return false;
+//   hostH = request->getHeader("Host")->value();
+
+//   if (!isIp(hostH) && hostH.indexOf("wled.me") < 0 && hostH.indexOf(cmDNS) < 0) {
+//     DEBUG_PRINTLN("Captive portal");
+//     AsyncWebServerResponse *response = request->beginResponse(302);
+//     response->addHeader(F("Location"), F("http://4.3.2.1"));
+//     request->send(response);
+//     return true;
+//   }
+//   return false;
+// }
+
+bool captivePortal(AsyncWebServerRequest* request) {
   if (ON_STA_FILTER(request)) return false; //only serve captive in AP mode
   String hostH;
   if (!request->hasHeader("Host")) return false;
@@ -102,8 +118,9 @@ bool captivePortal(AsyncWebServerRequest *request)
 
   if (!isIp(hostH) && hostH.indexOf("wled.me") < 0 && hostH.indexOf(cmDNS) < 0) {
     DEBUG_PRINTLN("Captive portal");
-    AsyncWebServerResponse *response = request->beginResponse(302);
-    response->addHeader(F("Location"), F("http://4.3.2.1"));
+    AsyncWebServerResponse* response = request->beginResponse(302);
+    // Use the actual AP IP instead of hardcoded 4.3.2.1
+    response->addHeader(F("Location"), "http://" + WiFi.softAPIP().toString() + "/");
     request->send(response);
     return true;
   }
@@ -146,6 +163,30 @@ void initServer()
     //request->send_P(200, "text/html", PAGE_liveview);
   });
 #endif
+
+  // Android captive portal detection
+  server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (captivePortal(request)) return;
+    request->send(204);
+    });
+
+  // Apple captive portal detection  
+  server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (captivePortal(request)) return;
+    request->send(200, "text/html", F("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"));
+    });
+
+  // Windows NCSI
+  server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (captivePortal(request)) return;
+    request->send(200, "text/plain", F("Microsoft Connect Test"));
+    });
+
+  // Firefox
+  server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (captivePortal(request)) return;
+    request->send(200, "text/html", F("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"));
+    });
 
   //settings page
   server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){
