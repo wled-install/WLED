@@ -166,26 +166,38 @@ void initServer()
 
   // Android captive portal detection
   server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (captivePortal(request)) return;
+    if (apActive) {
+      request->redirect("http://" + Network.softAPIP().toString() + "/");
+      return;
+    }
     request->send(204);
     });
 
   // Apple captive portal detection  
   server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (captivePortal(request)) return;
-    request->send(200, "text/html", F("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"));
+    if (apActive) {
+      request->redirect("http://" + Network.softAPIP().toString() + "/");
+      return;
+    }
+    request->send(204);
     });
 
   // Windows NCSI
   server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (captivePortal(request)) return;
-    request->send(200, "text/plain", F("Microsoft Connect Test"));
+    if (apActive) {
+      request->redirect("http://" + Network.softAPIP().toString() + "/");
+      return;
+    }
+    request->send(204);
     });
 
   // Firefox
   server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (captivePortal(request)) return;
-    request->send(200, "text/html", F("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"));
+    if (apActive) {
+      request->redirect("http://" + Network.softAPIP().toString() + "/");
+      return;
+    }
+    request->send(204);
     });
 
   //settings page

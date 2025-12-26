@@ -16,6 +16,7 @@ class NetworkClass
 {
 public:
   IPAddress localIP();
+  IPAddress softAPIP();
   IPAddress subnetMask();
   IPAddress gatewayIP();
   void localMAC(uint8_t* MAC);

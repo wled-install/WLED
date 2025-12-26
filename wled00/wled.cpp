@@ -571,9 +571,9 @@ void background_loop_nonblocking(void* pvParameters) {
       WLED::reset();
     }
 
+    if (apActive) dnsServer.processNextRequest();
+    
     if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
-
-      if (apActive) dnsServer.processNextRequest();
 
       #ifndef WLED_DISABLE_OTA
       if (WLED_CONNECTED && aOtaEnabled && !otaLock && correctPIN) ArduinoOTA.handle();
@@ -833,7 +833,10 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       } else {
         xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
       }
-      ESP_LOGI(TAG, "connect to the AP fail");
+      if (apBehavior == AP_BEHAVIOR_NO_CONN && !apActive) {
+        USER_PRINTLN("Connection lost, restarting AP");
+        WLED::initAP(false);
+      }
     } else if (event_id == WIFI_EVENT_HOME_CHANNEL_CHANGE) {
       // USER_PRINTLN("Event: WiFi HOME CHANNEL CHANGED");
     } else if (event_id == WIFI_EVENT_STA_STOP) {
@@ -871,9 +874,39 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       USER_PRINTLN("Event: WiFi Got IP");
       interfacesInited = false;
       wifi_is_connected = true;
+      showWelcomePage = false;
       ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
       s_retry_num = 0;
       xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+      USER_PRINTLN("Got IP address");
+
+      // Always stop DNS hijacking once we have internet
+      dnsServer.stop();
+      USER_PRINTLN("Stopped captive portal DNS");
+
+      // Handle AP based on behavior setting
+      switch (apBehavior) {
+      case AP_BEHAVIOR_BOOT_NO_CONN:
+      case AP_BEHAVIOR_NO_CONN:
+        // Shut down AP since we now have a connection
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        apActive = false;
+        USER_PRINTLN("Disabled AP (connection established)");
+        break;
+
+      case AP_BEHAVIOR_ALWAYS:
+        // Keep AP running, but captive portal DNS is already stopped
+        USER_PRINTLN("Keeping AP active (ALWAYS mode)");
+        break;
+
+      case AP_BEHAVIOR_BUTTON_ONLY:
+        // Shouldn't normally get here with AP active, but handle it
+        if (apActive) {
+          esp_wifi_set_mode(WIFI_MODE_STA);
+          apActive = false;
+        }
+        break;
+      }
     }
   }
 }
@@ -1668,8 +1701,7 @@ void WLED::beginStrip() {
   }
 }
 
-void WLED::initAP(bool resetAP)
-{
+void WLED::initAP(bool resetAP) {
   USER_PRINTLN("In initAP!");
   if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
     return;
@@ -1678,16 +1710,39 @@ void WLED::initAP(bool resetAP)
     WLED_SET_AP_SSID();
     strcpy_P(apPass, PSTR(WLED_AP_PASS));
   }
-  USER_PRINT(F("Opening access point "));  // WLEDMM
-  USER_PRINTLN(apSSID);                    // WLEDMM
+  USER_PRINT(F("Opening access point "));
+  USER_PRINTLN(apSSID);
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_stop());
 
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+  // Check if we have valid STA credentials
+  bool hasValidSTA = strlen(clientSSID) > 0 &&
+    strcmp(clientSSID, "Your_Network") != 0 &&
+    strcmp(clientSSID, DEFAULT_CLIENT_SSID) != 0;
+
+  if (hasValidSTA) {
+    // APSTA mode - run both AP and try to connect to configured network
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+    wifi_config_t wifi_sta_config = {};
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
+    wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_sta_config.sta.failure_retry_cnt = 5;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.pmf_cfg.capable = true;
+    wifi_sta_config.sta.pmf_cfg.required = true;
+    wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
+  } else {
+    // AP-only mode - no valid STA credentials
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_AP));
+    USER_PRINTLN(F("No valid STA credentials, AP-only mode"));
+  }
 
   wifi_config_t wifi_ap_config = {};
   strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.ssid), apSSID, sizeof(wifi_ap_config.ap.ssid));
-  strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.password), apPass, sizeof(wifi_ap_config.sta.password));
+  strncpy(reinterpret_cast<char*>(wifi_ap_config.ap.password), apPass, sizeof(wifi_ap_config.ap.password));
   wifi_ap_config.ap.ssid_len = strlen(apSSID);
   wifi_ap_config.ap.channel = apChannel;
   wifi_ap_config.ap.max_connection = 100;
@@ -1696,30 +1751,7 @@ void WLED::initAP(bool resetAP)
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
 
-  wifi_config_t wifi_sta_config = {};
-  strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
-  strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
-  wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-  wifi_sta_config.sta.failure_retry_cnt = 5;
-  wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-  wifi_sta_config.sta.pmf_cfg.capable = true;
-  wifi_sta_config.sta.pmf_cfg.required = true;  // PMF required for WPA3
-  wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
-
-  ESP_ERROR_CHECK(esp_wifi_set_country_code("CA", true));
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-  
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
-
-  // esp_netif_dns_info_t dns;
-  // esp_netif_get_dns_info(sta_netif, ESP_NETIF_DNS_MAIN, &dns);
-  // uint8_t dhcps_offer_option = 0x02;
-  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(ap_netif));
-  // ESP_ERROR_CHECK(esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
-  // ESP_ERROR_CHECK(esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns));
-  // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(ap_netif));
 
   if (!apActive) // start captive portal if AP active
   {
@@ -1742,8 +1774,11 @@ void WLED::initAP(bool resetAP)
         udpRgbConnected = rgbUdp.begin(udpRgbPort);
       }
     }
+    IPAddress apIP = Network.softAPIP();
+    USER_PRINT(F("AP IP: "));
+    USER_PRINTLN(apIP);
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-    dnsServer.start(53, "*", WiFi.softAPIP());
+    dnsServer.start(53, "*", Network.softAPIP());
   }
   apActive = true;
 }

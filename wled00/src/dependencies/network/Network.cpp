@@ -25,6 +25,15 @@ IPAddress NetworkClass::localIP() {
   return INADDR_NONE;
 }
 
+IPAddress NetworkClass::softAPIP() {
+  esp_netif_ip_info_t ip_info;
+  esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (ap_netif && esp_netif_get_ip_info(ap_netif, &ip_info) == ESP_OK) {
+    return IPAddress(ip_info.ip.addr);
+  }
+  return IPAddress(192, 168, 4, 1);  // Fallback to default
+}
+
 IPAddress NetworkClass::subnetMask() {
   esp_netif_ip_info_t ip_info;
   esp_netif_t* netif = esp_netif_get_default_netif();
