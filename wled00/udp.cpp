@@ -785,7 +785,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   bool e131_multicast
 ) {
   if (fps_limit < 1 || fps_limit > 120) fps_limit = 60;
-
+  tcpip_adapter_if_t send_interface = Network.isEthernet() ? TCPIP_ADAPTER_IF_ETH : TCPIP_ADAPTER_IF_STA;
   if (!(apActive || interfacesInited) || !length) return 1;
   if (!e131_multicast && !client[0]) return 1;  // Unicast requires valid IP
 
@@ -884,7 +884,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
         packetSize, bufferOffset, bri, isRGBW, color_order);
 
       if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN,
-        client, DDP_DEFAULT_PORT)) {
+        client, DDP_DEFAULT_PORT, send_interface)) {
         DEBUG_PRINTLN(F("DDP writeTo error"));
         return 1;
       }
@@ -1006,7 +1006,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
       IPAddress dest = e131_multicast ? e131MulticastIP(universe) : client;
 
       if (!e131Udp.writeTo(packet_buffer, packetSize + E131_HEADER_LEN,
-        dest, E131_DEFAULT_PORT)) {
+        dest, E131_DEFAULT_PORT, send_interface)) {
         DEBUG_PRINTLN(F("E1.31 writeTo error"));
         return 1;
       }
@@ -1054,18 +1054,18 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
     static AsyncUDP artnetUdp;
     static bool isConnected = false;
     static IPAddress lastClient = IPAddress(0, 0, 0, 0);
-
-    // If we haven't connected yet, OR the destination IP changed...
-    if (!isConnected || lastClient != client) {
-      // ...connect to the specific IP and Port ONCE.
-      if (artnetUdp.connect(client, ARTNET_DEFAULT_PORT)) {
-        isConnected = true;
-        lastClient = client;
-        DEBUG_PRINTLN(F("Art-Net Connected (Fast Mode)"));
-      } else {
-        return 1; // Failed to bind
-      }
-    }
+    
+    // // If we haven't connected yet, OR the destination IP changed...
+    // if (!isConnected || lastClient != client) {
+    //   // ...connect to the specific IP and Port ONCE.
+    //   if (artnetUdp.connect(client, ARTNET_DEFAULT_PORT)) {
+    //     isConnected = true;
+    //     lastClient = client;
+    //     DEBUG_PRINTLN(F("Art-Net Connected (Fast Mode)"));
+    //   } else {
+    //     return 1; // Failed to bind
+    //   }
+    // }
     // Initialize Art-Net header once
     if (packet_buffer[0] != 'A') {
       memcpy(packet_buffer, ART_NET_HEADER, 12);
@@ -1103,7 +1103,7 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
           packetSize, bufferOffset, bri, isRGBW, color_order);
         #endif
 
-        if (!artnetUdp.write(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+        if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN, client, ARTNET_DEFAULT_PORT, send_interface)) {
           USER_PRINTLN(F("Art-Net writeTo error"));
           return 1;
         }

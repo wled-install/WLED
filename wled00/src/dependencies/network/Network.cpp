@@ -9,19 +9,24 @@ IPAddress NetworkClass::localIP() {
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
 
-  uint32_t wifi_metric = 999, eth_metric = 999;
+  uint32_t wifi_metric = 0, eth_metric = 0;
   if (wifi_netif) wifi_metric = esp_netif_get_route_prio(wifi_netif);
   if (eth_netif) eth_metric = esp_netif_get_route_prio(eth_netif);
 
-  // Check the preferred interface first (Ethernet by default)
-  if (eth_metric < wifi_metric) {
-    if (eth_netif && esp_netif_get_ip_info(eth_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
-      return IPAddress(ip_info.ip.addr); // Return Ethernet IP if valid
-    }
+  // Determine which interface to try first based on priority
+  esp_netif_t* primary = (eth_metric >= wifi_metric) ? eth_netif : wifi_netif;
+  esp_netif_t* secondary = (eth_metric >= wifi_metric) ? wifi_netif : eth_netif;
+
+  // Try primary interface first
+  if (primary && esp_netif_get_ip_info(primary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    return IPAddress(ip_info.ip.addr);
   }
-  if (wifi_netif && esp_netif_get_ip_info(wifi_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
-    return IPAddress(ip_info.ip.addr); // Return Wi-Fi IP if valid
+
+  // Fall back to secondary interface
+  if (secondary && esp_netif_get_ip_info(secondary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    return IPAddress(ip_info.ip.addr);
   }
+
   return INADDR_NONE;
 }
 
@@ -159,7 +164,18 @@ String NetworkClass::getEscapedMac() {
 }
 
 bool NetworkClass::isEthernet() {
-  return eth_is_connected;
+  esp_netif_t* default_netif = esp_netif_get_default_netif();
+  if (default_netif == NULL) {
+    return false; // No default interface is active
+  }
+  esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+  if (default_netif == wifi_netif) {
+    return false;
+  } else if (default_netif == eth_netif) {
+    return true;
+  }
+  return false;
 }
 
 bool NetworkClass::setHostname(const char* hostname) {

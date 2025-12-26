@@ -882,7 +882,7 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
 
       // Always stop DNS hijacking once we have internet
       dnsServer.stop();
-      USER_PRINTLN("Stopped captive portal DNS");
+      if (apActive) USER_PRINTLN("Stopped captive portal DNS");
 
       // Handle AP based on behavior setting
       switch (apBehavior) {
@@ -1220,7 +1220,15 @@ void WLED::setup() {
       //   .driver = NULL,
       //   .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
       // };
-      esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
+      esp_netif_inherent_config_t base_cfg = ESP_NETIF_INHERENT_DEFAULT_ETH();
+      base_cfg.route_prio = 200;
+
+      esp_netif_config_t cfg = {
+          .base = &base_cfg,
+          .driver = NULL,
+          .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
+      };
+
       eth_netif = esp_netif_new(&cfg);
       assert(eth_netif);
 

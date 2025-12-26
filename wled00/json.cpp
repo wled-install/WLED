@@ -1169,7 +1169,7 @@ void serializeInfo(JsonObject root)
   }
 
   // --- Routing Information Section ---
-  uint32_t wifi_metric = 999, eth_metric = 999; // Default to high values
+  uint32_t wifi_metric = 0, eth_metric = 0; // Default to high values
 
   if (wifi_netif) {
     wifi_metric = esp_netif_get_route_prio(wifi_netif);
@@ -1178,15 +1178,32 @@ void serializeInfo(JsonObject root)
     eth_metric = esp_netif_get_route_prio(eth_netif);
   }
 
-  if (eth_netif && eth_metric < wifi_metric) {
-    network_info["default_route"] = "Ethernet";
+  // Determine default route
+  const char* route;
+  if (eth_netif && eth_metric > wifi_metric) {
+    if (Network.isEthernet()) {
+      route = "Ethernet";
+    } else {
+      route = "WiFi over Eth";
+    }
+  } else if (wifi_netif && wifi_metric > 0) {
+    route = "WiFi";
+  } else {
+    route = "None";
   }
-  else if (wifi_netif && wifi_metric < 999) {
-    network_info["default_route"] = "WiFi";
-  }
-  else {
-    network_info["default_route"] = "None";
-  }
+
+  // Add raw metrics
+  network_info["wifi_metric"] = wifi_metric;
+  network_info["eth_metric"] = eth_metric;
+
+  // Add combined default_route string
+  char buf[64];
+  snprintf(buf, sizeof(buf),
+    "%s (wifi=%u, eth=%u)",
+    route, wifi_metric, eth_metric);
+
+  network_info["default_route"] = buf;
+  
 
   JsonObject fs_info = root.createNestedObject("fs");
   fs_info["u"] = fsBytesUsed / 1000;
