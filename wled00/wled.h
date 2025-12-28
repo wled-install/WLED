@@ -431,7 +431,7 @@ WLED_GLOBAL esp_netif_t* sta_netif _INIT(NULL);
 WLED_GLOBAL esp_netif_t* ap_netif _INIT(NULL);
 WLED_GLOBAL esp_netif_t* eth_netif _INIT(NULL);
 WLED_GLOBAL unsigned long staDisconnectTime _INIT(0);
-
+WLED_GLOBAL EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 WLED_GLOBAL int s_retry_num _INIT(0);
@@ -446,6 +446,8 @@ WLED_GLOBAL int s_retry_num _INIT(0);
 WLED_GLOBAL esp_eth_handle_t eth_handle;
 WLED_GLOBAL bool eth_is_connected _INIT(false);
 WLED_GLOBAL bool wifi_is_connected _INIT(false);
+WLED_GLOBAL tcpip_adapter_if_t send_interface;
+WLED_GLOBAL netif* sender_netif _INIT(NULL);
 
 // LED CONFIG
 WLED_GLOBAL bool turnOnAtBoot _INIT(true);                // turn on LEDs at power-up

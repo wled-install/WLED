@@ -767,6 +767,74 @@ static inline void IRAM_ATTR processPixelData(
   #endif
 }
 
+extern "C" {
+  #include "lwip/opt.h"
+  #include "lwip/inet.h"
+  #include "lwip/udp.h"
+  #include "lwip/igmp.h"
+  #include "lwip/ip_addr.h"
+  #include "lwip/mld6.h"
+  #include "lwip/prot/ethernet.h"
+  #include <esp_err.h>
+  #include <esp_wifi.h>
+  #include <esp_netif.h>
+  #include <esp_netif_net_stack.h>
+}
+
+#include "lwip/priv/tcpip_priv.h"
+
+class FastAsyncUDP : public AsyncUDP {
+  ip_addr_t _addr_cache;
+  bool _addr_cached = false;
+  struct udp_api_call_t {
+    struct tcpip_api_call_data call;
+    struct udp_pcb* pcb;
+    const ip_addr_t* addr;
+    u16_t port;
+    struct pbuf* pb;
+    struct netif* netif;
+    err_t err;
+  };
+  udp_api_call_t _msg;  // Reuse instead of stack allocation each call
+
+  static err_t _udp_sendto_if_api(struct tcpip_api_call_data* api_call_msg) {
+    udp_api_call_t* msg = (udp_api_call_t*)api_call_msg;
+    msg->err = udp_sendto_if(msg->pcb, msg->pb, msg->addr, msg->port, msg->netif);
+    return msg->err;
+  }
+
+public:
+  // Call once at startup
+  bool begin(const IPAddress addr, uint16_t port) {
+    _pcb = udp_new();
+    if (!_pcb) return false;
+
+    _addr_cache.type = IPADDR_TYPE_V4;
+    _addr_cache.u_addr.ip4.addr = static_cast<uint32_t>(addr);
+
+    // Pre-fill the static parts of the message
+    _msg.pcb = _pcb;
+    _msg.addr = &_addr_cache;
+    _msg.port = port;
+    _msg.netif = sender_netif;
+
+    return true;
+  }
+
+  size_t writeTo(const uint8_t* data, size_t len) {
+    pbuf* pbt = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+    if (!pbt) return 0;
+
+    memcpy(pbt->payload, data, len);
+
+    _msg.pb = pbt;  // Only thing that changes per-call
+    tcpip_api_call(_udp_sendto_if_api, (struct tcpip_api_call_data*)&_msg);
+
+    pbuf_free(pbt);
+    return (_msg.err == ERR_OK) ? len : 0;
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main broadcast function
 // type: 0=DDP, 1=E1.31, 2=Art-Net
@@ -785,7 +853,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   bool e131_multicast
 ) {
   if (fps_limit < 1 || fps_limit > 120) fps_limit = 60;
-  tcpip_adapter_if_t send_interface = Network.isEthernet() ? TCPIP_ADAPTER_IF_ETH : TCPIP_ADAPTER_IF_STA;
   if (!(apActive || interfacesInited) || !length) return 1;
   if (!e131_multicast && !client[0]) return 1;  // Unicast requires valid IP
 
@@ -800,16 +867,6 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
       protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
     return 1;
   }
-
-  // if (strip.getLength() < length) {
-  //   length = strip.getLength();
-  //   USER_PRINTF("length == %lu strip.getLength() == %lu\n", length, strip.getLength());
-  // }
-
-  // if (SEGMENT.maxHeight * SEGMENT.maxWidth < length) {
-  //   length = SEGMENT.maxHeight * SEGMENT.maxWidth;
-  //   USER_PRINTF("length == %lu SEGMENT.maxWidth == %lu SEGMENT.maxHeight == %lu\n", length, SEGMENT.maxWidth, SEGMENT.maxHeight);
-  // }
 
   // Packet buffer sized for DDP (largest: 10 + 1440 = 1450 bytes)
   #ifdef ESP32
@@ -850,8 +907,14 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   // Efficiency: 94.9% | Header: 10 bytes | Max payload: 1440 bytes
   // ═══════════════════════════════════════════════════════════════════
   case 0: {
-    static AsyncUDP ddpUdp;
+    static FastAsyncUDP ddpUdp;
+    static IPAddress lastClient((uint32_t)0);
 
+    if ((uint32_t)client != (uint32_t)lastClient) {
+      ddpUdp.begin(client, DDP_DEFAULT_PORT);
+      lastClient = client;
+    }
+    
     const uint16_t maxChannels = (DDP_MAX_DATALEN / bpp) * bpp;
     const size_t packetCount = ((totalChannels - 1) / maxChannels) + 1;
 
@@ -880,11 +943,9 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
       packet_buffer[8] = (packetSize >> 8) & 0xFF;
       packet_buffer[9] = packetSize & 0xFF;
 
-      processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in,
-        packetSize, bufferOffset, bri, isRGBW, color_order);
+      processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
 
-      if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN,
-        client, DDP_DEFAULT_PORT, send_interface)) {
+      if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN)) {
         DEBUG_PRINTLN(F("DDP writeTo error"));
         return 1;
       }
@@ -1000,13 +1061,11 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
       packet_buffer[113] = (universe >> 8) & 0xFF;
       packet_buffer[114] = universe & 0xFF;
 
-      processPixelData(packet_buffer + E131_HEADER_LEN, buffer_in,
-        packetSize, bufferOffset, bri, isRGBW, color_order);
+      processPixelData(packet_buffer + E131_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
 
       IPAddress dest = e131_multicast ? e131MulticastIP(universe) : client;
 
-      if (!e131Udp.writeTo(packet_buffer, packetSize + E131_HEADER_LEN,
-        dest, E131_DEFAULT_PORT, send_interface)) {
+      if (!e131Udp.writeTo(packet_buffer, packetSize + E131_HEADER_LEN, dest, E131_DEFAULT_PORT, send_interface)) {
         DEBUG_PRINTLN(F("E1.31 writeTo error"));
         return 1;
       }
@@ -1050,23 +1109,14 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
   // Efficiency: 85.9% | Header: 18 bytes | Max payload: 512 bytes
   // ═══════════════════════════════════════════════════════════════════
   case 2: {
-    // 1. Setup the socket
-    static AsyncUDP artnetUdp;
-    static bool isConnected = false;
-    static IPAddress lastClient = IPAddress(0, 0, 0, 0);
-    
-    // // If we haven't connected yet, OR the destination IP changed...
-    // if (!isConnected || lastClient != client) {
-    //   // ...connect to the specific IP and Port ONCE.
-    //   if (artnetUdp.connect(client, ARTNET_DEFAULT_PORT)) {
-    //     isConnected = true;
-    //     lastClient = client;
-    //     DEBUG_PRINTLN(F("Art-Net Connected (Fast Mode)"));
-    //   } else {
-    //     return 1; // Failed to bind
-    //   }
-    // }
-    // Initialize Art-Net header once
+    static FastAsyncUDP artnetUdp;
+    static IPAddress lastClient((uint32_t)0);
+
+    if ((uint32_t)client != (uint32_t)lastClient) {
+      artnetUdp.begin(client, ARTNET_DEFAULT_PORT);
+      lastClient = client;
+    }
+
     if (packet_buffer[0] != 'A') {
       memcpy(packet_buffer, ART_NET_HEADER, 12);
     }
@@ -1096,14 +1146,12 @@ uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
 
         #ifdef REALTIME_TESTING_ZEROS
         uint8_t test_bri = 0;
-        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in,
-          packetSize, bufferOffset, test_bri, isRGBW, color_order);
+        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, test_bri, isRGBW, color_order);
         #else
-        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in,
-          packetSize, bufferOffset, bri, isRGBW, color_order);
+        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
         #endif
 
-        if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN, client, ARTNET_DEFAULT_PORT, send_interface)) {
+        if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
           USER_PRINTLN(F("Art-Net writeTo error"));
           return 1;
         }

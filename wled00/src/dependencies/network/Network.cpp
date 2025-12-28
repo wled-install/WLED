@@ -4,6 +4,7 @@
 #include "lwip/dns.h"
 #include "lwip/netdb.h"
 #include "mdns.h"
+#include "esp_netif_net_stack.h"
 
 IPAddress NetworkClass::localIP() {
   esp_netif_ip_info_t ip_info;
@@ -186,6 +187,8 @@ bool NetworkClass::isEthernet() {
   if (default_netif == NULL) {
     return false; // No default interface is active
   }
+  // This sets the default netif for FastAsyncUDP
+  sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(default_netif));
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
   if (default_netif == wifi_netif) {
