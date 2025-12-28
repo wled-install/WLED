@@ -785,7 +785,6 @@ extern "C" {
 
 class FastAsyncUDP : public AsyncUDP {
   ip_addr_t _addr_cache;
-  bool _addr_cached = false;
   struct udp_api_call_t {
     struct tcpip_api_call_data call;
     struct udp_pcb* pcb;
