@@ -192,8 +192,18 @@ bool NetworkClass::isEthernet() {
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
   if (default_netif == wifi_netif) {
+    #ifdef WLED_USE_ETHERNET_ONLY
+    send_interface = TCPIP_ADAPTER_IF_MAX; // this is dumb but otherwise it sends down a slow path. Only for E1.31 until I can test it.
+    #else
+    send_interface = TCPIP_ADAPTER_IF_STA;
+    #endif
     return false;
   } else if (default_netif == eth_netif) {
+    #ifdef WLED_USE_ETHERNET_ONLY
+    send_interface = TCPIP_ADAPTER_IF_MAX; // this is dumb but otherwise it sends down a slow path. Only for E1.31 until I can test it.
+    #else
+    send_interface = TCPIP_ADAPTER_IF_ETH;
+    #endif
     return true;
   }
   return false;
