@@ -19,9 +19,12 @@ public:
   IPAddress softAPIP();
   IPAddress subnetMask();
   IPAddress gatewayIP();
+  IPAddress getWiFiIP();
+  IPAddress getEthernetIP();
   void localMAC(uint8_t* MAC);
   bool isConnected();
   bool isEthernet();
+  bool isWiFi();
   IPAddress hostByName(const char* hostname);
   String format_mac_address(const uint8_t* mac);
   esp_err_t get_hardware_mac_address(uint8_t* mac_addr);

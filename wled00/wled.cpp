@@ -814,11 +814,11 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
     if (event_id == WIFI_EVENT_STA_START) {
       USER_PRINTLN("Event: WiFi Started");
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
-      interfacesInited = false;
+      if (!interfacesInited) interfacesInited = false;
       wifi_is_connected = false;
     } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
       USER_PRINTLN("Event: WiFi Connected");
-      interfacesInited = false;
+      if (!interfacesInited) interfacesInited = false;
       wifi_is_connected = false;
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
       wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
@@ -830,8 +830,6 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
         s_retry_num++;
         USER_PRINTF("Event Action: Retry to connect to the AP %d\n", s_retry_num);
-      } else {
-        xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
       }
       if (apBehavior == AP_BEHAVIOR_NO_CONN && !apActive) {
         USER_PRINTLN("Connection lost, restarting AP");
@@ -877,8 +875,6 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
       showWelcomePage = false;
       ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
       s_retry_num = 0;
-      xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-      USER_PRINTLN("Got IP address");
 
       // Always stop DNS hijacking once we have internet
       dnsServer.stop();
@@ -920,6 +916,16 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
   } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
     USER_PRINTLN("Event: Ethernet Link Down");
     eth_is_connected = false;
+    USER_PRINT("IP Address is now http://");
+    USER_PRINTLN(Network.localIP());
+    MDNS.end();
+    escapedMac = Network.getEscapedMac();
+    sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
+    MDNS.begin(cmDNS);
+    USER_PRINTF("mDNS started: http://%s.local\n", cmDNS); // WLEDMM
+    MDNS.addService("http", "tcp", 80);
+    MDNS.addService("wled", "tcp", 80);
+    MDNS.addServiceTxt("wled", "tcp", "mac", escapedMac.c_str());
   } else if (event_id == ETHERNET_EVENT_START) {
     eth_is_connected = false;
     // USER_PRINTLN("Event: Ethernet Started");
@@ -1105,10 +1111,7 @@ void WLED::setup() {
         ap_netif = esp_netif_create_default_wifi_ap();
         wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
         esp_wifi_init(&wifi_initiation);
-        s_wifi_event_group = xEventGroupCreate();
-        if (s_wifi_event_group == NULL) {
-          USER_PRINTLN("FATAL: Failed to create WiFi event group!");
-        }
+
         esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
         esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
 
@@ -1121,7 +1124,7 @@ void WLED::setup() {
         };
         esp_wifi_set_country(&country);
 
-        // esp_wifi_set_mode(WIFI_MODE_APSTA);
+        esp_wifi_set_mode(WIFI_MODE_STA);
         // ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
 
         // // Wait for WiFi to be fully ready
@@ -1132,7 +1135,6 @@ void WLED::setup() {
         vTaskDelay(pdMS_TO_TICKS(100));
         USER_PRINTLN("Checking WiFi Stuff");
 
-        // #if CONFIG_SOC_WIFI_HE_SUPPORT
         wifi_band_mode_t band_mode;
         esp_wifi_get_band_mode(&band_mode);
         USER_PRINTF("Band mode: %s\n", wifi_band_mode_to_string(band_mode));
@@ -1140,28 +1142,37 @@ void WLED::setup() {
         wifi_protocols_t protocols;
         esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
         print_wifi_protocols("2.4GHz protocols before set:", protocols.ghz_2g);
-        print_wifi_protocols("5GHz protocols before set:", protocols.ghz_5g);
+        if (band_mode != WIFI_BAND_MODE_2G_ONLY) print_wifi_protocols("5GHz protocols before set:", protocols.ghz_5g);
 
         wifi_country_t country_check;
         esp_wifi_get_country(&country_check);
         USER_PRINTF("Country: %.2s, channels %d-%d\n", country_check.cc, country_check.schan, country_check.schan + country_check.nchan - 1);
 
-        wifi_protocols_t xprotocols = {
-          .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
-          .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N
-        };
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocols(WIFI_IF_STA, &xprotocols));
+        wifi_protocols_t xprotocols;
+        wifi_bandwidths_t bw_config;
 
-        wifi_bandwidths_t bw_config = {
-          .ghz_2g = WIFI_BW_HT40,
-          .ghz_5g = WIFI_BW_HT40,
-        };
-        esp_err_t err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bw_config);
-        USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
-
+        if (band_mode != WIFI_BAND_MODE_2G_ONLY) {
+          xprotocols = {
+            .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
+            .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N
+          };
+          ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocols(WIFI_IF_STA, &xprotocols));
+          bw_config = {
+            .ghz_2g = WIFI_BW_HT40,
+            .ghz_5g = WIFI_BW_HT40,
+          };
+          esp_err_t err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bw_config);
+          USER_PRINTF("Set bandwidths result: %d (%s)\n", err, esp_err_to_name(err));
+        } else {
+          ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
+          esp_err_t err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+          USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
+        }
+        
         esp_wifi_get_protocols(WIFI_IF_STA, &xprotocols);
-        print_wifi_protocols("2.4GHz protocols after set:", protocols.ghz_2g);
-        print_wifi_protocols("5GHz protocols after set:", protocols.ghz_5g);
+
+        print_wifi_protocols("2.4GHz protocols after set:", xprotocols.ghz_2g);
+        if (band_mode != WIFI_BAND_MODE_2G_ONLY) print_wifi_protocols("5GHz protocols after set:", xprotocols.ghz_5g);
 
         #ifdef WLEDMM_SHOW_WIFI_SCAN
         // Scan to see what networks are visible
@@ -1198,7 +1209,6 @@ void WLED::setup() {
           free(ap_list);
         }
         #endif
-        // #endif
         #endif
 
 
@@ -1588,72 +1598,70 @@ void WLED::setup() {
   #ifdef ARDUINO_RUNNING_CORE
     DEBUG_PRINTF("Arduino core=%d (loop is now on core #%d)\n", int(ARDUINO_RUNNING_CORE), int(xPortGetCoreID()));
   #endif
-  #ifdef ARDUINO_EVENT_RUNNING_CORE
+    #ifdef ARDUINO_EVENT_RUNNING_CORE
     DEBUG_PRINTF("Arduino Event core=%d\n", int(ARDUINO_EVENT_RUNNING_CORE));
-  #endif
+    #endif
 
-  // WLEDMM : dump GPIO infos (experimental, UI integration pending)
-  //#ifdef WLED_DEBUG
-  USER_PRINTLN(F("\nGPIO\t| Assigned to\t\t| Info"));
-  USER_PRINTLN(F("--------|-----------------------|------------"));
-  for(int pinNr = 0; pinNr < WLED_NUM_PINS; pinNr++) { // 49 = highest PIN on ESP32-S3
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-    if((pinManager.isPinOk(pinNr, false)) || (pinNr > 18 && pinNr < 21)) {  // softhack007: list USB pins
-#else
-    if(pinManager.isPinOk(pinNr, false)) {
-#endif
-      //if ((!pinManager.isPinAllocated(pinNr)) && (pinManager.getPinSpecialText(pinNr).length() == 0)) continue;      // un-comment to hide no-name,unused GPIO pins
-      bool is_inOut = pinManager.isPinOk(pinNr, true);
-#if 0 // for testing
-      USER_PRINT(pinManager.isPinAnalog(pinNr) ? "A": " ");
-      USER_PRINT(pinManager.isPinADC1(pinNr) ? "1": " ");
-      USER_PRINT(pinManager.isPinADC2(pinNr) ? "2": " ");
-      USER_PRINT(pinManager.isPinTouch(pinNr) ? "T": " ");
-      USER_PRINT(pinManager.isPinPWM(pinNr) ? " P": "  ");
-      USER_PRINT(pinManager.isPinINT(pinNr) ? "I ": "  ");
-#endif
-      USER_PRINTF("%s  %2d\t  %-17s %s\t  %s\n", 
-          (is_inOut?"i/o":"in "), 
-          pinNr, 
+    // WLEDMM : dump GPIO infos (experimental, UI integration pending)
+    //#ifdef WLED_DEBUG
+    USER_PRINTLN(F("\nGPIO\t| Assigned to\t\t| Info"));
+    USER_PRINTLN(F("--------|-----------------------|------------"));
+    for (int pinNr = 0; pinNr < WLED_NUM_PINS; pinNr++) { // 49 = highest PIN on ESP32-S3
+      #if defined(CONFIG_IDF_TARGET_ESP32S3)
+      if ((pinManager.isPinOk(pinNr, false)) || (pinNr > 18 && pinNr < 21)) {  // softhack007: list USB pins
+        #else
+      if (pinManager.isPinOk(pinNr, false)) {
+        #endif
+        //if ((!pinManager.isPinAllocated(pinNr)) && (pinManager.getPinSpecialText(pinNr).length() == 0)) continue;      // un-comment to hide no-name,unused GPIO pins
+        bool is_inOut = pinManager.isPinOk(pinNr, true);
+        #if 0 // for testing
+        USER_PRINT(pinManager.isPinAnalog(pinNr) ? "A" : " ");
+        USER_PRINT(pinManager.isPinADC1(pinNr) ? "1" : " ");
+        USER_PRINT(pinManager.isPinADC2(pinNr) ? "2" : " ");
+        USER_PRINT(pinManager.isPinTouch(pinNr) ? "T" : " ");
+        USER_PRINT(pinManager.isPinPWM(pinNr) ? " P" : "  ");
+        USER_PRINT(pinManager.isPinINT(pinNr) ? "I " : "  ");
+        #endif
+        USER_PRINTF("%s  %2d\t  %-17s %s\t  %s\n",
+          (is_inOut ? "i/o" : "in "),
+          pinNr,
           pinManager.getPinOwnerText(pinNr).c_str(),
           pinManager.getPinConflicts(pinNr).c_str(),
           pinManager.getPinSpecialText(pinNr).c_str()
-      );
-      USER_FLUSH();  // avoid lost lines (Serial buffer overflow)
+        );
+        USER_FLUSH();  // avoid lost lines (Serial buffer overflow)
+      }
     }
-  }
 
-#if 0 // for testing
-  USER_PRINTLN(F("\n"));
-  USER_PRINTF("ADC1-0 = %d, ADC1-3 = %d, ADC1-7 = %d, ADC2-0 = %d, ADC2-1 = %d, ADC2-8 = %d, ADC2-10 = %d\n",
-    pinManager.getADCPin(PM_ADC1, 0), pinManager.getADCPin(PM_ADC1, 3), pinManager.getADCPin(PM_ADC1, 7), 
-    pinManager.getADCPin(PM_ADC2, 0), pinManager.getADCPin(PM_ADC2, 1), pinManager.getADCPin(PM_ADC2, 8),
-    pinManager.getADCPin(PM_ADC2, 10)
-  );
-  USER_PRINTLN();
-  for(int p=0; p<11; p++) {
-    if(pinManager.getADCPin(PinManagerClass::ADC1, p) < 255)
-      USER_PRINTF("ADC1-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC1, p));
-  }
-  USER_PRINTLN();
-  for(int p=0; p<11; p++) {
-    if(pinManager.getADCPin(PinManagerClass::ADC2, p) < 255)
-      USER_PRINTF("ADC2-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC2, p));
-  }
-  USER_PRINTLN(F("\n"));
-#endif
+    #if 0 // for testing
+    USER_PRINTLN(F("\n"));
+    USER_PRINTF("ADC1-0 = %d, ADC1-3 = %d, ADC1-7 = %d, ADC2-0 = %d, ADC2-1 = %d, ADC2-8 = %d, ADC2-10 = %d\n",
+      pinManager.getADCPin(PM_ADC1, 0), pinManager.getADCPin(PM_ADC1, 3), pinManager.getADCPin(PM_ADC1, 7),
+      pinManager.getADCPin(PM_ADC2, 0), pinManager.getADCPin(PM_ADC2, 1), pinManager.getADCPin(PM_ADC2, 8),
+      pinManager.getADCPin(PM_ADC2, 10)
+    );
+    USER_PRINTLN();
+    for (int p = 0; p < 11; p++) {
+      if (pinManager.getADCPin(PinManagerClass::ADC1, p) < 255)
+        USER_PRINTF("ADC1-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC1, p));
+    }
+    USER_PRINTLN();
+    for (int p = 0; p < 11; p++) {
+      if (pinManager.getADCPin(PinManagerClass::ADC2, p) < 255)
+        USER_PRINTF("ADC2-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC2, p));
+    }
+    USER_PRINTLN(F("\n"));
+    #endif
 
-  USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
-  USER_PRINTLN(F("WLED initialization done.\n"));
-  
-  serial_drain();
-  Serial.flush();
+    USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
+    USER_PRINTLN(F("WLED initialization done.\n"));
+    serial_drain();
+    Serial.flush();
+    delay(50);
 
-  delay(50);
-  
-  xSemaphoreGive(busMutex);
+    xSemaphoreGive(busMutex);
 
-  xTaskCreatePinnedToCore(
+    xTaskCreatePinnedToCore(
     background_loop_blocking,  // Task function
     "BG_Blocking",    // Name
     6244,             // Stack size in words (was 24000)
@@ -1661,9 +1669,9 @@ void WLED::setup() {
     1,                // Priority
     NULL,             // Task handle (optional)
     0                 // Core ID (0 or 1)
-  );
+    );
 
-  xTaskCreatePinnedToCore(
+    xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
     5000,             // Stack size in words (was 24000)
@@ -1671,10 +1679,10 @@ void WLED::setup() {
     1,                // Priority
     NULL,             // Task handle (optional)
     0                 // Core ID (0 or 1)
-  );
+    );
 
-  //#endif
-  // WLEDMM end
+    //#endif
+    // WLEDMM end
 } // endsetup
 
 void WLED::beginStrip() {
@@ -1841,11 +1849,14 @@ void WLED::initConnection() {
     strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
     wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_sta_config.sta.failure_retry_cnt = 5;
-    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.pmf_cfg.capable = true;
+    wifi_sta_config.sta.pmf_cfg.required = true;
     wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     USER_PRINTF("Connecting to WiFi Station: \"%s\" with password \"%s\"\n", wifi_sta_config.sta.ssid, "********");
   }
 
@@ -1886,8 +1897,9 @@ void WLED::initInterfaces()
     // "end" must be called before "begin" is called a 2nd time
     // see https://github.com/esp8266/Arduino/issues/7213
     MDNS.end();
+    escapedMac = Network.getEscapedMac();
+    sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
     MDNS.begin(cmDNS);
-
     USER_PRINTF("mDNS started: http://%s.local\n", cmDNS); // WLEDMM
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("wled", "tcp", 80);
@@ -1920,23 +1932,56 @@ void WLED::handleConnection() {
   static byte stacO = 0;
   static uint32_t lastHeap = UINT32_MAX;
   static unsigned long heapTime = 0;
+  static bool wifiStartAttempted = false;      // NEW: Track if we've tried to start WiFi
+  static unsigned long lastWifiRetry = 0;       // NEW: For periodic WiFi retry
   unsigned long now = millis();
 
   if (now < 2000 && (!WLED_WIFI_CONFIGURED || apBehavior == AP_BEHAVIOR_ALWAYS))
     return;
 
+  // === NEW: Ensure WiFi is started regardless of Ethernet state ===
+  #if !defined(WLED_USE_ETHERNET_ONLY)
+  if (!wifiStartAttempted && WLED_WIFI_CONFIGURED && apBehavior != AP_BEHAVIOR_ALWAYS) {
+    USER_PRINTLN(F("Starting WiFi STA mode..."));
+
+    wifi_config_t wifi_sta_config = {};
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
+    strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
+    wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_sta_config.sta.failure_retry_cnt = 5;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.pmf_cfg.capable = true;
+    wifi_sta_config.sta.pmf_cfg.required = true;
+    wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
+
+    // Only set mode if not already in APSTA mode
+    wifi_mode_t currentMode;
+    esp_wifi_get_mode(&currentMode);
+    if (currentMode != WIFI_MODE_APSTA) {
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+    }
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+
+    wifiStartAttempted = true;
+    lastWifiRetry = now;
+    lastReconnectAttempt = now;
+    USER_PRINTF("WiFi connecting to: \"%s\"\n", clientSSID);
+  }
+  #endif
+  // === END NEW SECTION ===
+
   if (lastReconnectAttempt == 0) {
     DEBUG_PRINTLN(F("lastReconnectAttempt == 0"));
     initConnection();
+    wifiStartAttempted = true;  // initConnection also starts WiFi
     return;
   }
 
-  static unsigned retryCount = 0;  // WLEDMM
-
-  // --- START REFACTOR ---
-  // This block replaces the crashing esp_wifi_ap_get_sta_list() call.
-  // We now safely read the client count from the global variable
-  // that is updated by the Wi-Fi event handler.
+  // AP client count handling (unchanged)
   byte stac = g_ap_client_count;
 
   if (stac != stacO) {
@@ -1948,11 +1993,11 @@ void WLED::handleConnection() {
         // WiFi.disconnect();
       } else {
         initConnection();
-        return; // CRITICAL: Return immediately after state change
+        wifiStartAttempted = true;
+        return;
       }
     }
   }
-  // --- END REFACTOR ---
 
   if (forceReconnect) {
     USER_PRINTLN(F("Forcing reconnect."));
@@ -1960,14 +2005,33 @@ void WLED::handleConnection() {
     interfacesInited = false;
     forceReconnect = false;
     wasConnected = false;
+    wifiStartAttempted = true;
     return;
   }
-  if (!Network.isConnected()) {
+
+  // === NEW: Retry WiFi connection periodically if Ethernet is up but WiFi isn't ===
+  #if defined(WLED_USE_ETHERNET) && !defined(WLED_USE_ETHERNET_ONLY)
+  if (eth_is_connected && !wifi_is_connected && wifiStartAttempted && WLED_WIFI_CONFIGURED) {
+    if (now - lastWifiRetry > 30000) {  // Retry every 30 seconds
+      USER_PRINTLN(F("Ethernet connected, retrying WiFi..."));
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+      lastWifiRetry = now;
+    }
+  }
+  #endif
+  // === END NEW SECTION ===
+
+  // Check if ANY network is disconnected that we care about
+  // Modified logic: Only consider "disconnected" if ALL networks are down
+  bool anyNetworkConnected = eth_is_connected || wifi_is_connected;
+
+  if (!anyNetworkConnected) {
     if (interfacesInited) {
       USER_PRINTLN(F("Disconnected!"));
       interfacesInited = false;
       initConnection();
-      return; // CRITICAL: Return immediately after state change
+      wifiStartAttempted = true;
+      return;
     }
     // send improv failed 6 seconds after second init attempt (24 sec. after provisioning)
     if (improvActive > 2 && now - lastReconnectAttempt > 6000) {
@@ -1978,23 +2042,41 @@ void WLED::handleConnection() {
       if (improvActive == 2) improvActive = 3;
       USER_PRINTLN(F("Last reconnect too old."));
       initConnection();
-      return; // CRITICAL: Return immediately after state change
+      wifiStartAttempted = true;
+      return;
     }
     if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
-      USER_PRINTLN(F("Not connected starting AP."));
+      USER_PRINTLN(F("Not connected, starting AP."));
       initAP();
     }
   }
 
-  if ((eth_is_connected || wifi_is_connected) && !interfacesInited) { //newly connected
+  // Initialize interfaces when we have ANY connection
+  if (anyNetworkConnected && !interfacesInited) {
     USER_PRINTLN();
-    USER_PRINT(F("Connected! IP address: http://"));
+    USER_PRINT(F("Connected!\nIP address: http://"));
     USER_PRINT(Network.localIP());
-    if (Network.isEthernet()) {
-      USER_PRINTLN(" via Ethernet");
+    IPAddress backup;
+    if (Network.isEthernet() && !Network.isWiFi()) {
+      USER_PRINT(F(" via Ethernet (Primary Route)\n"));
+      backup = Network.getWiFiIP();
+      if (backup != INADDR_NONE && backup != IPAddress(IPADDR_BROADCAST)) {
+        USER_PRINT(F("IP address: http://"));
+        USER_PRINT(backup);
+        USER_PRINT(F(" via WiFi (Backup Route)\n"));
+      }
+    } else if (Network.isWiFi() && !Network.isEthernet()) {
+      USER_PRINT(F(" via WiFi (Primary Route)\n"));
+      backup = Network.getEthernetIP();
+      if (backup != INADDR_NONE && backup != IPAddress(IPADDR_BROADCAST)) {
+        USER_PRINT(F("IP address: http://"));
+        USER_PRINT(backup);
+        USER_PRINT(F(" via Ethernet (Backup Route)\n"));
+      }
     } else {
-      USER_PRINTLN(" via WiFi");
+      USER_PRINT(F(" via Unknown (This shouldn't happen!)"));
     }
+    USER_PRINTLN();
 
     if (improvActive) {
       if (improvError == 3) sendImprovStateResponse(0x00, true);
@@ -2004,19 +2086,20 @@ void WLED::handleConnection() {
     initInterfaces();
     userConnected();
     usermods.connected();
-    lastMqttReconnectAttempt = 0; // force immediate update
-
-  } else {
-    // #ifndef WLED_USE_ETHERNET_ONLY
-    //   wifi_mode_t mode;
-    //   esp_wifi_get_mode(&mode);
-    //   if (mode != WIFI_MODE_APSTA) {
-    //     esp_wifi_stop();
-    //     USER_PRINTLN("handleConnection() forcing reconnect.");
-    //     forceReconnect = true;
-    //   }
-    // #endif
+    lastMqttReconnectAttempt = 0;
+    ws.onEvent(wsEvent);
   }
+
+  // === NEW: Log when WiFi comes up after Ethernet ===
+  #if defined(WLED_USE_ETHERNET)
+  static bool wifiWasConnected = false;
+  if (wifi_is_connected && !wifiWasConnected) {
+    wifiWasConnected = true;
+  } else if (!wifi_is_connected && wifiWasConnected) {
+    wifiWasConnected = false;
+  }
+  #endif
+  // === END NEW SECTION ===
 }
 
 // If status LED pin is allocated for other uses, does nothing

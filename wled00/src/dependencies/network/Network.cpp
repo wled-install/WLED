@@ -3,6 +3,7 @@
 #include "esp_netif.h"
 #include "lwip/dns.h"
 #include "lwip/netdb.h"
+#include "mdns.h"
 
 IPAddress NetworkClass::localIP() {
   esp_netif_ip_info_t ip_info;
@@ -19,15 +20,43 @@ IPAddress NetworkClass::localIP() {
 
   // Try primary interface first
   if (primary && esp_netif_get_ip_info(primary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP6);
+    mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP4);
+    mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP6);
     return IPAddress(ip_info.ip.addr);
   }
 
   // Fall back to secondary interface
   if (secondary && esp_netif_get_ip_info(secondary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP6);
+    mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP4);
+    mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP6);
     return IPAddress(ip_info.ip.addr);
   }
 
   return INADDR_NONE;
+}
+
+IPAddress NetworkClass::getWiFiIP() {
+  esp_netif_ip_info_t ip_info;
+  esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+
+  if (wifi_netif && esp_netif_get_ip_info(wifi_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    return IPAddress(ip_info.ip.addr);
+  } else { 
+    return INADDR_NONE;
+  }
+}
+
+IPAddress NetworkClass::getEthernetIP() {
+  esp_netif_ip_info_t ip_info;
+  esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+
+  if (eth_netif && esp_netif_get_ip_info(eth_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    return IPAddress(ip_info.ip.addr);
+  } else {
+    return INADDR_NONE;
+  }
 }
 
 IPAddress NetworkClass::softAPIP() {
@@ -77,18 +106,6 @@ void NetworkClass::localMAC(uint8_t* MAC) {
   return;
 }
 
-// bool NetworkClass::isConnected() {
-//   esp_netif_t* netif = esp_netif_get_default_netif();
-//   if (netif == NULL) {
-//     return false;
-//   }
-//   esp_netif_ip_info_t ip_info;
-//   if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-//     return (ip_info.ip.addr != 0);
-//   }
-//   return false;
-// }
-
 bool NetworkClass::isConnected() {
   esp_netif_t* netif = esp_netif_get_default_netif();
   if (netif == NULL) {
@@ -137,20 +154,21 @@ String NetworkClass::format_mac_address(const uint8_t* mac) {
 }
 
 esp_err_t NetworkClass::get_hardware_mac_address(uint8_t* mac_addr) {
+
   // This gets the MAC from the hardware, before any network service init happens.
   esp_err_t err = ESP_FAIL;
+  
   #if defined(WLED_USE_ETHERNET) 
-  if (eth_handle != NULL) {
-    // Investigate esp_efuse_mac_get_default() in case we don't even need the eth_handle.
-    // Just need to check with one this returns, assuming Ethernet on the P4.
-    err = esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
-  }
+  err = esp_read_mac(mac_addr, ESP_MAC_ETH);
   if (err == ESP_OK) {
     return ESP_OK;
   }
-  #elif !defined(WLED_USE_ETHERNET_ONLY)
-  err = esp_wifi_get_mac(WIFI_IF_STA, mac_addr);
   #endif
+  err = esp_read_mac(mac_addr, ESP_MAC_WIFI_STA);
+  if (err == ESP_OK) {
+    return ESP_OK;
+  }
+  USER_PRINTLN("Failed to read MAC");
   return err;
 }
 
@@ -174,6 +192,21 @@ bool NetworkClass::isEthernet() {
     return false;
   } else if (default_netif == eth_netif) {
     return true;
+  }
+  return false;
+}
+
+bool NetworkClass::isWiFi() {
+  esp_netif_t* default_netif = esp_netif_get_default_netif();
+  if (default_netif == NULL) {
+    return false; // No default interface is active
+  }
+  esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+  if (default_netif == wifi_netif) {
+    return true;
+  } else if (default_netif == eth_netif) {
+    return false;
   }
   return false;
 }
