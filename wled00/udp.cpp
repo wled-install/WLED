@@ -674,7 +674,7 @@ extern "C" {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Shared pixel processing - handles brightness, color order, and pixel remapping
 // ═══════════════════════════════════════════════════════════════════════════════
-static inline void IRAM_ATTR processPixelData(
+static inline void processPixelData(
   uint8_t* dest,
   const uint8_t* src,
   uint_fast16_t packetSize,
@@ -796,7 +796,7 @@ class FastAsyncUDP : public AsyncUDP {
   };
   udp_api_call_t _msg;  // Reuse instead of stack allocation each call
 
-  static err_t IRAM_ATTR _udp_sendto_if_api(struct tcpip_api_call_data* api_call_msg) {
+  static err_t _udp_sendto_if_api(struct tcpip_api_call_data* api_call_msg) {
     udp_api_call_t* msg = (udp_api_call_t*)api_call_msg;
     msg->err = udp_sendto_if(msg->pcb, msg->pb, msg->addr, msg->port, msg->netif);
     return msg->err;
@@ -820,7 +820,7 @@ public:
     return true;
   }
 
-  size_t IRAM_ATTR writeTo(const uint8_t* data, size_t len) {
+  size_t writeTo(const uint8_t* data, size_t len) {
     pbuf* pbt = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
     if (!pbt) return 0;
 
@@ -838,7 +838,7 @@ public:
 // Main broadcast function
 // type: 0=DDP, 1=E1.31, 2=Art-Net
 // ═══════════════════════════════════════════════════════════════════════════════
-uint8_t IRAM_ATTR __attribute__((hot)) realtimeBroadcast(
+uint8_t __attribute__((hot)) realtimeBroadcast(
   uint8_t type,
   IPAddress client,
   uint32_t length,
