@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <algorithm>
 
+
 static const char* TAG = "ImageCache";
 
 ImageCacheManager& ImageCacheManager::getInstance() {
@@ -26,6 +27,165 @@ ImageCacheManager::ImageCacheManager() :
 ImageCacheManager::~ImageCacheManager() {
   clearCache();
   vSemaphoreDelete(cache_mutex);
+}
+
+// ============================================================================
+// Helper: Detect if path is an MJPEG file
+// ============================================================================
+
+bool ImageCacheManager::_isMJPEGFile(const psram_string& path) {
+  return path.size() > 6 && path.substr(path.size() - 6) == ".mjpeg";
+}
+
+// ============================================================================
+// MJPEG Whole-File Caching
+// ============================================================================
+
+bool ImageCacheManager::_ensureMJPEGCached(const psram_string& file_path) {
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  if (mjpeg_cache.find(file_path) != mjpeg_cache.end()) {
+    xSemaphoreGive(cache_mutex);
+    return true;
+  }
+  xSemaphoreGive(cache_mutex);
+
+  // Get file size
+  struct stat st;
+  if (stat(file_path.c_str(), &st) != 0) {
+    ESP_LOGE(TAG, "Failed to stat MJPEG: %s", file_path.c_str());
+    return false;
+  }
+  size_t file_size = st.st_size;
+
+  // Check if we have room
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  bool has_room = (psram_used + file_size <= psram_limit);
+  xSemaphoreGive(cache_mutex);
+
+  if (!has_room) {
+    ESP_LOGW(TAG, "Not enough PSRAM for MJPEG: %s (%u bytes needed, %u available)",
+      file_path.c_str(), file_size, psram_limit - psram_used);
+    return false;
+  }
+
+  // Allocate buffer
+  uint8_t* buffer = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+  if (!buffer) {
+    ESP_LOGE(TAG, "Failed to allocate %u bytes for MJPEG", file_size);
+    return false;
+  }
+
+  // Load entire file
+  FILE* fp = fopen(file_path.c_str(), "rb");
+  if (!fp) {
+    free(buffer);
+    ESP_LOGE(TAG, "Failed to open MJPEG: %s", file_path.c_str());
+    return false;
+  }
+
+  current_status = CacheStatus::PRELOADING_BG;
+
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  current_loading_file = file_path;
+  xSemaphoreGive(cache_mutex);
+
+  ESP_LOGI(TAG, "Loading MJPEG: %s (%u bytes)", file_path.c_str(), file_size);
+
+  size_t bytes_read = fread(buffer, 1, file_size, fp);
+  fclose(fp);
+
+  if (bytes_read != file_size) {
+    free(buffer);
+    ESP_LOGE(TAG, "Incomplete MJPEG read: %u/%u", bytes_read, file_size);
+    xSemaphoreTake(cache_mutex, portMAX_DELAY);
+    current_loading_file = "";
+    xSemaphoreGive(cache_mutex);
+    current_status = CacheStatus::IDLE;
+    return false;
+  }
+
+  // Build frame index by scanning buffer (fast - it's in memory now)
+  std::vector<MJPEGFrameInfo, PSRAM_Allocator<MJPEGFrameInfo>> frames;
+
+  size_t frame_start = 0;
+  bool in_frame = false;
+
+  for (size_t i = 1; i < file_size; i++) {
+    if (!in_frame) {
+      // Look for SOI marker (0xFFD8)
+      if (buffer[i - 1] == 0xFF && buffer[i] == 0xD8) {
+        frame_start = i - 1;
+        in_frame = true;
+      }
+    } else {
+      // Look for EOI marker (0xFFD9)
+      if (buffer[i - 1] == 0xFF && buffer[i] == 0xD9) {
+        size_t frame_size = i - frame_start + 1;
+        frames.push_back({ frame_start, frame_size });
+        in_frame = false;
+      }
+    }
+  }
+
+  if (frames.empty()) {
+    free(buffer);
+    ESP_LOGE(TAG, "No frames found in MJPEG: %s", file_path.c_str());
+    xSemaphoreTake(cache_mutex, portMAX_DELAY);
+    current_loading_file = "";
+    xSemaphoreGive(cache_mutex);
+    current_status = CacheStatus::IDLE;
+    return false;
+  }
+
+  // Store in cache
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  mjpeg_cache[file_path] = { buffer, file_size, std::move(frames) };
+  psram_used += file_size;
+  current_loading_file = "";
+  xSemaphoreGive(cache_mutex);
+
+  current_status = CacheStatus::IDLE;
+
+  ESP_LOGI(TAG, "Cached MJPEG %s: %u bytes, %u frames",
+    file_path.c_str(), file_size, mjpeg_cache[file_path].frames.size());
+
+  return true;
+}
+
+size_t ImageCacheManager::_getMJPEGFrameCount(const psram_string& file_path) {
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  auto it = mjpeg_cache.find(file_path);
+  size_t count = (it != mjpeg_cache.end()) ? it->second.frames.size() : 0;
+  xSemaphoreGive(cache_mutex);
+  return count;
+}
+
+ImageResult ImageCacheManager::_getImageFromMJPEG(const psram_string& file_path, size_t index) {
+  ImageResult result = { nullptr, 0, false, false };
+
+  xSemaphoreTake(cache_mutex, portMAX_DELAY);
+  auto it = mjpeg_cache.find(file_path);
+  if (it == mjpeg_cache.end()) {
+    xSemaphoreGive(cache_mutex);
+    return result;
+  }
+
+  if (index >= it->second.frames.size()) {
+    xSemaphoreGive(cache_mutex);
+    ESP_LOGW(TAG, "Frame index %d out of range for %s", index, file_path.c_str());
+    return result;
+  }
+
+  const MJPEGFrameInfo& frame = it->second.frames[index];
+
+  // Return pointer directly into cached buffer - no copy, no allocation!
+  result.buffer = it->second.buffer + frame.offset;
+  result.size = frame.size;
+  result.from_cache = true;
+  result.needs_free = false;
+
+  xSemaphoreGive(cache_mutex);
+  return result;
 }
 
 // ============================================================================
@@ -80,6 +240,14 @@ psram_string ImageCacheManager::_getFilenameByIndex(const psram_string& folder_p
 
 size_t ImageCacheManager::getFolderSizeFromDisk(const std::string& folder_path) {
   psram_string ps_path = folder_path.c_str();
+
+  // Handle MJPEG files
+  if (_isMJPEGFile(ps_path)) {
+    _ensureMJPEGCached(ps_path);
+    return _getMJPEGFrameCount(ps_path);
+  }
+
+  // Handle JPEG folders
   _ensureFileListCached(ps_path);
 
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
@@ -97,16 +265,26 @@ size_t ImageCacheManager::getFolderSizeFromDisk(const std::string& folder_path) 
 // ============================================================================
 
 ImageResult ImageCacheManager::getImageStreaming(const std::string& folder_path, size_t index) {
-  psram_string ps_folder_path = folder_path.c_str();
+  psram_string ps_path = folder_path.c_str();
+
+  // Handle MJPEG files
+  if (_isMJPEGFile(ps_path)) {
+    if (!_ensureMJPEGCached(ps_path)) {
+      return { nullptr, 0, false, false };
+    }
+    return _getImageFromMJPEG(ps_path, index);
+  }
+
+  // Handle JPEG folders
   ImageResult result = { nullptr, 0, false, false };
 
-  if (!_ensureFileListCached(ps_folder_path)) {
+  if (!_ensureFileListCached(ps_path)) {
     return result;
   }
 
   // Fast path: check cache
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
-  ImageData* cached = _getImageByIndex(ps_folder_path, index);
+  ImageData* cached = _getImageByIndex(ps_path, index);
   if (cached) {
     result.buffer = cached->buffer;
     result.size = cached->size;
@@ -118,13 +296,13 @@ ImageResult ImageCacheManager::getImageStreaming(const std::string& folder_path,
   xSemaphoreGive(cache_mutex);
 
   // Load from disk
-  psram_string filename = _getFilenameByIndex(ps_folder_path, index);
+  psram_string filename = _getFilenameByIndex(ps_path, index);
   if (filename.empty()) {
     ESP_LOGW(TAG, "No filename at index %d for %s", index, folder_path.c_str());
     return result;
   }
 
-  psram_string full_path = ps_folder_path + "/" + filename;
+  psram_string full_path = ps_path + "/" + filename;
 
   struct stat st;
   if (stat(full_path.c_str(), &st) != 0) {
@@ -167,7 +345,7 @@ ImageResult ImageCacheManager::getImageStreaming(const std::string& folder_path,
   // Cache for next time
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
   if (psram_used + file_size <= psram_limit) {
-    psram_file_map& cached_files = image_cache[ps_folder_path];
+    psram_file_map& cached_files = image_cache[ps_path];
     if (cached_files.find(filename) == cached_files.end()) {
       uint8_t* cache_buffer = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
       if (cache_buffer) {
@@ -179,7 +357,7 @@ ImageResult ImageCacheManager::getImageStreaming(const std::string& folder_path,
   }
   xSemaphoreGive(cache_mutex);
 
-  _queueBackgroundSync(ps_folder_path);
+  _queueBackgroundSync(ps_path);
 
   return result;
 }
@@ -188,15 +366,20 @@ ImageResult ImageCacheManager::getImageStreaming(const std::string& folder_path,
 // Background Sync
 // ============================================================================
 
-void ImageCacheManager::_queueBackgroundSync(const psram_string& folder_path) {
+void ImageCacheManager::_queueBackgroundSync(const psram_string& path) {
+  // Skip MJPEG files - they're loaded in full on first access
+  if (_isMJPEGFile(path)) {
+    return;
+  }
+
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
 
   bool already_queued = std::find(pending_sync_folders.begin(),
-    pending_sync_folders.end(), folder_path) != pending_sync_folders.end();
+    pending_sync_folders.end(), path) != pending_sync_folders.end();
 
   if (!already_queued) {
-    auto file_list_it = folder_file_lists.find(folder_path);
-    auto cache_it = image_cache.find(folder_path);
+    auto file_list_it = folder_file_lists.find(path);
+    auto cache_it = image_cache.find(path);
 
     bool fully_cached = false;
     if (file_list_it != folder_file_lists.end() && cache_it != image_cache.end()) {
@@ -204,7 +387,7 @@ void ImageCacheManager::_queueBackgroundSync(const psram_string& folder_path) {
     }
 
     if (!fully_cached) {
-      pending_sync_folders.push_back(folder_path);
+      pending_sync_folders.push_back(path);
     }
   }
   xSemaphoreGive(cache_mutex);
@@ -335,32 +518,59 @@ void ImageCacheManager::startPreload(const std::string& root_path) {
     return;
   }
 
-  psram_string_vector folders;
+  psram_string_vector items;
   struct dirent* entry;
+  struct stat st;
+
   while ((entry = readdir(dir)) != nullptr) {
     psram_string name = entry->d_name;
-    if (entry->d_type == DT_DIR && name.rfind("sequence", 0) == 0) {
-      folders.push_back(name);
+    psram_string full_path = psram_string(root_path.c_str()) + "/" + name;
+
+    if (stat(full_path.c_str(), &st) != 0) continue;
+
+    // Check for MJPEG files
+    if (S_ISREG(st.st_mode) &&
+      name.rfind("sequence", 0) == 0 &&
+      name.size() > 6 &&
+      name.substr(name.size() - 6) == ".mjpeg") {
+      items.push_back(name);
+    }
+    // Check for JPEG sequence folders
+    else if (S_ISDIR(st.st_mode) && name.rfind("sequence", 0) == 0) {
+      items.push_back(name);
     }
   }
   closedir(dir);
 
-  // Sort with _hot folders first
-  std::sort(folders.begin(), folders.end(), [](const psram_string& a, const psram_string& b) {
-    bool a_hot = (a.length() > 4 && a.substr(a.length() - 4) == "_hot");
-    bool b_hot = (b.length() > 4 && b.substr(b.length() - 4) == "_hot");
+  // Sort with _hot items first
+  std::sort(items.begin(), items.end(), [](const psram_string& a, const psram_string& b) {
+    auto is_hot = [](const psram_string& s) {
+      if (s.size() >= 11 && s.substr(s.size() - 11) == "_hot.mjpeg") return true;
+      if (s.size() >= 4 && s.substr(s.size() - 4) == "_hot") return true;
+      return false;
+      };
+    bool a_hot = is_hot(a);
+    bool b_hot = is_hot(b);
     if (a_hot != b_hot) return a_hot;
     return a < b;
     });
 
-  // Queue all folders for background sync
+  // Queue all items for preload
   psram_string ps_root = root_path.c_str();
-  for (const auto& folder : folders) {
-    psram_string full_path = ps_root + "/" + folder;
-    _queueBackgroundSync(full_path);
+  for (const auto& item : items) {
+    psram_string full_path = ps_root + "/" + item;
+
+    if (_isMJPEGFile(full_path)) {
+      // Load MJPEG files immediately (they load as a single operation)
+      _ensureMJPEGCached(full_path);
+    } else {
+      // Queue folders for background sync
+      _ensureFileListCached(full_path);
+      _queueBackgroundSync(full_path);
+    }
   }
 
-  ESP_LOGI(TAG, "Queued %d folders for background preload", folders.size());
+  ESP_LOGI(TAG, "Queued %d items for preload", items.size());
 }
 
 CacheStatus ImageCacheManager::getStatus() {
@@ -383,6 +593,8 @@ size_t ImageCacheManager::getCacheUsedBytes() {
 
 void ImageCacheManager::clearCache() {
   xSemaphoreTake(cache_mutex, portMAX_DELAY);
+
+  // Clear JPEG folder cache
   for (auto& pair : image_cache) {
     for (auto& file_pair : pair.second) {
       free(file_pair.second.buffer);
@@ -390,6 +602,13 @@ void ImageCacheManager::clearCache() {
   }
   image_cache.clear();
   folder_file_lists.clear();
+
+  // Clear MJPEG cache
+  for (auto& pair : mjpeg_cache) {
+    free(pair.second.buffer);
+  }
+  mjpeg_cache.clear();
+
   pending_sync_folders.clear();
   psram_used = 0;
   xSemaphoreGive(cache_mutex);

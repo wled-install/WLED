@@ -9615,47 +9615,60 @@ int get_sequence_folder(const std::string& base_path, std::string& selected_path
     DIR* dir = opendir(base_path.c_str());
     if (!dir) return -1;
 
-    std::vector<std::string> hot_folders;
-    std::vector<std::string> cold_folders;
+    std::vector<std::string> hot_items;
+    std::vector<std::string> cold_items;
 
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
-      std::string folder_name = entry->d_name;
-      std::string full_folder_path = base_path + "/" + folder_name;
+      std::string name = entry->d_name;
+      std::string full_path = base_path + "/" + name;
       struct stat st;
 
-      if (stat(full_folder_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
-        folder_name.rfind("sequence", 0) == 0) {
-        std::string image_path = full_folder_path + "/image-0001.jpg";
+      if (stat(full_path.c_str(), &st) != 0) continue;
+
+      // Check for MJPEG files (sequence*.mjpeg)
+      if (S_ISREG(st.st_mode) &&
+        name.rfind("sequence", 0) == 0 &&
+        name.size() > 6 &&
+        name.substr(name.size() - 6) == ".mjpeg") {
+
+        if (name.size() > 11 && name.substr(name.size() - 11) == "_hot.mjpeg") {
+          hot_items.push_back(name);
+        } else {
+          cold_items.push_back(name);
+        }
+      }
+      // Check for JPEG sequence folders
+      else if (S_ISDIR(st.st_mode) && name.rfind("sequence", 0) == 0) {
+        std::string image_path = full_path + "/image-0001.jpg";
         if (stat(image_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
-          if (folder_name.length() > 4 && folder_name.substr(folder_name.length() - 4) == "_hot") {
-            hot_folders.push_back(folder_name);
-          }
-          else {
-            cold_folders.push_back(folder_name);
+          if (name.length() > 4 && name.substr(name.length() - 4) == "_hot") {
+            hot_items.push_back(name);
+          } else {
+            cold_items.push_back(name);
           }
         }
       }
     }
     closedir(dir);
 
-    std::sort(hot_folders.begin(), hot_folders.end());
-    std::sort(cold_folders.begin(), cold_folders.end());
+    std::sort(hot_items.begin(), hot_items.end());
+    std::sort(cold_items.begin(), cold_items.end());
 
-    cached_matches.reserve(hot_folders.size() + cold_folders.size());
-    cached_matches.insert(cached_matches.end(), hot_folders.begin(), hot_folders.end());
-    cached_matches.insert(cached_matches.end(), cold_folders.begin(), cold_folders.end());
+    cached_matches.reserve(hot_items.size() + cold_items.size());
+    cached_matches.insert(cached_matches.end(), hot_items.begin(), hot_items.end());
+    cached_matches.insert(cached_matches.end(), cold_items.begin(), cold_items.end());
 
     if (cached_matches.empty()) return -2;
     cache_initialized = true;
 
     if (print_map) {
-      USER_PRINTLN("Sequence Folder Map:");
-      const int num_folders = cached_matches.size();
-      for (int i = 0; i < num_folders; ++i) {
-        int lower_bound = (i * 256) / num_folders;
-        int upper_bound = ((i + 1) * 256) / num_folders - 1;
-        if (i == num_folders - 1) {
+      USER_PRINTLN("Sequence Map:");
+      const int num_items = cached_matches.size();
+      for (int i = 0; i < num_items; ++i) {
+        int lower_bound = (i * 256) / num_items;
+        int upper_bound = ((i + 1) * 256) / num_items - 1;
+        if (i == num_items - 1) {
           upper_bound = 255;
         }
         USER_PRINTF("[%3d-%3d] -> %s\n", lower_bound, upper_bound, cached_matches[i].c_str());
@@ -9663,7 +9676,11 @@ int get_sequence_folder(const std::string& base_path, std::string& selected_path
     }
   }
 
-  int index = (slider_value * cached_matches.size()) / 256;
+  // Select based on slider value
+  const int num_items = cached_matches.size();
+  int index = (slider_value * num_items) / 256;
+  if (index >= num_items) index = num_items - 1;
+
   selected_path = base_path + "/" + cached_matches[index];
   return 0;
 }
@@ -9743,6 +9760,7 @@ uint16_t mode_PPA_IMAGEPLAYER() {
 
   ImageResult img = ImageCacheManager::getInstance().getImageStreaming(folder_path, frame);
 
+  // Get frame data
   uint8_t* file_jpeg = NULL;
   size_t file_jpeg_size = 0;
 
