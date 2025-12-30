@@ -843,7 +843,7 @@ void getSettingsJS(AsyncWebServerRequest* request, byte subPage, char* dest) //W
       sappend('c',SET_F("PSL"),strip.panelO.serpentine);
       
       //WLEDMM: add Total LEDs
-      uint16_t ledCount = 0;
+      uint32_t ledCount = 0;
       for (int8_t b = 0; b < busses.getNumBusses(); b++) {
         ledCount+=busses.getBus(b)->getLength();
       }
