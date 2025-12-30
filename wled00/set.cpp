@@ -59,6 +59,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
 
     #ifdef WLED_USE_ETHERNET
     ethernetType = request->arg(F("ETH")).toInt();
+    ethernetOnly = request->hasArg(F("ETHO"));
     // WLED::instance().initEthernet();
     #endif
 

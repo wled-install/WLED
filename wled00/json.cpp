@@ -1202,7 +1202,11 @@ void serializeInfo(JsonObject root)
     "%s (wifi=%u, eth=%u)",
     route, wifi_metric, eth_metric);
 
+  #ifndef WLED_USE_ETHERNET_ONLY
   network_info["default_route"] = buf;
+  #else
+  network_info["default_route"] = "Ethernet Only Mode";
+  #endif
   
 
   JsonObject fs_info = root.createNestedObject("fs");

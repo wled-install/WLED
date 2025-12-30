@@ -441,6 +441,7 @@ WLED_GLOBAL int s_retry_num _INIT(0);
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_DEFAULT);          // ethernet board type
   #else
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_NONE);             // use none for ethernet board type if default not defined
+    WLED_GLOBAL bool ethernetOnly _INIT(false);             // use none for ethernet board type if default not defined
   #endif
 #endif
 WLED_GLOBAL esp_eth_handle_t eth_handle;

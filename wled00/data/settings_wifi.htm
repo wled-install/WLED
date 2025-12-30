@@ -178,10 +178,12 @@
 		<option value="3">Never (not recommended)</option></select><br>
 		AP IP: <span class="sip"> Not active </span><br>
 		<h3>Experimental</h3>
-		Force 802.11g mode (ESP8266 only): <input type="checkbox" name="FG"><br>
+		<span style="display:none;">
+    Force 802.11g mode (ESP8266 only): <input type="checkbox" name="FG"><br>
 		Disable Wi-Fi sleep: <input type="checkbox" name="WS"><br>
 		<i>Can help with connectivity issues.<br>
 		Do not enable if Wi-Fi is working correctly, increases power consumption.</i>
+    </span>
 
 		<div id="remd">
 			<h3>Wireless Remote</h3>
@@ -193,23 +195,20 @@
 			Last Seen: <span class="rlid">None</span> <br>
 		</div>
 
-		<div id="ethd">
-			<h3>Ethernet Type</h3>
-			<select name="ETH">
-				<option value="0">None</option>
-				<option value="9">ABC! WLED V43 & compatible</option>
-				<option value="2">ESP32-POE</option>
-				<option value="6">ESP32Deux</option>
-				<option value="7">KIT-VE</option>
-				<option value="11">Olimex-ESP32-Gateway</option> <!-- WLEDMM -->
-				<option value="8">QuinLED-Dig-Octa & T-ETH-POE</option>
-				<option value="4">QuinLED-ESP32</option>
-				<option value="10">Serg74-ETH32</option>
-				<option value="5">TwilightLord-ESP32</option>
-				<option value="3">WESP32</option>
-				<option value="1">WT32-ETH01</option>
-			</select><br><br>
-		</div>
+    <div id="ethd">
+      <h3>Ethernet Type</h3>
+      <select name="ETH">
+        <option value="0">None</option>
+        <option value="1">Almost every ESP32 P4 Board</option>
+      </select><br><br>
+    </div>
+    <div id="etho">
+      <h3>Ethernet Only</h3>
+      <p>For performance reasons, the ESP32-P4 WiFi can be a strain on the system with lage displays.<br />
+      This forces disabling of WiFi and all the high priority tasks associated with it.</p>
+      <label>Disable WiFI entirely: <input type="checkbox" name="ETHO"></label>
+      <br><br><br>
+    </div>
 		<hr>
 		<button type="button" onclick="B()">Back</button><button type="submit">Save &amp; Connect</button>
 	</form>

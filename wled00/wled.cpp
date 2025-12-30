@@ -1087,8 +1087,11 @@ void WLED::setup() {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_restore());
         esp_hosted_coprocessor_fwver_t c6_fw_version;
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
-        USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
-        if (c6_fw_version.major1 < 2) USER_PRINTLN("-> ESP-Hosted versions below 2.15.12 don't return a proper version!");
+        if (c6_fw_version.major1 >= 2) {
+          USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
+        } else {
+          USER_PRINTF("ESP-Hosted C6 Firmware is older than verion 2.15.12\n");
+        }
         esp_err_t check = ota_littlefs_perform(true);
         if (check == ESP_HOSTED_SLAVE_OTA_COMPLETED) {
           esp_err_t ret = esp_hosted_slave_ota_activate();
@@ -1168,7 +1171,7 @@ void WLED::setup() {
           esp_err_t err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
           USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
         }
-        
+
         esp_wifi_get_protocols(WIFI_IF_STA, &xprotocols);
 
         print_wifi_protocols("2.4GHz protocols after set:", xprotocols.ghz_2g);
@@ -1739,6 +1742,47 @@ void WLED::initAP(bool resetAP) {
   if (hasValidSTA) {
     // APSTA mode - run both AP and try to connect to configured network
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    USER_PRINTLN("Checking WiFi Stuff");
+
+    wifi_band_mode_t band_mode;
+    esp_wifi_get_band_mode(&band_mode);
+    USER_PRINTF("Band mode: %s\n", wifi_band_mode_to_string(band_mode));
+
+    wifi_protocols_t protocols;
+    esp_wifi_get_protocols(WIFI_IF_STA, &protocols);
+    print_wifi_protocols("2.4GHz protocols before set:", protocols.ghz_2g);
+    if (band_mode != WIFI_BAND_MODE_2G_ONLY) print_wifi_protocols("5GHz protocols before set:", protocols.ghz_5g);
+
+    wifi_country_t country_check;
+    esp_wifi_get_country(&country_check);
+    USER_PRINTF("Country: %.2s, channels %d-%d\n", country_check.cc, country_check.schan, country_check.schan + country_check.nchan - 1);
+
+    wifi_protocols_t xprotocols;
+    wifi_bandwidths_t bw_config;
+
+    if (band_mode != WIFI_BAND_MODE_2G_ONLY) {
+      xprotocols = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N
+      };
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocols(WIFI_IF_STA, &xprotocols));
+      bw_config = {
+        .ghz_2g = WIFI_BW_HT40,
+        .ghz_5g = WIFI_BW_HT40,
+      };
+      esp_err_t err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bw_config);
+      USER_PRINTF("Set bandwidths result: %d (%s)\n", err, esp_err_to_name(err));
+    } else {
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
+      esp_err_t err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+      USER_PRINTF("Set bandwidth result: %d (%s)\n", err, esp_err_to_name(err));
+    }
+
+    esp_wifi_get_protocols(WIFI_IF_STA, &xprotocols);
+
+    print_wifi_protocols("2.4GHz protocols after set:", xprotocols.ghz_2g);
+    if (band_mode != WIFI_BAND_MODE_2G_ONLY) print_wifi_protocols("5GHz protocols after set:", xprotocols.ghz_5g);
 
     wifi_config_t wifi_sta_config = {};
     strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.ssid), clientSSID, sizeof(wifi_sta_config.sta.ssid));
