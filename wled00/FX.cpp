@@ -10553,27 +10553,55 @@ uint16_t mode_DJLight_Circles(void) {
   struct DJCircleData {
     uint32_t colorCache[256];
     CRGB ringBuffer[256];
+    uint8_t* radiusLUT;
     uint8_t ringHead;
     uint16_t ringCount;
+    uint16_t lutWidth;
+    uint16_t lutHeight;
   };
 
   if (!SEGENV.allocateData(sizeof(DJCircleData))) return FRAMETIME;
   DJCircleData* data = reinterpret_cast<DJCircleData*>(SEGENV.data);
 
-  if (SEGENV.call == 0) {
+  const bool needsLUT = (SEGENV.call == 0) ||
+    (data->radiusLUT == nullptr) ||
+    (data->lutWidth != qw) ||
+    (data->lutHeight != qh);
+
+  if (needsLUT) {
+    if (data->radiusLUT) {
+      free(data->radiusLUT);
+      data->radiusLUT = nullptr;
+    }
+
     memset(data, 0, sizeof(DJCircleData));
-    _djCircleSprite.setColorDepth(24);
+
+    const uint32_t lutSize = qw * qh;
+    data->radiusLUT = (uint8_t*)ps_malloc(lutSize);  // Use PSRAM
+
+    if (data->radiusLUT) {
+      // Center is at bottom-right of quadrant: (qw-1, qh-1)
+      // For pixel (x,y), distance to center is sqrt((qw-1-x)² + (qh-1-y)²)
+      for (uint16_t y = 0; y < qh; y++) {
+        const int16_t dy = (qh - 1) - y;  // Distance from center in Y
+        const uint32_t dy2 = dy * dy;
+        for (uint16_t x = 0; x < qw; x++) {
+          const int16_t dx = (qw - 1) - x;  // Distance from center in X
+          const uint8_t r = (uint8_t)min(255.0f, sqrtf(dx * dx + dy2));
+          data->radiusLUT[y * qw + x] = r;
+        }
+      }
+      data->lutWidth = qw;
+      data->lutHeight = qh;
+    }
   }
 
-  if (_djCircleSprite.getBuffer() != busPixelData) {
-    _djCircleSprite.setBuffer(busPixelData, cols, rows, 24);
-  }
+  if (!data->radiusLUT) return FRAMETIME;
 
   um_data_t* um_data = getAudioData();
   const uint8_t* __restrict__ fftResult = (uint8_t*)um_data->u_data[2];
   const float volumeSmth = *(float*)um_data->u_data[0];
 
-  // Intensity: 0 = normal, 255 = maximum boost
   const uint8_t boost = SEGMENT.intensity;
 
   uint8_t secondHand = micros() / (256 - SEGMENT.speed) / 500 + 1 % 64;
@@ -10611,11 +10639,10 @@ uint16_t mode_DJLight_Circles(void) {
       if (candyMode) fadeVal = constrain(fadeVal, 0, 176);
       color.fadeToBlackBy(fadeVal);
 
-      // Apply intensity boost
       if (boost > 0) {
         CHSV hsv = rgb2hsv_approximate(color);
-        hsv.s = qadd8(hsv.s, boost);                          // Boost saturation
-        hsv.v = qadd8(hsv.v, boost >> 1);                     // Boost brightness (half rate)
+        hsv.s = qadd8(hsv.s, boost);
+        hsv.v = qadd8(hsv.v, boost >> 1);
         color = hsv;
       }
 
@@ -10626,73 +10653,420 @@ uint16_t mode_DJLight_Circles(void) {
     data->ringBuffer[head] = color;
     data->colorCache[head] = color32;
     data->ringHead = (head + 1) & 0xFF;
-    if (data->ringCount < maxRadius) data->ringCount++;
+    if (data->ringCount < 256) data->ringCount++;
 
-    memset(busPixelData, 0, cols * rows * 3);
-
-    const uint16_t numCircles = min(data->ringCount, (uint16_t)maxRadius);
-    const CRGB* __restrict__ ringBuf = data->ringBuffer;
+    const uint16_t numCircles = min((uint16_t)data->ringCount, maxRadius);
     const uint32_t* __restrict__ colorBuf = data->colorCache;
-    const uint8_t ringHead = data->ringHead;
+    const uint8_t ringHeadMinus1 = (data->ringHead - 1) & 0xFF;  // Pre-compute
+    const uint8_t* __restrict__ lut = data->radiusLUT;
 
-    // Draw arcs in top-left quadrant (center at qw-1, qh-1)
-    for (int16_t r = numCircles; r > 0; r--) {
-      const uint8_t idx = (ringHead + 256 - r) & 0xFF;
-      if (ringBuf[idx].getLuma() > 2) {
-        _djCircleSprite.fillArc(qw - 1, qh - 1, r, r - 1, 180, 270, colorBuf[idx]);
+    // Fill top-left quadrant using LUT - optimized
+    for (uint16_t y = 0; y < qh; y++) {
+      const uint8_t* __restrict__ lutRow = &lut[y * qw];
+      uint8_t* __restrict__ pixRow = &busPixelData[y * cols * 3];
+
+      uint16_t x = 0;
+
+      // Process 4 pixels per iteration
+      for (; x + 3 < qw; x += 4) {
+        const uint8_t r0 = lutRow[x];
+        const uint8_t r1 = lutRow[x + 1];
+        const uint8_t r2 = lutRow[x + 2];
+        const uint8_t r3 = lutRow[x + 3];
+
+        if (r0 < numCircles) {
+          const uint32_t c = colorBuf[(ringHeadMinus1 - r0) & 0xFF];
+          if (c) {
+            uint8_t* p = &pixRow[x * 3];
+            p[0] = c >> 16;
+            p[1] = (c >> 8) & 0xFF;
+            p[2] = c & 0xFF;
+          }
+        }
+
+        if (r1 < numCircles) {
+          const uint32_t c = colorBuf[(ringHeadMinus1 - r1) & 0xFF];
+          if (c) {
+            uint8_t* p = &pixRow[(x + 1) * 3];
+            p[0] = c >> 16;
+            p[1] = (c >> 8) & 0xFF;
+            p[2] = c & 0xFF;
+          }
+        }
+
+        if (r2 < numCircles) {
+          const uint32_t c = colorBuf[(ringHeadMinus1 - r2) & 0xFF];
+          if (c) {
+            uint8_t* p = &pixRow[(x + 2) * 3];
+            p[0] = c >> 16;
+            p[1] = (c >> 8) & 0xFF;
+            p[2] = c & 0xFF;
+          }
+        }
+
+        if (r3 < numCircles) {
+          const uint32_t c = colorBuf[(ringHeadMinus1 - r3) & 0xFF];
+          if (c) {
+            uint8_t* p = &pixRow[(x + 3) * 3];
+            p[0] = c >> 16;
+            p[1] = (c >> 8) & 0xFF;
+            p[2] = c & 0xFF;
+          }
+        }
+      }
+
+      // Handle remainder
+      for (; x < qw; x++) {
+        const uint8_t r = lutRow[x];
+        if (r < numCircles) {
+          const uint32_t c = colorBuf[(ringHeadMinus1 - r) & 0xFF];
+          if (c) {
+            uint8_t* p = &pixRow[x * 3];
+            p[0] = c >> 16;
+            p[1] = (c >> 8) & 0xFF;
+            p[2] = c & 0xFF;
+          }
+        }
       }
     }
 
+    // PPA mirrors
     ppa_srm_oper_config_t srm_config = {};
     srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
     srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
     srm_config.in.block_offset_x = 0;
     srm_config.in.block_offset_y = 0;
-    srm_config.in.buffer = busPixelData; // (uint8_t*)_djCircleSprite.getBuffer();
+    srm_config.in.buffer = busPixelData;
     srm_config.out.buffer = busPixelData;
     srm_config.out.buffer_size = busPixelSize;
     srm_config.out.pic_w = cols;
     srm_config.out.pic_h = rows;
-    srm_config.out.block_offset_x = 0;
-    srm_config.out.block_offset_y = 0;
     srm_config.scale_x = 1;
     srm_config.scale_y = 1;
-    srm_config.mirror_x = false;
-    srm_config.mirror_y = false;
     srm_config.rgb_swap = 0;
     srm_config.byte_swap = 0;
     srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
     srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-    srm_config.in.buffer = busPixelData;
+    // Mirror top-left to top-right
     srm_config.in.pic_w = cols;
     srm_config.in.pic_h = rows;
     srm_config.in.block_w = qw;
     srm_config.in.block_h = qh;
-
     srm_config.out.block_offset_x = qw;
     srm_config.out.block_offset_y = 0;
     srm_config.mirror_x = true;
     srm_config.mirror_y = false;
-
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
 
+    // Mirror entire top to bottom
     srm_config.in.block_w = cols;
+    srm_config.in.block_h = qh;
     srm_config.out.block_offset_x = 0;
     srm_config.out.block_offset_y = qh;
     srm_config.mirror_x = false;
     srm_config.mirror_y = true;
-
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
-
   }
   #endif
   return FRAMETIME;
 }
 static const char _data_FX_MODE_DJLIGHT_CIRCLES[] PROGMEM = "DJ Light Circles ☾🐺@Speed,Vibrancy,,,,Candy Factory;;!;2f;sx=255,ix=128,o1=1,si=0";
-
 #endif // WLED_DISABLE_2D
+
+uint16_t IRAM_ATTR mode_AkemiPPA() {
+  #ifdef SOC_PPA_SUPPORTED
+  // PPA-accelerated 2D Akemi - renders at native 32x32, scales via SRM
+  // Author: @TroyHacks
+  // @license GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+
+  if (!strip.isMatrix) return mode_static();
+
+  const uint16_t width = SEGMENT.virtualWidth();
+  const uint16_t height = SEGMENT.virtualHeight();
+
+  // Native Akemi resolution
+  constexpr uint16_t AKEMI_W = 32;
+  constexpr uint16_t AKEMI_H = 32;
+  constexpr uint32_t AKEMI_BUFFER_SIZE = AKEMI_W * AKEMI_H * 3; // RGB888
+
+  // Static buffer for 32x32 rendering
+  static uint8_t* akemiBuffer = nullptr;
+
+  if (!SEGENV.allocateData(4)) return mode_static();
+
+  if (SEGENV.call == 0) {
+    SEGMENT.setUpLeds();
+    if (akemiBuffer == nullptr) {
+      akemiBuffer = (uint8_t*)heap_caps_calloc(AKEMI_BUFFER_SIZE, sizeof(byte),
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+      if (!akemiBuffer) return mode_static();
+    }
+  }
+
+  byte* busPixelData = nullptr;
+  uint32_t busPixelSize = 0;
+  Bus* bus = busses.getBus(0);
+  if (bus) {
+    busPixelData = bus->getPixelData();
+    busPixelSize = SEGMENT.length() * 3;
+    if (busPixelData == NULL || busPixelSize == 0) return mode_static();
+  } else {
+    return mode_static();
+  }
+
+  // --- Pre-calculate colors (same logic as original Akemi) ---
+  uint16_t counter = (strip.now * ((SEGMENT.speed >> 2) + 2)) >> 8;
+
+  // Base colors from color wheel and segment colors
+  CRGB baseFaceColor = SEGMENT.color_wheel(counter);
+  CRGB baseArmsColor = SEGCOLOR(1) > 0 ? CRGB(SEGCOLOR(1)) : CRGB(0xFFE0A0);
+  CRGB eyesMouthColor = SEGCOLOR(2) > 0 ? CRGB(SEGCOLOR(2)) : CRGB(0xFFFFFF);
+
+  // Scaled variations
+  const uint8_t lightFactorInt = 40;   // 0.15 * 255
+  const uint8_t normalFactorInt = 102; // 0.4 * 255
+
+  CRGB lightFaceColor = baseFaceColor; lightFaceColor.nscale8_video(lightFactorInt);
+  CRGB normalFaceColor = baseFaceColor; normalFaceColor.nscale8_video(normalFactorInt);
+  CRGB lightArmsColor = baseArmsColor; lightArmsColor.nscale8_video(lightFactorInt);
+  CRGB normalArmsColor = baseArmsColor; normalArmsColor.nscale8_video(normalFactorInt);
+
+  // Audio reactivity
+  um_data_t* um_data = getAudioData();
+  uint8_t fftBase = 0;
+  if (um_data && um_data->u_data) {
+    uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+    fftBase = fftResult[0];
+  }
+  const bool isDancing = (SEGMENT.intensity > 128 && fftBase > 128);
+
+  // Cheek color for audio reactivity
+  CRGB cheekColor = baseArmsColor;
+  if (fftBase > 102) {
+    cheekColor = CRGB(CRGB::Orange);
+    cheekColor.nscale8_video(fftBase);
+  }
+
+  // Build color lookup table (indices 0-8 from original akemi data)
+  // 0 = transparent/black, 1-8 = various colors
+  struct { uint8_t r, g, b; } colorLUT[9] = {
+    {0, 0, 0},                                              // 0: transparent
+    {baseArmsColor.r, baseArmsColor.g, baseArmsColor.b},    // 1: base arms
+    {normalArmsColor.r, normalArmsColor.g, normalArmsColor.b}, // 2: normal arms
+    {lightArmsColor.r, lightArmsColor.g, lightArmsColor.b},  // 3: light arms
+    {baseFaceColor.r, baseFaceColor.g, baseFaceColor.b},     // 4: base face
+    {normalFaceColor.r, normalFaceColor.g, normalFaceColor.b}, // 5: normal face
+    {lightFaceColor.r, lightFaceColor.g, lightFaceColor.b},  // 6: light face
+    {eyesMouthColor.r, eyesMouthColor.g, eyesMouthColor.b},  // 7: eyes/mouth
+    {cheekColor.r, cheekColor.g, cheekColor.b}               // 8: cheeks (audio reactive)
+  };
+
+  // --- Clear the 32x32 buffer using PPA fill ---
+  ppa_fill_oper_config_t fill_config = {};
+  fill_config.out.buffer = akemiBuffer;
+  fill_config.out.buffer_size = AKEMI_BUFFER_SIZE;
+  fill_config.out.pic_w = AKEMI_W;
+  fill_config.out.pic_h = AKEMI_H;
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  fill_config.out.block_offset_x = 0;
+  fill_config.out.block_offset_y = 0;
+  fill_config.fill_block_w = AKEMI_W;
+  fill_config.fill_block_h = AKEMI_H;
+  fill_config.fill_argb_color.r = 0;
+  fill_config.fill_argb_color.g = 0;
+  fill_config.fill_argb_color.b = 0;
+  fill_config.fill_argb_color.a = 255;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+
+  // --- Draw Akemi pixel by pixel into the 32x32 buffer ---
+  // For a 32x32 source with mostly contiguous color regions,
+  // we could optimize with run-length encoding, but let's keep it simple first
+  // and draw directly to the buffer (CPU, not PPA for individual pixels)
+
+  uint8_t yOffset = isDancing ? 1 : 0; // Shift down by 1 when dancing
+
+  for (int y = 0; y < AKEMI_H; y++) {
+    int destY = y + yOffset;
+    if (destY >= AKEMI_H) continue; // Don't draw outside buffer
+
+    for (int x = 0; x < AKEMI_W; x++) {
+      uint8_t ak = pgm_read_byte_near(akemi + y * AKEMI_W + x);
+      if (ak == 0) continue; // Skip transparent pixels
+
+      // Calculate buffer position (RGB888 format)
+      uint32_t pos = (destY * AKEMI_W + x) * 3;
+      akemiBuffer[pos + 0] = colorLUT[ak].r;
+      akemiBuffer[pos + 1] = colorLUT[ak].g;
+      akemiBuffer[pos + 2] = colorLUT[ak].b;
+    }
+  }
+
+  // --- Scale from 32x32 to segment size using PPA SRM ---
+  // Calculate scale factors (fixed point: 1.0 = 1.0, supports up to ~16x)
+  float scaleX = (float)width / AKEMI_W;
+  float scaleY = (float)height / AKEMI_H;
+
+  // Clear the output buffer first
+  ppa_fill_oper_config_t clearConfig = {};
+  clearConfig.out.buffer = busPixelData;
+  clearConfig.out.buffer_size = busPixelSize;
+  clearConfig.out.pic_w = width;
+  clearConfig.out.pic_h = height;
+  clearConfig.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  clearConfig.out.block_offset_x = 0;
+  clearConfig.out.block_offset_y = 0;
+  clearConfig.fill_block_w = width;
+  clearConfig.fill_block_h = height;
+  clearConfig.fill_argb_color.r = 0;
+  clearConfig.fill_argb_color.g = 0;
+  clearConfig.fill_argb_color.b = 0;
+  clearConfig.fill_argb_color.a = 255;
+  clearConfig.mode = PPA_TRANS_MODE_BLOCKING;
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &clearConfig));
+
+  // SRM (Scale-Rotate-Mirror) operation
+  ppa_srm_oper_config_t srm_config = {};
+  srm_config.in.buffer = akemiBuffer;
+  srm_config.in.pic_w = AKEMI_W;
+  srm_config.in.pic_h = AKEMI_H;
+  srm_config.in.block_w = AKEMI_W;
+  srm_config.in.block_h = AKEMI_H;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+  srm_config.out.buffer = busPixelData;
+  srm_config.out.buffer_size = busPixelSize;
+  srm_config.out.pic_w = width;
+  srm_config.out.pic_h = height;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  srm_config.scale_x = scaleX;
+  srm_config.scale_y = scaleY;
+  srm_config.mirror_x = SEGMENT.mirror;
+  srm_config.mirror_y = SEGMENT.mirror_y;
+  srm_config.rgb_swap = 0;
+  srm_config.byte_swap = 0;
+  srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
+  // --- Optional: GEQ overlay on hands (if check1 is enabled) ---
+  // Render 16 bands into a tiny 16x17 buffer, then PPA scale to hand positions
+  if (SEGMENT.check1 && um_data && um_data->u_data) {
+    uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+
+    // GEQ buffer: 16x16 (one pixel per band, square for easy scaling)
+    constexpr uint16_t GEQ_W = 16;
+    constexpr uint16_t GEQ_H = 16;
+    constexpr uint32_t GEQ_BUFFER_SIZE = GEQ_W * GEQ_H * 3; // RGB888
+
+    static uint8_t* geqBuffer = nullptr;
+    if (geqBuffer == nullptr) {
+      geqBuffer = (uint8_t*)heap_caps_calloc(GEQ_BUFFER_SIZE, sizeof(byte),
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+      if (!geqBuffer) return FRAMETIME;
+    }
+
+    // Clear GEQ buffer
+    ppa_fill_oper_config_t geqFill = {};
+    geqFill.out.buffer = geqBuffer;
+    geqFill.out.buffer_size = GEQ_BUFFER_SIZE;
+    geqFill.out.pic_w = GEQ_W;
+    geqFill.out.pic_h = GEQ_H;
+    geqFill.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+    geqFill.out.block_offset_x = 0;
+    geqFill.out.block_offset_y = 0;
+    geqFill.fill_block_w = GEQ_W;
+    geqFill.fill_block_h = GEQ_H;
+    geqFill.fill_argb_color = { 0, 0, 0, 0 };  // transparent black
+    geqFill.mode = PPA_TRANS_MODE_BLOCKING;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &geqFill));
+
+    // Draw 16 bands into the buffer (1 pixel wide each, growing up from bottom)
+    for (int i = 0; i < 16; i++) {
+      int barHeight = map(fftResult[i], 0, 255, 0, GEQ_H);
+      if (barHeight == 0) continue;
+
+      // Get palette color for this band
+      uint32_t palColor = SEGMENT.color_from_palette((i * 35), false, PALETTE_SOLID_WRAP, 0);
+
+      geqFill.fill_argb_color.r = (palColor >> 16) & 0xFF;
+      geqFill.fill_argb_color.g = (palColor >> 8) & 0xFF;
+      geqFill.fill_argb_color.b = palColor & 0xFF;
+      geqFill.fill_argb_color.a = 255;
+
+      geqFill.out.block_offset_x = i;
+      geqFill.out.block_offset_y = GEQ_H - barHeight;
+      geqFill.fill_block_w = 1;
+      geqFill.fill_block_h = barHeight;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &geqFill));
+    }
+
+    // Scale factors from 32x32 to actual segment
+    float pixelScaleX = (float)width / 32.0f;
+    float pixelScaleY = (float)height / 32.0f;
+
+    // Hand region: 4 pixels wide, 16 pixels tall in 32x32 space
+    // Left hand at x=0, right hand at x=28
+    int handWidthScaled = (int)(4 * pixelScaleX);
+    int handHeightScaled = (int)(GEQ_H * pixelScaleY);
+    int handTopY = (int)((17 - GEQ_H) * pixelScaleY);  // aligns bottom of GEQ with row 17
+    if (handTopY < 0) handTopY = 0;
+
+    // SRM scale from 16x17 to hand size
+    float geqScaleX = (float)handWidthScaled / GEQ_W;
+    float geqScaleY = (float)handHeightScaled / GEQ_H;
+
+    ppa_srm_oper_config_t geqSrm = {};
+    geqSrm.in.buffer = geqBuffer;
+    geqSrm.in.pic_w = GEQ_W;
+    geqSrm.in.pic_h = GEQ_H;
+    geqSrm.in.block_w = GEQ_W;
+    geqSrm.in.block_h = GEQ_H;
+    geqSrm.in.block_offset_x = 0;
+    geqSrm.in.block_offset_y = 0;
+    geqSrm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+    geqSrm.out.buffer = busPixelData;
+    geqSrm.out.buffer_size = busPixelSize;
+    geqSrm.out.pic_w = width;
+    geqSrm.out.pic_h = height;
+    geqSrm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+
+    geqSrm.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+    geqSrm.scale_x = geqScaleX;
+    geqSrm.scale_y = geqScaleY;
+    geqSrm.mirror_x = false;
+    geqSrm.mirror_y = false;
+    geqSrm.rgb_swap = 0;
+    geqSrm.byte_swap = 0;
+    geqSrm.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    geqSrm.mode = PPA_TRANS_MODE_BLOCKING;
+
+    // Left hand at x=0
+    geqSrm.out.block_offset_x = 0;
+    geqSrm.out.block_offset_y = handTopY;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &geqSrm));
+
+    // Right hand at x=28 (scaled), mirrored horizontally
+    geqSrm.out.block_offset_x = width - handWidthScaled;
+    geqSrm.mirror_x = true;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &geqSrm));
+  }
+
+  #endif
+  return FRAMETIME;
+} // mode_AkemiPPA
+static const char _data_FX_MODE_AKEMIPPA[] PROGMEM = "Akemi PPA ☾🐺@Speed,Intensity,,,,GEQ Overlay;Face,Arms,Eyes;;2f;pal=11,c1=1";
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // mode data
@@ -10948,6 +11322,7 @@ void WS2812FX::setupEffectData() {
   addEffect(FX_MODE_PPA_IMAGEPLAYER, &mode_PPA_IMAGEPLAYER, _data_FX_MODE_PPA_IMAGEPLAYER); // audio
   addEffect(FX_MODE_PRO_LINK, &mode_PRO_LINK, _data_FX_MODE_PRO_LINK); // audio
   addEffect(FX_MODE_DJLIGHT_CIRCLES, &mode_DJLight_Circles, _data_FX_MODE_DJLIGHT_CIRCLES); // audio
+  addEffect(FX_MODE_AKEMIPPA, &mode_AkemiPPA, _data_FX_MODE_AKEMIPPA); // audio
   #endif
 
 #endif // WLED_DISABLE_2D
