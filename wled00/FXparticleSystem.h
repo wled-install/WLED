@@ -47,8 +47,8 @@ static inline int32_t limitSpeed(const int32_t speed) {
 #define MAXSOURCES_2D 64
 #define SOURCEREDUCTIONFACTOR 6
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
-#define MAXPARTICLES_2D 16384
-#define MAXSOURCES_2D 2048
+#define MAXPARTICLES_2D 8192
+#define MAXSOURCES_2D 1024
 #define SOURCEREDUCTIONFACTOR 2
 #else
 #define MAXPARTICLES_2D 2048

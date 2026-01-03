@@ -612,6 +612,48 @@ void ParticleSystem2D::render() {
     blur2D(framebuffer, maxXpixel + 1, maxYpixel + 1, smearBlur, smearBlur);
   }
 
+  #if defined(SOC_PPA_SUPPORTED) && defined(WLEDMM_REMAP_AT_OUTPUT)
+  byte* busPixelData = nullptr;
+  uint32_t busPixelSize = 0;
+  Bus* bus = busses.getBus(0);
+  if (bus) {
+    busPixelData = bus->getPixelData();
+    busPixelSize = SEGMENT.length() * 3;
+    if (busPixelData == NULL || busPixelSize == 0) return;
+  } else {
+    return;
+  }
+
+  ppa_srm_oper_config_t srm_config = {};
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  srm_config.out.buffer = busPixelData;
+  srm_config.out.buffer_size = busPixelSize;
+  srm_config.out.pic_w = SEGMENT.maxWidth;
+  srm_config.out.pic_h = SEGMENT.maxHeight;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.scale_x = 1;
+  srm_config.scale_y = 1;
+  srm_config.mirror_x = false;
+  srm_config.mirror_y = false;
+  srm_config.rgb_swap = 0;
+  srm_config.byte_swap = 0;
+  srm_config.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  srm_config.in.buffer = framebuffer;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.in.pic_w = SEGMENT.maxWidth;
+  srm_config.in.pic_h = SEGMENT.maxHeight;
+  srm_config.in.block_w = SEGMENT.maxWidth;
+  srm_config.in.block_h = SEGMENT.maxHeight;
+
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
+
+  #else
   // transfer the framebuffer to the segment
   for (int y = 0; y <= maxYpixel; y++) {
     int index = y * (maxXpixel + 1); // current row index for 1D buffer
@@ -619,6 +661,7 @@ void ParticleSystem2D::render() {
       SEGMENT.setPixelColorXY(x, y, framebuffer[index++]);
     }
   }
+  #endif
 }
 
 // calculate pixel positions and brightness distribution and render the particle to local buffer or global buffer

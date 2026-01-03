@@ -12080,64 +12080,76 @@ static const char _data_FX_MODE_PARTICLESPRAY[] PROGMEM = "PS Spray@Speed,!,Left
 uint16_t mode_particleGEQ(void) {
   ParticleSystem2D* PartSys = nullptr;
 
-  if (SEGMENT.call == 0) { // initialization
+  if (SEGMENT.call == 0) {
     if (!initParticleSystem2D(PartSys, 1))
-      return mode_oops(); // allocation failed or not 2D
+      return mode_oops();
     PartSys->setKillOutOfBounds(true);
-    PartSys->setUsedParticles(170); // use 2/3 of available particles
-  } else
-    PartSys = reinterpret_cast<ParticleSystem2D*>(SEGENV.data); // if not first call, just set the pointer to the PS
+    PartSys->setUsedParticles(170);
+  } else {
+    PartSys = reinterpret_cast<ParticleSystem2D*>(SEGENV.data);
+  }
   if (PartSys == nullptr)
-    return mode_oops(); // something went wrong, no data!
+    return mode_oops();
 
-  uint32_t i;
-  // set particle system properties
-  PartSys->updateSystem(); // update system properties (dimensions and data pointers)
+  PartSys->updateSystem();
   PartSys->setWrapX(SEGMENT.check1);
   PartSys->setBounceX(SEGMENT.check2);
   PartSys->setBounceY(SEGMENT.check3);
-  //PartSys->enableParticleCollisions(false);
   PartSys->setWallHardness(SEGMENT.custom2);
-  PartSys->setGravity(SEGMENT.custom3 << 2); // set gravity strength
+  PartSys->setGravity(SEGMENT.custom3 << 2);
+  // PartSys->setParticleSize(1);
 
   um_data_t* um_data = getAudioData();
-  uint8_t* fftResult = (uint8_t*)um_data->u_data[2]; // 16 bins with FFT data, log mapped already, each band contains frequency amplitude 0-255
+  const uint8_t* fftResult = (const uint8_t*)um_data->u_data[2];
 
-  //map the bands into 16 positions on x axis, emit some particles according to frequency loudness
-  i = 0;
-  uint32_t binwidth = (PartSys->maxX + 1) >> 4; //emit poisition variation for one bin (+/-) is equal to width/16 (for 16 bins)
-  uint32_t threshold = 300 - SEGMENT.intensity;
-  uint32_t emitparticles = 0;
+  const uint32_t binwidth = (PartSys->maxX + 1) >> 4;
+  const uint32_t threshold = 300 - SEGMENT.intensity;
+  const uint32_t speedScale = SEGMENT.speed;
+  const uint32_t custom1 = SEGMENT.custom1;
+  const uint32_t intensity = SEGMENT.intensity;
+
+  PSparticle* particles = PartSys->particles;
+  const uint32_t usedParticles = PartSys->usedParticles;
+  uint32_t particleIdx = 0;
 
   for (uint32_t bin = 0; bin < 16; bin++) {
-    uint32_t xposition = binwidth * bin + (binwidth >> 1); // emit position according to frequency band
-    uint8_t emitspeed = ((uint32_t)fftResult[bin] * (uint32_t)SEGMENT.speed) >> 9; // emit speed according to loudness of band (127 max!)
-    emitparticles = 0;
+    const uint8_t fftVal = fftResult[bin];
+    if (fftVal == 0) continue;  // skip silent bins entirely
 
-    if (fftResult[bin] > threshold) {
-      emitparticles = 1;// + (fftResult[bin]>>6);
-    } else if (fftResult[bin] > 0) { // band has low volue
-      uint32_t restvolume = ((threshold - fftResult[bin]) >> 2) + 2;
-      if (hw_random16() % restvolume == 0)
-        emitparticles = 1;
+    // Determine if we should emit
+    bool shouldEmit;
+    if (fftVal > threshold) {
+      shouldEmit = true;
+    } else {
+      uint32_t restvolume = ((threshold - fftVal) >> 2) + 2;
+      shouldEmit = (hw_random16() % restvolume == 0);
     }
 
-    while (i < PartSys->usedParticles && emitparticles > 0) { // emit particles if there are any left, low frequencies take priority
-      if (PartSys->particles[i].ttl == 0) { // find a dead particle
-        //set particle properties TODO: could also use the spray...
-        PartSys->particles[i].ttl = 20 + map(SEGMENT.intensity, 0, 255, emitspeed >> 1, emitspeed + hw_random16(emitspeed)); // set particle alive, particle lifespan is in number of frames
-        PartSys->particles[i].x = xposition + hw_random16(binwidth) - (binwidth >> 1); // position randomly, deviating half a bin width
-        PartSys->particles[i].y = PS_P_RADIUS; // start at the bottom (PS_P_RADIUS is minimum position a particle is fully in frame)
-        PartSys->particles[i].vx = hw_random16(SEGMENT.custom1 >> 1) - (SEGMENT.custom1 >> 2); //x-speed variation: +/- custom1/4
-        PartSys->particles[i].vy = emitspeed;
-        PartSys->particles[i].hue = (bin << 4) + hw_random16(17) - 8; // color from palette according to bin
-        emitparticles--;
+    if (!shouldEmit) continue;
+
+    // Pre-calculate emission parameters once per bin
+    const uint32_t xposition = binwidth * bin + (binwidth >> 1);
+    const uint8_t emitspeed = (fftVal * speedScale) >> 9;
+    const uint8_t baseHue = bin << 4;
+
+    // Find one dead particle
+    while (particleIdx < usedParticles) {
+      if (particles[particleIdx].ttl == 0) {
+        PSparticle& p = particles[particleIdx];
+        p.ttl = 20 + map(intensity, 0, 255, emitspeed >> 1, emitspeed + hw_random16(emitspeed));
+        p.x = xposition + hw_random16(binwidth) - (binwidth >> 1);
+        p.y = PS_P_RADIUS;
+        p.vx = hw_random16(custom1 >> 1) - (custom1 >> 2);
+        p.vy = emitspeed;
+        p.hue = baseHue + hw_random16(17) - 8;
+        particleIdx++;
+        break;  // one particle per bin
       }
-      i++;
+      particleIdx++;
     }
   }
 
-  PartSys->update(); // update and render
+  PartSys->update();
   return FRAMETIME;
 }
 
