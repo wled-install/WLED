@@ -1422,7 +1422,7 @@ bool Segment::ppaFill(uint32_t color) {
       .a = (uint8_t)((color >> 24) & 0xFF)  // W becomes A
   };
 
-  #ifndef WLED_DEBUG
+  #ifdef WLED_DEBUG
   uint32_t startTime = micros();
   #endif
 
@@ -1444,13 +1444,13 @@ bool Segment::ppaFill(uint32_t color) {
 
   esp_err_t err = ppa_do_fill(ppa_fill_handle, &fill_cfg);
 
-  #ifndef WLED_DEBUG
+  #ifdef WLED_DEBUG
   uint32_t elapsed = micros() - startTime;
   static uint32_t callCount = 0;
-  // if (++callCount % 100 == 0) {
+  if (++callCount % 100 == 0) {
     USER_PRINTF("PPA fill %ux%u @ (%u,%u): %lu us (err=%d)\n",
       w, h, x0, y0, elapsed, err);
-  // }
+  }
   #endif
 
   return (err == ESP_OK);
