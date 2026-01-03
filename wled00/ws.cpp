@@ -267,11 +267,30 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     // Calculate scale, clamp to min, then truncate to PPA's actual precision
     float scale = (srcW > MAX_PREVIEW_WIDTH) ? (float)MAX_PREVIEW_WIDTH / srcW : 1.0f;
     if (scale < MIN_SCALE) scale = MIN_SCALE;
-    scale = floorf(scale / SCALE_STEP) * SCALE_STEP;  // Truncate to 1/16 step
+    scale = floorf(scale / SCALE_STEP) * SCALE_STEP;
 
     // Calculate output dimensions from the truncated scale
-    const uint16_t dstW = MAX(1, (uint16_t)(srcW * scale));
-    const uint16_t dstH = MAX(1, (uint16_t)(srcH * scale));
+    uint16_t dstW = MAX(1, (uint16_t)(srcW * scale));
+    uint16_t dstH = MAX(1, (uint16_t)(srcH * scale));
+
+    // Clamp to MAX_PREVIEW_WIDTH to prevent buffer overflow
+    if (dstW > MAX_PREVIEW_WIDTH) {
+      scale = (float)MAX_PREVIEW_WIDTH / srcW;
+      scale = floorf(scale / SCALE_STEP) * SCALE_STEP;
+      dstW = MAX(1, (uint16_t)(srcW * scale));
+      dstH = MAX(1, (uint16_t)(srcH * scale));
+    }
+    if (dstH > MAX_PREVIEW_WIDTH) {
+      float maxDim = MAX(srcW, srcH);
+      scale = (float)MAX_PREVIEW_WIDTH / maxDim;
+      scale = floorf(scale / SCALE_STEP) * SCALE_STEP;
+      dstW = MAX(1, (uint16_t)(srcW * scale));
+      dstH = MAX(1, (uint16_t)(srcH * scale));
+    }
+
+    // Final safety clamp
+    dstW = MIN(dstW, MAX_PREVIEW_WIDTH);
+    dstH = MIN(dstH, MAX_PREVIEW_WIDTH);
 
     const size_t headerSize = LiveLedsWS::HEADER_SIZE_2D;
     const size_t pixelDataSize = dstW * dstH * 3;
@@ -284,6 +303,12 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     if (!ppaBuffer) {
       ppaBuffer = (uint8_t*)heap_caps_aligned_alloc(CACHE_LINE, PPA_BUF_SIZE, MALLOC_CAP_INTERNAL);
       if (!ppaBuffer) return false;
+    }
+
+    // Verify buffer size is sufficient
+    if (pixelDataSize > PPA_BUF_SIZE) {
+      DEBUG_PRINTF("PPA buffer too small: need %d, have %d\n", pixelDataSize, PPA_BUF_SIZE);
+      return false;
     }
 
     ppa_srm_oper_config_t srm_config = {};
