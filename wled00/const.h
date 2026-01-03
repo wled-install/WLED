@@ -350,6 +350,8 @@
 #define ERR_DENIED       1  // Permission denied
 #define ERR_EEP_COMMIT   2  // Could not commit to EEPROM (wrong flash layout?) OBSOLETE
 #define ERR_NOBUF        3  // JSON buffer was not released in time, request cannot be handled at this time
+#define ERR_NOT_IMPL     4  // Not implemented
+#define ERR_NORAM_PX     7  // not enough RAM for pixels
 #define ERR_JSON         9  // JSON parsing failed (input too large?)
 #define ERR_FS_BEGIN    10  // Could not init filesystem (no partition?)
 #define ERR_FS_QUOTA    11  // The FS is full or the maximum file size is reached
@@ -588,6 +590,14 @@
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #define pcTaskGetTaskName pcTaskGetName
 #endif
+#endif
+
+#define WLED_O2_ATTR __attribute__((optimize("O2")))
+
+#if !defined(WLEDMM_SAVE_FLASH) // WLEDMM
+#define WLED_O3_ATTR __attribute__((optimize("O3,fast-math")))
+#else
+#define WLED_O3_ATTR WLED_O2_ATTR   // -O3 increases flash size due to loop unrolling
 #endif
 
 #endif

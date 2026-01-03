@@ -1387,31 +1387,122 @@ void Segment::refreshLightCapabilities() {
   _capabilities = capabilities;
 }
 
+#if defined(SOC_PPA_SUPPORTED)
+bool Segment::ppaFill(uint32_t color) {
+  if (!ppa_fill_handle) return false;
+  if (!is2D()) return false;
+
+  Bus* bus = busses.getBus(0);
+  if (!bus) return false;
+
+  uint8_t* busData = bus->getPixelData();
+  if (!busData) return false;
+
+  const uint16_t matrixWidth = Segment::maxWidth;
+  const uint16_t matrixHeight = Segment::maxHeight;
+  const uint16_t x0 = start;
+  const uint16_t y0 = startY;
+  const uint16_t w = stop - start;
+  const uint16_t h = stopY - startY;
+
+  // Sanity checks
+  if (w == 0 || h == 0) return false;
+  if (x0 + w > matrixWidth || y0 + h > matrixHeight) return false;
+
+  const bool isRGBW = bus->hasWhite();
+  const uint8_t bpp = isRGBW ? 4 : 3;
+  const uint32_t bufferSize = matrixWidth * matrixHeight * bpp;
+
+  // Convert WLED color (WRGB: W[31:24] R[23:16] G[15:8] B[7:0]) 
+  // to PPA's ARGB8888 format
+  color_pixel_argb8888_data_t fillColor = {
+      .b = (uint8_t)((color >> 16) & 0xFF),
+      .g = (uint8_t)((color >> 8) & 0xFF),
+      .r = (uint8_t)((color) & 0xFF),
+      .a = (uint8_t)((color >> 24) & 0xFF)  // W becomes A
+  };
+
+  #ifndef WLED_DEBUG
+  uint32_t startTime = micros();
+  #endif
+
+  ppa_fill_oper_config_t fill_cfg = {
+      .out = {
+          .buffer = busData,
+          .buffer_size = bufferSize,
+          .pic_w = matrixWidth,
+          .pic_h = matrixHeight,
+          .block_offset_x = x0,
+          .block_offset_y = y0,
+          .fill_cm = isRGBW ? PPA_FILL_COLOR_MODE_ARGB8888 : PPA_FILL_COLOR_MODE_RGB888,
+      },
+      .fill_block_w = w,
+      .fill_block_h = h,
+      .fill_argb_color = fillColor,
+      .mode = PPA_TRANS_MODE_BLOCKING,
+  };
+
+  esp_err_t err = ppa_do_fill(ppa_fill_handle, &fill_cfg);
+
+  #ifndef WLED_DEBUG
+  uint32_t elapsed = micros() - startTime;
+  static uint32_t callCount = 0;
+  // if (++callCount % 100 == 0) {
+    USER_PRINTF("PPA fill %ux%u @ (%u,%u): %lu us (err=%d)\n",
+      w, h, x0, y0, elapsed, err);
+  // }
+  #endif
+
+  return (err == ESP_OK);
+}
+#endif
+
 /*
  * Fills segment with color - WLEDMM using faster sPC if possible
  */
 void __attribute__((hot)) Segment::fill(uint32_t c) {
-  if (!isActive()) return; // not active
+  if (!isActive()) return;
 
-  const uint_fast16_t cols = is2D() ? virtualWidth() : virtualLength();             // WLEDMM use fast int types
-  const uint_fast16_t rows = virtualHeight(); // will be 1 for 1D
+  #if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_PPA_SUPPORTED)
+  if (is2D() && ppaFill(c)) {
+    // Optimized ledsrgb fill
+    if (ledsrgb) {
+      const uint32_t len = length();
+      if (c == 0) {
+        // BLACK - use memset (very fast)
+        memset(ledsrgb, 0, len * sizeof(CRGB));
+      } else {
+        // Non-black: fill with 32-bit writes where possible
+        CRGB crgb = CRGB(c);
+        uint32_t crgbVal;
+        memcpy(&crgbVal, &crgb, sizeof(CRGB));  // Get CRGB as uint32_t pattern
 
-  if (is2D()) {
-    // pre-calculate scaled color
-    uint32_t scaled_col = c;
-    bool simpleSegment = (grouping == 1) && (spacing == 0);
-    if (simpleSegment) {
-      uint8_t _bri_t = currentBri(on ? opacity : 0);
-      if (!_bri_t && !transitional) return;
-      if (_bri_t < 255) scaled_col = color_fade(c, _bri_t);
+        // Process 4 pixels at a time (12 bytes, but CRGB is 3 bytes so we do pairs)
+        uint32_t i = 0;
+        for (; i + 1 < len; i += 2) {
+          ledsrgb[i] = crgb;
+          ledsrgb[i + 1] = crgb;
+        }
+        if (i < len) {
+          ledsrgb[i] = crgb;
+        }
+      }
     }
-    // fill 2D segment
-    for(unsigned y = 0; y < rows; y++) for (unsigned x = 0; x < cols; x++) {
-      if (simpleSegment) setPixelColorXY_fast(x, y, c, scaled_col, cols, rows);
-      else setPixelColorXY_slow(x, y, c);
+    return;
+  }
+  #endif
+
+  // Software fallback
+  const auto cols = is2D() ? virtualWidth() : virtualLength();
+  const auto rows = is2D() ? virtualHeight() : 1;
+  for (int_fast32_t y = 0; y < rows; y++) {
+    for (int_fast32_t x = 0; x < cols; x++) {
+      if (is2D()) {
+        setPixelColorXY(x, y, c);
+      } else {
+        setPixelColor((uint32_t)x, c);
+      }
     }
-  } else { // fill 1D strip
-    for (uint32_t x = 0; x < cols; x++) setPixelColor(uint32_t(x), c);
   }
 }
 

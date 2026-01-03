@@ -342,7 +342,39 @@ bool strip_uses_global_leds(void) __attribute__((pure));  // WLEDMM implemented 
 #define FX_MODE_PRO_LINK               200
 #define FX_MODE_DJLIGHT_CIRCLES        201
 #define FX_MODE_AKEMIPPA               202
-#define MODE_COUNT                     203
+
+#define FX_MODE_PARTICLEVOLCANO        203
+#define FX_MODE_PARTICLEFIRE           204
+#define FX_MODE_PARTICLEFIREWORKS      205
+#define FX_MODE_PARTICLEVORTEX         206
+#define FX_MODE_PARTICLEPERLIN         207
+#define FX_MODE_PARTICLEPIT            208
+#define FX_MODE_PARTICLEBOX            209
+#define FX_MODE_PARTICLEATTRACTOR      210
+#define FX_MODE_PARTICLEIMPACT         211
+#define FX_MODE_PARTICLEWATERFALL      212
+#define FX_MODE_PARTICLESPRAY          213
+#define FX_MODE_PARTICLESGEQ           214
+#define FX_MODE_PARTICLECENTERGEQ      215
+#define FX_MODE_PARTICLEGHOSTRIDER     216
+#define FX_MODE_PARTICLEBLOBS          217
+#define FX_MODE_PSDRIP                 218
+#define FX_MODE_PSPINBALL              219
+#define FX_MODE_PSDANCINGSHADOWS       220
+#define FX_MODE_PSFIREWORKS1D          221
+#define FX_MODE_PSSPARKLER             222
+#define FX_MODE_PSHOURGLASS            223
+#define FX_MODE_PS1DSPRAY              224
+#define FX_MODE_PSBALANCE              225
+#define FX_MODE_PSCHASE                226
+#define FX_MODE_PSSTARBURST            227
+#define FX_MODE_PS1DGEQ                228
+#define FX_MODE_PSFIRE1D               229
+#define FX_MODE_PS1DSONICSTREAM        230
+#define FX_MODE_PS1DSONICBOOM          231
+#define FX_MODE_PS1DSPRINGY            232
+
+#define MODE_COUNT                     233
 
 typedef enum mapping1D2D {
   M12_Pixels = 0,
@@ -427,7 +459,6 @@ typedef struct Segment {
     size_t _dataLen;                   // WLEDMM uint16_t is too small
     static size_t _usedSegmentData;    // WLEDMM uint16_t is too small
     void setPixelColorXY_fast(int x, int y,uint32_t c, uint32_t scaled_col, int cols, int rows) const; // set relative pixel within segment with color - faster, but no error checking!!!
-
     bool _isSimpleSegment = false;      // simple = no grouping or spacing - mirror, transpose or reverse allowed
     bool _isSuperSimpleSegment = false; // superSimple = no grouping or spacing, no mirror - only transpose or reverse allowed
 #ifdef WLEDMM_FASTPATH
@@ -579,6 +610,10 @@ typedef struct Segment {
 
     static size_t   getUsedSegmentData(void)    { return _usedSegmentData; } // WLEDMM size_t
     static void     addUsedSegmentData(int len) { _usedSegmentData += len; }
+    
+    #if defined(SOC_PPA_SUPPORTED)
+    bool ppaFill(uint32_t color);
+    #endif
 
     void    allocLeds(); //WLEDMM
     inline static const CRGBPalette16 &getCurrentPalette(void) { return Segment::_currentPalette; }
