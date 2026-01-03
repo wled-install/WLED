@@ -823,7 +823,7 @@ bool PinManagerClass::isPinOk(byte gpio, bool output) const
     if (             gpio <   2) return false;     // NC unless you mod the board.
     if (             gpio ==  9) return false;     // I2S Sound Output Pin
     if (gpio > 13 && gpio <  20) return false;     // ESP-Hosted WiFi pins
-    if (gpio > 23 && gpio <  26) return false;     // USB Pins
+    // if (gpio > 23 && gpio <  26) return false;     // USB Pins
     if (gpio > 27 && gpio <  32) return false;     // Ethernet pins
     if (gpio > 33 && gpio <  36) return false;     // Ethernet pins - boot button is on 35 and works... but messes with Ethernet if enabled in WLED
     // if (gpio > 36 && gpio <  38) return false;     // Serial console.
