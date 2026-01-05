@@ -504,6 +504,10 @@ void initServer()
 
 void serveIndexOrWelcome(AsyncWebServerRequest *request)
 {
+  #if defined(WLED_USE_ETHERNET_ONLY)
+  showWelcomePage = false;
+  #endif
+  
   if (!showWelcomePage){
     serveIndex(request);
   } else {
