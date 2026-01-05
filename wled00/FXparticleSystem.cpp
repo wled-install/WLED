@@ -14,6 +14,7 @@
 
 #if !(defined(WLED_DISABLE_PARTICLESYSTEM2D) && defined(WLED_DISABLE_PARTICLESYSTEM1D)) // not both disabled
 #include "FXparticleSystem.h"
+#include "particle_simd.h"
 // local shared functions (used both in 1D and 2D system)
 static int32_t calcForce_dv(const int8_t force, uint8_t& counter);
 static bool checkBoundsAndWrap(int32_t& position, const int32_t max, const int32_t particleradius, const bool wrap); // returns false if out of bounds by more than particleradius
@@ -561,16 +562,26 @@ void ParticleSystem2D::render() {
     blend = LINEARBLEND_NOWRAP;
   }
 
-  if (motionBlur) { // motion-blurring active
+  uint32_t numPixels = (maxXpixel + 1) * (maxYpixel + 1);
+
+  if (motionBlur) {
+    #if HAS_PIE_SIMD
+    fast_color_scale_simd(framebuffer, motionBlur, numPixels);
+    #else
     for (int32_t y = 0; y <= maxYpixel; y++) {
       int index = y * (maxXpixel + 1);
       for (int32_t x = 0; x <= maxXpixel; x++) {
-        fast_color_scale(framebuffer[index], motionBlur); // note: could skip if only globalsmear is active but usually they are both active and scaling is fast enough
+        fast_color_scale(framebuffer[index], motionBlur);
         index++;
       }
     }
-  } else { // no blurring: clear buffer
-    memset(framebuffer, 0, (maxXpixel + 1) * (maxYpixel + 1) * sizeof(CRGB));
+    #endif
+  } else {
+    #if HAS_PIE_SIMD
+    clear_buffer_simd(framebuffer, numPixels * sizeof(CRGB));
+    #else
+    memset(framebuffer, 0, numPixels * sizeof(CRGB));
+    #endif
   }
 
   // go over particles and render them to the buffer
