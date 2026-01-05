@@ -9759,10 +9759,18 @@ uint16_t mode_PPA_IMAGEPLAYER() {
   std::string folder_path;
   static std::string last_folder_path;
 
-  if (get_sequence_folder("/usb0", folder_path, SEGMENT.speed, rescan_source) != 0) {
-    DEBUG_PRINTLN("No sequence folders found — skipping");
-    delay(500);
-    return 1;
+  if (is_sdcard_mounted()) {
+    if (get_sequence_folder("/sdcard", folder_path, SEGMENT.speed, rescan_source) != 0) {
+      DEBUG_PRINTLN("No sequence folders found — skipping");
+      delay(500);
+      return 1;
+    }
+  } else {
+    if (get_sequence_folder("/usb0", folder_path, SEGMENT.speed, rescan_source) != 0) {
+      DEBUG_PRINTLN("No sequence folders found — skipping");
+      delay(500);
+      return 1;
+    }
   }
 
   static uint16_t folder_size = 0;

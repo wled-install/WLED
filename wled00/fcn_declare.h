@@ -394,6 +394,8 @@ void userSetup();
 void userConnected();
 void userLoop();
 
+bool is_sdcard_mounted(void);
+
 //util.cpp
 void dumpAllTaskHWMs(void);
 #define inoise8 perlin8   // fastled legacy alias

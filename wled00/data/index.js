@@ -749,7 +749,7 @@ ${(() => {
     const usageStr = `${formatBytes(i.usb.u)} / ${formatBytes(i.usb.t)}`;
     const percent = i.usb.t > 0 ? Math.round(i.usb.u * 100 / i.usb.t) : 0;
     return inforow("USB Storage", `${usageStr}, ${percent}%`);
-  } else if (i.cache && i.cache.s !== 'Idle' && i.cache.f && i.cache.f.startsWith('/usb0')) {
+  } else if (i.cache && i.cache.s !== 'Idle' && i.cache.f && (i.cache.f.startsWith('/usb0') || i.cache.f.startsWith('/sdcard'))) {
     return inforow("USB Storage", "Preloading");
   } else {
     return "";

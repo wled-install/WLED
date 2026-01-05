@@ -1233,7 +1233,12 @@ void serializeInfo(JsonObject root)
   if (status == CacheStatus::IDLE) {
     uint64_t usb_bytes_total = 0;
     uint64_t usb_bytes_free = 0;
-    const char* mount_path = "/usb0";
+    const char* mount_path;
+    if (is_sdcard_mounted()) {
+      mount_path = "/sdcard";
+    } else {
+      mount_path = "/usb0";
+    }
 
     #if defined(SOC_USB_OTG_SUPPORTED)
     esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);

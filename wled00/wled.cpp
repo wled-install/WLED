@@ -36,6 +36,88 @@ static const char *TAG = "WLED";
   #define MNT_PATH "/usb"     // Base mount path prefix, devices will be mounted as /usb0, /usb1, /usb2...
   #define MAX_MSC_DEVICES  CONFIG_FATFS_VOLUME_COUNT 
 
+  #include "esp_vfs_fat.h"
+  #include "sdmmc_cmd.h"
+  #include "driver/sdmmc_host.h"
+  #include "driver/gpio.h"
+
+  #define MOUNT_POINT "/sdcard"
+  #define SD_POWER_PIN GPIO_NUM_45
+
+  static sdmmc_card_t* card = NULL;
+
+  static void sdcard_power_on(void) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << SD_POWER_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(SD_POWER_PIN, 0);  // P-FET: low = on
+    vTaskDelay(pdMS_TO_TICKS(50));    // let power stabilize
+  }
+
+  static void sdcard_power_off(void) {
+    gpio_set_level(SD_POWER_PIN, 1);  // P-FET: high = off
+  }
+
+  esp_err_t mount_sdcard(void) {
+    sdcard_power_on();
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+
+    sdmmc_slot_config_t slot_config = {
+        .clk = GPIO_NUM_43,
+        .cmd = GPIO_NUM_44,
+        .d0 = GPIO_NUM_39,
+        .d1 = GPIO_NUM_40,
+        .d2 = GPIO_NUM_41,
+        .d3 = GPIO_NUM_42,
+        .cd = SDMMC_SLOT_NO_CD,
+        .wp = SDMMC_SLOT_NO_WP,
+        .width = 4,
+        .flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP,
+    };
+
+    esp_err_t ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config, &mount_config, &card);
+
+    if (ret != ESP_OK) {
+      USER_PRINTF("Mount failed : %s\n", esp_err_to_name(ret));
+      sdcard_power_off();
+      return ret;
+    }
+
+    sdmmc_card_print_info(stdout, card);
+    USER_PRINTF("Mounted at %s\n", MOUNT_POINT);
+    return ESP_OK;
+  }
+
+  esp_err_t unmount_sdcard(void) {
+    if (card == NULL) {
+      return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = esp_vfs_fat_sdcard_unmount(MOUNT_POINT, card);
+    if (ret == ESP_OK) {
+      card = NULL;
+      sdcard_power_off();
+      USER_PRINTLN("Unmounted");
+    }
+    return ret;
+  }
+
+  bool is_sdcard_mounted(void) {
+    return card != NULL;
+  }
+
   typedef struct {
     uint8_t usb_addr;                     /*!< USB device address */
     msc_host_device_handle_t msc_device;  /*!< Handle of the MSC device */
@@ -1662,6 +1744,11 @@ void WLED::setup() {
     Serial.flush();
     delay(50);
 
+    err_t sdcarderr = mount_sdcard();
+    if (sdcarderr == ESP_OK) {
+      ImageCacheManager::getInstance().startPreload("/sdcard");
+    }
+      
     xSemaphoreGive(busMutex);
 
     xTaskCreatePinnedToCore(
