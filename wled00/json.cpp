@@ -1239,6 +1239,7 @@ void serializeInfo(JsonObject root)
     } else {
       mount_path = "/usb0";
     }
+    cache_info["m"] = mount_path;
 
     #if defined(SOC_USB_OTG_SUPPORTED)
     esp_err_t result = esp_vfs_fat_info(mount_path, &usb_bytes_total, &usb_bytes_free);
@@ -1305,10 +1306,16 @@ void serializeInfo(JsonObject root)
   #endif
   #if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_HAS_PSRAM)
   if (psramFound()) {  // OK use
+    #if defined(CONFIG_SPIRAM_SPEED)
+    root[F("tpramspeed")] = String(CONFIG_SPIRAM_SPEED);
+    #endif
     root[F("tpram")] = ESP.getPsramSize(); //WLEDMM
     root[F("psram")] = ESP.getFreePsram();
     root[F("psusedram")] = ESP.getMinFreePsram();
-    #if CONFIG_ESP32S3_SPIRAM_SUPPORT  // WLEDMM -S3 has "qspi" or "opi" PSRAM mode
+    #if CONFIG_SPIRAM_MODE_HEX
+      root[F("psrmode")] = F("🚀🚀 HEX");
+      root[F("psrspeed ")] = F("🚀🚀 HEX");
+    #elif CONFIG_ESP32S3_SPIRAM_SUPPORT  // WLEDMM -S3 has "qspi" or "opi" PSRAM mode
     #if CONFIG_SPIRAM_MODE_OCT
       root[F("psrmode")]  = F("🚀 OPI");
     #elif CONFIG_SPIRAM_MODE_QUAD
@@ -1350,21 +1357,20 @@ void serializeInfo(JsonObject root)
   root[F("e32speed")] = ESP.getCpuFreqMHz();
   root[F("e32flash")] = int((ESP.getFlashChipSize()/1024)/1024);
   root[F("e32flashspeed")] = int(ESP.getFlashChipSpeed()/1000000);
-  // root[F("e32flashmode")] = int(ESP.getFlashChipMode());
-  // switch (ESP.getFlashChipMode()) {
-  //   // missing: Octal modes
-  //   case FM_QIO:  root[F("e32flashtext")] = F(" (QIO)"); break;
-  //   case FM_QOUT: root[F("e32flashtext")] = F(" (QOUT)");break;
-  //   case FM_DIO:  root[F("e32flashtext")] = F(" (DIO)"); break;
-  //   case FM_DOUT: root[F("e32flashtext")] = F(" (DOUT or other)");break;
-  //   #if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_ESPTOOLPY_FLASHMODE_OPI
-  //     case FM_FAST_READ: root[F("e32flashtext")] = F(" (🚀OPI)");break;
-  //   #else
-  //     case FM_FAST_READ: root[F("e32flashtext")] = F(" (fast_read)");break;
-  //   #endif
-  //   case FM_SLOW_READ: root[F("e32flashtext")] = F(" (slow_read)");break;
-  //   default: root[F("e32flashtext")] = F(" (other)"); break;
-  // }
+  root[F("e32flashmode")] = int(ESP.getFlashChipMode());
+  switch (ESP.getFlashChipMode()) {
+  case FM_QIO:  root[F("e32flashtext")] = F(" (QIO)"); break;
+  case FM_QOUT: root[F("e32flashtext")] = F(" (QOUT)");break;
+  case FM_DIO:  root[F("e32flashtext")] = F(" (DIO)"); break;
+  case FM_DOUT: root[F("e32flashtext")] = F(" (DOUT or other)");break;
+    #if (defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)) && CONFIG_ESPTOOLPY_FLASHMODE_OPI
+  case FM_FAST_READ: root[F("e32flashtext")] = F(" (🚀OPI)");break;
+    #else
+  case FM_FAST_READ: root[F("e32flashtext")] = F(" (fast_read)");break;
+    #endif
+  case FM_SLOW_READ: root[F("e32flashtext")] = F(" (slow_read)");break;
+  default: root[F("e32flashtext")] = F(" (other)"); break;
+  }
 
   #else // for 8266
   root[F("e32core0code")] = (int)ESP.getResetInfoPtr()->reason;

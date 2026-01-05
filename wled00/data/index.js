@@ -739,8 +739,14 @@ ${inforow("Uptime",getRuntimeStr(i.uptime))}
 <tr><td colspan=2><hr style="height:2px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
 ${inforow("Filesystem", i.fs.u + "/" + i.fs.t + " KB, " + Math.round(i.fs.u * 100 / i.fs.t) + "%")}
 ${(() => {
+  let storage_dir_title = "Other Storage ☾🐺";
   // This means the drive is present and the cache was idle, so we can show stats.
   if (i.usb) {
+    if (i.cache.m && i.cache.m.startsWith('/sdcard')) {
+      storage_dir_title = "SD Card Storage ☾🐺";
+    } else if (i.cache.m && i.cache.m.startsWith('/usb')) {
+      storage_dir_title = "USB Storage ☾🐺";
+    }
     const formatBytes = (bytes) => {
       if (bytes >= 1000000000) { return (bytes / 1000000000).toFixed(2) + " GB"; }
       if (bytes >= 1000000) { return (bytes / 1000000).toFixed(1) + " MB"; }
@@ -748,15 +754,15 @@ ${(() => {
     };
     const usageStr = `${formatBytes(i.usb.u)} / ${formatBytes(i.usb.t)}`;
     const percent = i.usb.t > 0 ? Math.round(i.usb.u * 100 / i.usb.t) : 0;
-    return inforow("USB Storage", `${usageStr}, ${percent}%`);
-  } else if (i.cache && i.cache.s !== 'Idle' && i.cache.f && (i.cache.f.startsWith('/usb0') || i.cache.f.startsWith('/sdcard'))) {
-    return inforow("USB Storage", "Preloading");
+    return inforow(storage_dir_title, `${usageStr}, ${percent}%`);
+  } else if (i.cache && i.cache.s !== 'Idle' && i.cache.f && (i.cache.f.startsWith('/usb') || i.cache.f.startsWith('/sdcard'))) {
+    return inforow(storage_dir_title, "Preloading");
   } else {
     return "";
   }
 })()}
-${i.cache ? inforow("ImageCache", i.cache.s) : ""}
-${i.cache && i.cache.f ? inforow("ImageCache Dir", i.cache.f.substring(0, i.cache.f.lastIndexOf('/'))) : ""}
+${i.cache ? inforow("ImageCache ☾🐺", i.cache.s) : ""}
+${i.cache && i.cache.m ? inforow("ImageCache Dir", i.cache.m) : ""}
 ${i.cache && i.cache.p > 0 ? inforow("ImageCache Size", i.cache.p + " KB") : ""}
 ${theap > 0 ? inforow("Heap ☾", ((i.totalheap - i.freeheap) / 1024).toFixed(0) + "/" + theap.toFixed(0) + " KB", ", " + Math.round((i.totalheap - i.freeheap) / (10 * theap)) + "%") : inforow("Free heap", heap,"  KB")}  <!--WLEDMM different for 8266-->
 ${i.minfreeheap ? inforow("Max used heap ☾", ((i.totalheap - i.minfreeheap) / 1024).toFixed(0) +" KB",", "+Math.round((i.totalheap-i.minfreeheap)/(10*theap))+"%"):""} 
@@ -764,8 +770,33 @@ ${i.psram ? inforow("PSRAM ☾", ((i.tpram - i.psram) / 1024).toFixed(0) + "/" +
 ${i.psusedram ? inforow("Max used PSRAM ☾", ((i.tpram - i.psusedram) / 1024).toFixed(0) +" KB",", "+((i.tpram-i.psusedram)*100.0/i.tpram).toFixed(1)+"%"):""} 
 ${i.freestack ? inforow("Free stack ☾",(i.freestack/1024).toFixed(3)," KB"):""} <!--WLEDMM-->
 <tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
-${i.tpram ? inforow("PSRAM " + (i.psrmode ? "(" + i.psrmode + " mode) " : "") + " ☾", (i.tpram / 1024 / 1024).toFixed(0), " MB") : inforow("No PSRAM found.", "")}
-${i.e32flash ? inforow("Flash mode " + i.e32flashmode + i.e32flashtext + " ☾", i.e32flash + " MB, " + i.e32flashspeed," Mhz"):""}
+${(() => {
+      if (!i.tpram) {
+        return inforow("No PSRAM found.", "");
+      }
+
+      const label =
+        "PSRAM " +
+        (i.psrmode ? `(${i.psrmode} mode) ` : "") +
+        "☾";
+
+      const mb = (i.tpram / 1024 / 1024).toFixed(0) + " MB";
+
+      const speed = i.tpramspeed ? ` (${i.tpramspeed} Mhz)` : "";
+
+      return inforow(label, mb + speed);
+    })()}
+
+${i.e32flash
+      ? inforow(
+        "Flash mode " +
+        (i.e32flashmode || "") +
+        (i.e32flashtext || "") +
+        " ☾",
+        i.e32flash + " MB, " + i.e32flashspeed,
+        " Mhz"
+      )
+      : ""}
 ${i.e32model ? inforow(i.e32model + " ☾", i.e32cores + " core(s),", " " + i.e32speed +" Mhz"):""}
 ${inforow("Environment", i.arch + " " + i.core + " (" + i.lwip + ")")}
 <tr><td colspan=2><hr style="height:1px;border-width:0;color:SeaGreen;background-color:SeaGreen"></td></tr>
