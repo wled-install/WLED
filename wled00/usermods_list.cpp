@@ -210,6 +210,9 @@
 #ifdef USERMOD_AUTO_PLAYLIST
 #include "../usermods/usermod_v2_auto_playlist/usermod_v2_auto_playlist.h"
 #endif
+#ifdef USERMOD_ARTNETMAP
+#include "../usermods/usermod_v2_artnetmap/usermod_v2_artnetmap.h"
+#endif
 
 void registerUsermods()
 {
@@ -357,6 +360,10 @@ void registerUsermods()
 
 #ifdef USERMOD_PIONEER_PROLINK
   usermods.add(new ProLinkUsermod());
+#endif
+
+#ifdef USERMOD_ARTNETMAP
+  usermods.add(new ArtNetMapUsermod(true));
 #endif
 
 #ifdef USERMOD_KLIPPER_PERCENTAGE
