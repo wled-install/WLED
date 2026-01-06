@@ -30,8 +30,13 @@
 #define PSPRINTLN(x)
 #endif
 
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 // limit speed of particles (used in 1D and 2D)
 static inline int32_t limitSpeed(const int32_t speed) {
+  if (likely((uint32_t)(speed + PS_P_MAXSPEED) <= (uint32_t)(PS_P_MAXSPEED * 2)))
+    return speed;
   return speed > PS_P_MAXSPEED ? PS_P_MAXSPEED : (speed < -PS_P_MAXSPEED ? -PS_P_MAXSPEED : speed); // note: this is slightly faster than using min/max at the cost of 50bytes of flash
 }
 #endif
@@ -47,8 +52,8 @@ static inline int32_t limitSpeed(const int32_t speed) {
 #define MAXSOURCES_2D 64
 #define SOURCEREDUCTIONFACTOR 6
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
-#define MAXPARTICLES_2D 16384
-#define MAXSOURCES_2D 2048
+#define MAXPARTICLES_2D 8192
+#define MAXSOURCES_2D 1024
 #define SOURCEREDUCTIONFACTOR 2
 #else
 #define MAXPARTICLES_2D 2048

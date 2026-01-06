@@ -15,6 +15,9 @@
 #if !(defined(WLED_DISABLE_PARTICLESYSTEM2D) && defined(WLED_DISABLE_PARTICLESYSTEM1D)) // not both disabled
 #include "FXparticleSystem.h"
 #include "particle_simd.h"
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 // local shared functions (used both in 1D and 2D system)
 static int32_t calcForce_dv(const int8_t force, uint8_t& counter);
 static bool checkBoundsAndWrap(int32_t& position, const int32_t max, const int32_t particleradius, const bool wrap); // returns false if out of bounds by more than particleradius
@@ -63,6 +66,8 @@ void ParticleSystem2D::update(void) {
   //update size settings before handling collisions
   if (advPartSize) {
     for (uint32_t i = 0; i < usedParticles; i++) {
+      if (unlikely(particles[i].ttl == 0 || particleFlags[i].outofbounds))
+        continue;
       if (updateSize(&advPartProps[i], &advPartSize[i]) == false) { // if particle shrinks to 0 size
         particles[i].ttl = 0; // kill particle
       }
@@ -281,6 +286,8 @@ void ParticleSystem2D::particleMoveUpdate(PSparticle& part, PSparticleFlags& par
 // move function for fire particles
 void ParticleSystem2D::fireParticleupdate() {
   for (uint32_t i = 0; i < usedParticles; i++) {
+    if (unlikely(particles[i].ttl == 0))  // most particles alive
+      continue;
     if (particles[i].ttl > 0) {
       particles[i].ttl--; // age
       int32_t newY = particles[i].y + (int32_t)particles[i].vy + (particles[i].ttl >> 2); // younger particles move faster upward as they are hotter
@@ -1931,7 +1938,7 @@ static bool checkBoundsAndWrap(int32_t& position, const int32_t max, const int32
 // note: result is stored in c1, not using a return value is faster as the CRGB struct does not need to be copied upon return
 // note2: function is mainly used to add scaled colors, so checking if one color is black is slower
 // note3: scale is 255 when using blur, checking for that makes blur faster
-__attribute__((optimize("O2"))) static void fast_color_add(CRGB& c1, const CRGB& c2, const uint8_t scale) {
+__attribute__((optimize("Ofast"))) static void fast_color_add(CRGB& c1, const CRGB& c2, const uint8_t scale) {
   uint32_t r, g, b;
   if (scale < 255) {
     r = c1.r + ((c2.r * scale) >> 8);
@@ -1958,7 +1965,7 @@ __attribute__((optimize("O2"))) static void fast_color_add(CRGB& c1, const CRGB&
 }
 
 // faster than fastled color scaling as it does in place scaling
-__attribute__((optimize("O2"))) static void fast_color_scale(CRGB& c, const uint8_t scale) {
+__attribute__((optimize("Ofast"))) static void fast_color_scale(CRGB& c, const uint8_t scale) {
   c.r = ((c.r * scale) >> 8);
   c.g = ((c.g * scale) >> 8);
   c.b = ((c.b * scale) >> 8);
