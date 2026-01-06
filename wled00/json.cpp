@@ -1357,6 +1357,7 @@ void serializeInfo(JsonObject root)
   root[F("e32speed")] = ESP.getCpuFreqMHz();
   root[F("e32flash")] = int((ESP.getFlashChipSize()/1024)/1024);
   root[F("e32flashspeed")] = int(ESP.getFlashChipSpeed()/1000000);
+  #if !defined (CONFIG_IDF_TARGET_ARCH_RISCV)
   root[F("e32flashmode")] = int(ESP.getFlashChipMode());
   switch (ESP.getFlashChipMode()) {
   case FM_QIO:  root[F("e32flashtext")] = F(" (QIO)"); break;
@@ -1371,6 +1372,13 @@ void serializeInfo(JsonObject root)
   case FM_SLOW_READ: root[F("e32flashtext")] = F(" (slow_read)");break;
   default: root[F("e32flashtext")] = F(" (other)"); break;
   }
+  #else
+    #if defined(CONFIG_ESPTOOLPY_FLASHMODE_QIO)
+      root[F("e32flashtext")] = "QIO";
+    #elif defined(CONFIG_ESPTOOLPY_FLASHMODE_DIO)
+      root[F("e32flashtext")] = "DIO";
+    #endif
+  #endif
 
   #else // for 8266
   root[F("e32core0code")] = (int)ESP.getResetInfoPtr()->reason;
