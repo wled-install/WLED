@@ -251,7 +251,8 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
 
   Bus* bus = busses.getBus(0);
   if (!bus) return false;
-
+  if (!bus->isOk()) return false;
+  
   uint8_t* srcBuffer = bus->getPixelData();
   if (!srcBuffer) return false;
 

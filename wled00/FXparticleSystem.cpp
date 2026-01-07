@@ -635,6 +635,7 @@ void ParticleSystem2D::render() {
   uint32_t busPixelSize = 0;
   Bus* bus = busses.getBus(0);
   if (bus) {
+    if (!bus->isOk()) return;
     busPixelData = bus->getPixelData();
     busPixelSize = SEGMENT.length() * 3;
     if (busPixelData == NULL || busPixelSize == 0) return;

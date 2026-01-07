@@ -2,6 +2,10 @@
 #include "lwip/udp.h"
 #include "lwip/ip_addr.h"
 
+#ifdef USERMOD_ARTNETMAP
+#include "../usermods/usermod_v2_artnetmap/usermod_v2_artnetmap.h"
+#endif
+
 /*
  * UDP sync notifier / Realtime / Hyperion / TPM2.NET
  */
@@ -859,13 +863,13 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
   const size_t totalChannels = length * bpp;
   const char* protocolName = (type == 0) ? "DDP" : (type == 1) ? "E1.31" : "Art-Net";
 
-  // Validate output configuration
-  if (length != outputs * leds_per_output) {
-    delay(100);
-    USER_PRINTF("%s config mismatch: length=%lu but outputs=%lu * leds_per_output=%lu = %lu\n",
-      protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
-    return 1;
-  }
+  // // Validate output configuration
+  // if (length != outputs * leds_per_output) {
+  //   delay(100);
+  //   USER_PRINTF("%s config mismatch: length=%lu but outputs=%lu * leds_per_output=%lu = %lu\n",
+  //     protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
+  //   return 1;
+  // }
 
   // Packet buffer sized for DDP (largest: 10 + 1440 = 1450 bytes)
   #ifdef ESP32
@@ -1103,10 +1107,6 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
     break;
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Art-Net (Optimized: Connected Mode)
-  // Efficiency: 85.9% | Header: 18 bytes | Max payload: 512 bytes
-  // ═══════════════════════════════════════════════════════════════════
   case 2: {
     static FastAsyncUDP artnetUdp;
     static IPAddress lastClient((uint32_t)0);
@@ -1122,46 +1122,93 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
 
     const uint16_t maxChannels = isRGBW ? 512 : 510;
 
-    uint_fast32_t bufferOffset = 0;
-    uint_fast16_t universe = 0;
-
     sequenceNumber = (sequenceNumber + 1) & 0xFF;
     if (sequenceNumber == 0) sequenceNumber = 1;
 
-    for (uint_fast16_t output = 0; output < outputs; output++) {
-      uint_fast16_t channels_remaining = leds_per_output * bpp;
+    uint_fast32_t bufferOffset = 0;
 
-      while (channels_remaining > 0) {
-        uint_fast16_t packetSize = (channels_remaining < maxChannels)
-          ? channels_remaining : maxChannels;
-        channels_remaining -= packetSize;
+    #ifdef USERMOD_ARTNETMAP
+    // Get the ArtNetMap usermod for per-output universe mapping
+    ArtNetMapUsermod* artnetMap = (ArtNetMapUsermod*)usermods.lookup(USERMOD_ID_ARTNETMAP);
 
-        packet_buffer[12] = sequenceNumber;
-        packet_buffer[13] = 0;
-        packet_buffer[14] = universe & 0xFF;
-        packet_buffer[15] = (universe >> 8) & 0xFF;
-        packet_buffer[16] = (packetSize >> 8) & 0xFF;
-        packet_buffer[17] = packetSize & 0xFF;
+    if (artnetMap && artnetMap->isEnabled() && artnetMap->getNumOutputs() > 0) {
+      // Use usermod configuration - each output has its own start universe and LED count
+      uint16_t numOutputs = artnetMap->getNumOutputs();
 
-        #ifdef REALTIME_TESTING_ZEROS
-        uint8_t test_bri = 0;
-        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, test_bri, isRGBW, color_order);
-        #else
-        processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
-        #endif
+      for (uint_fast16_t output = 0; output < numOutputs; output++) {
+        uint_fast16_t universe = artnetMap->getStartUniverse(output);
+        uint_fast16_t output_leds = artnetMap->getLedsPerOutput(output);
+        uint_fast16_t channels_remaining = output_leds * bpp;
 
-        if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
-          USER_PRINTLN(F("Art-Net writeTo error"));
-          return 1;
+        while (channels_remaining > 0) {
+          uint_fast16_t packetSize = (channels_remaining < maxChannels)
+            ? channels_remaining : maxChannels;
+          channels_remaining -= packetSize;
+
+          packet_buffer[12] = sequenceNumber;
+          packet_buffer[13] = 0;
+          packet_buffer[14] = universe & 0xFF;
+          packet_buffer[15] = (universe >> 8) & 0xFF;
+          packet_buffer[16] = (packetSize >> 8) & 0xFF;
+          packet_buffer[17] = packetSize & 0xFF;
+
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+
+          if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+            USER_PRINTLN(F("Art-Net writeTo error"));
+            return 1;
+          }
+
+          #ifdef REALTIME_OUTPUT_TIMER
+          packetstotal++;
+          datatotal += packetSize + ARTNET_HEADER_LEN + 46;
+          #endif
+
+          bufferOffset += packetSize;
+          universe++;
         }
+      }
+    } else
+      #endif
+    {
+      // Default behavior - sequential universes, uniform leds_per_output
+      uint_fast16_t universe = 0;
 
-        #ifdef REALTIME_OUTPUT_TIMER
-        packetstotal++;
-        datatotal += packetSize + ARTNET_HEADER_LEN + 46;
-        #endif
+      for (uint_fast16_t output = 0; output < outputs; output++) {
+        uint_fast16_t channels_remaining = leds_per_output * bpp;
 
-        bufferOffset += packetSize;
-        universe++;
+        while (channels_remaining > 0) {
+          uint_fast16_t packetSize = (channels_remaining < maxChannels)
+            ? channels_remaining : maxChannels;
+          channels_remaining -= packetSize;
+
+          packet_buffer[12] = sequenceNumber;
+          packet_buffer[13] = 0;
+          packet_buffer[14] = universe & 0xFF;
+          packet_buffer[15] = (universe >> 8) & 0xFF;
+          packet_buffer[16] = (packetSize >> 8) & 0xFF;
+          packet_buffer[17] = packetSize & 0xFF;
+
+          #ifdef REALTIME_TESTING_ZEROS
+          uint8_t test_bri = 0;
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, test_bri, isRGBW, color_order);
+          #else
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+          #endif
+
+          if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+            USER_PRINTLN(F("Art-Net writeTo error"));
+            return 1;
+          }
+
+          #ifdef REALTIME_OUTPUT_TIMER
+          packetstotal++;
+          datatotal += packetSize + ARTNET_HEADER_LEN + 46;
+          #endif
+
+          bufferOffset += packetSize;
+          universe++;
+        }
       }
     }
 
@@ -1196,7 +1243,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
 
   default:
     return 1;
-}
+  }
 
 if (fps_limit > 0) {
     frame_limiter = timer + (1000000 / fps_limit);

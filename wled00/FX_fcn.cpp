@@ -1394,7 +1394,8 @@ bool Segment::ppaFill(uint32_t color) {
 
   Bus* bus = busses.getBus(0);
   if (!bus) return false;
-
+  if (!bus->isOk()) return false;
+  
   uint8_t* busData = bus->getPixelData();
   if (!busData) return false;
 
@@ -1757,7 +1758,7 @@ uint8_t * Segment::getAudioPalette(int pal) const {
 //WLEDMM from util.cpp
 // enumerate all ledmapX.json files on FS and extract ledmap names if existing
 void WS2812FX::enumerateLedmaps() {
-  ledmapMaxSize = 0;
+  ledmapMaxSize = 0; // TROYHACKS: not setting this to zero causes crashes even tho I had a good idea.
   ledMaps = 1;
   for (int i=1; i<10; i++) {
     char fileName[33] = {'\0'};       // WLEDMM ensure termination

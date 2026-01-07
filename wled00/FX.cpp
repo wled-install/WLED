@@ -136,6 +136,7 @@ inline bool ppaEffectBegin(PPAEffectContext& ctx) {
     ctx.valid = false;
     return false;
   }
+  if (!bus->isOk()) return false;
 
   ctx.busPixelData = bus->getPixelData();
   ctx.busPixelSize = ctx.max_width * ctx.max_height * 3;
@@ -9748,6 +9749,7 @@ uint16_t mode_PPA_IMAGEPLAYER() {
   uint32_t busPixelSize = 0;
   Bus* bus = busses.getBus(0);
   if (bus) {
+    if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
     busPixelSize = SEGMENT.length() * 3;
     if (busPixelData == NULL || busPixelSize == 0) return 1;
@@ -10270,6 +10272,7 @@ uint16_t mode_PRO_LINK() {
   uint32_t busPixelSize = 0;
   Bus* bus = busses.getBus(0);
   if (bus) {
+    if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
     busPixelSize = SEGMENT.length() * 3;
     if (!busPixelData || busPixelSize == 0) return 1;
@@ -10571,6 +10574,7 @@ uint16_t mode_DJLight_Circles(void) {
   uint32_t busPixelSize = 0;
   Bus* bus = busses.getBus(0);
   if (bus) {
+    if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
     busPixelSize = SEGMENT.length() * 3;
     if (!busPixelData || busPixelSize == 0) return FRAMETIME;
@@ -10837,6 +10841,7 @@ uint16_t IRAM_ATTR mode_AkemiPPA() {
   uint32_t busPixelSize = 0;
   Bus* bus = busses.getBus(0);
   if (bus) {
+    if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
     busPixelSize = SEGMENT.length() * 3;
     if (busPixelData == NULL || busPixelSize == 0) return mode_static();

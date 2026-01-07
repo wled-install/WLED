@@ -62,6 +62,7 @@ bool ArtNetReceiver::begin(uint16_t _init_start_universe, UBaseType_t task_prior
   uint32_t busLedCount = 0;
 
   if (bus) {
+    if (!bus->isOk()) return false;
     busLedCount = bus->getLength();
     if (_totalUniverses == 0) {
       _totalUniverses = (busLedCount + (LEDS_PER_UNIVERSE - 1)) / LEDS_PER_UNIVERSE;
@@ -150,6 +151,7 @@ void ArtNetReceiver::_process_frame_internal() {
   if (xSemaphoreTake(busMutex, portMAX_DELAY) == pdTRUE) {
     Bus* bus = busses.getBus(0);
     if (bus) {
+      if (!bus->isOk()) return;
       uint8_t* busPixelData = bus->getPixelData();
       uint32_t busLedCount = bus->getLength();
       uint32_t bus_len_bytes = busLedCount * 3;

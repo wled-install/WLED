@@ -381,6 +381,7 @@ class BusNetwork : public Bus {
     uint8_t getColorOrder() const override {
       return _colorOrder;
     }
+    bool ensureCapacity(uint32_t requiredPixels);
 
     void cleanup();
 
@@ -399,6 +400,7 @@ class BusNetwork : public Bus {
     uint8_t             _fps_limit;
     uint32_t             _outputs;
     uint32_t            _leds_per_output;
+    uint32_t            _bufferCapacity = 0;
     const ColorOrderMap &_colorOrderMap;
 };
 

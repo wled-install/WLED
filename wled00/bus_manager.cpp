@@ -478,9 +478,21 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
       break;
   }
   _UDPchannels = _rgbw ? 4 : 3;
+
+  uint32_t minPixels = uint32_t(Segment::maxWidth * Segment::maxHeight);
+  uint32_t allocPixels = max(bc.count, minPixels);
+
+  _data = (byte*)heap_caps_calloc_prefer(
+    (allocPixels * _UDPchannels) + 15, sizeof(byte), 3,
+    MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
+    MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
+    MALLOC_CAP_INTERNAL
+  );
+
   // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-  _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
   if (_data == nullptr) return;
+  _bufferCapacity = allocPixels;
   _len = bc.count;
   _colorOrder = bc.colorOrder;
   IPAddress local = Network.localIP();
@@ -519,73 +531,109 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
 }
 
 void IRAM_ATTR_YN BusNetwork::setPixelColor(uint32_t pix, uint32_t c) {
-    if (pix >= _len) return;
-    if (_rgbw) c = autoWhiteCalc(c);
-    if (_cct >= 1900) c = colorBalanceFromKelvin(_cct, c); // color correction from CCT
+  if (pix >= _bufferCapacity) return;
+  if (pix >= _len) return;
+  if (_rgbw) c = autoWhiteCalc(c);
+  if (_cct >= 1900) c = colorBalanceFromKelvin(_cct, c); // color correction from CCT
 
-    uint32_t offset = pix * _UDPchannels;
-    uint8_t co = _colorOrderMap.getPixelColorOrder(pix + _start, _colorOrder);
-    #ifndef WLEDMM_REMAP_AT_OUTPUT
-    if (_colorOrder != co || _colorOrder != COL_ORDER_RGB) {
-        switch (co) {
-            case COL_ORDER_GRB:
-                _data[offset] = G(c); _data[offset+1] = R(c); _data[offset+2] = B(c);
-                break;
-            case COL_ORDER_RGB:
-                _data[offset] = R(c); _data[offset+1] = G(c); _data[offset+2] = B(c);
-                break;
-            case COL_ORDER_BRG:
-                _data[offset] = B(c); _data[offset+1] = R(c); _data[offset+2] = G(c);
-                break;
-            case COL_ORDER_RBG:
-                _data[offset] = R(c); _data[offset+1] = B(c); _data[offset+2] = G(c);
-                break;
-            case COL_ORDER_GBR:
-                _data[offset] = G(c); _data[offset+1] = B(c); _data[offset+2] = R(c);
-                break;
-            case COL_ORDER_BGR:
-                _data[offset] = B(c); _data[offset+1] = G(c); _data[offset+2] = R(c);
-                break;
-        }
-        if (_rgbw) _data[offset+3] = W(c);
-    } else {
-        _data[offset] = R(c); _data[offset+1] = G(c); _data[offset+2] = B(c);
-        if (_rgbw) _data[offset+3] = W(c);
+  uint32_t offset = pix * _UDPchannels;
+  uint8_t co = _colorOrderMap.getPixelColorOrder(pix + _start, _colorOrder);
+  #ifndef WLEDMM_REMAP_AT_OUTPUT
+  if (_colorOrder != co || _colorOrder != COL_ORDER_RGB) {
+    switch (co) {
+    case COL_ORDER_GRB:
+      _data[offset] = G(c); _data[offset + 1] = R(c); _data[offset + 2] = B(c);
+      break;
+    case COL_ORDER_RGB:
+      _data[offset] = R(c); _data[offset + 1] = G(c); _data[offset + 2] = B(c);
+      break;
+    case COL_ORDER_BRG:
+      _data[offset] = B(c); _data[offset + 1] = R(c); _data[offset + 2] = G(c);
+      break;
+    case COL_ORDER_RBG:
+      _data[offset] = R(c); _data[offset + 1] = B(c); _data[offset + 2] = G(c);
+      break;
+    case COL_ORDER_GBR:
+      _data[offset] = G(c); _data[offset + 1] = B(c); _data[offset + 2] = R(c);
+      break;
+    case COL_ORDER_BGR:
+      _data[offset] = B(c); _data[offset + 1] = G(c); _data[offset + 2] = R(c);
+      break;
     }
-    #else
+    if (_rgbw) _data[offset + 3] = W(c);
+  } else {
     _data[offset] = R(c); _data[offset + 1] = G(c); _data[offset + 2] = B(c);
     if (_rgbw) _data[offset + 3] = W(c);
-    #endif
+  }
+  #else
+  _data[offset] = R(c); _data[offset + 1] = G(c); _data[offset + 2] = B(c);
+  if (_rgbw) _data[offset + 3] = W(c);
+  #endif
 }
 
 uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint32_t pix) const {
-    if (pix >= _len) return 0;
-    uint32_t offset = pix * _UDPchannels;
-    uint8_t co = _colorOrderMap.getPixelColorOrder(pix + _start, _colorOrder);
+  if (pix >= _bufferCapacity) return 0;
+  if (pix >= _len) return 0;
+  uint32_t offset = pix * _UDPchannels;
+  uint8_t co = _colorOrderMap.getPixelColorOrder(pix + _start, _colorOrder);
 
-    uint8_t r = _data[offset + 0];
-    uint8_t g = _data[offset + 1];
-    uint8_t b = _data[offset + 2];
-    uint8_t w = _rgbw ? _data[offset + 3] : 0;
-    #ifndef WLEDMM_REMAP_AT_OUTPUT
-    switch (co) {
-        case COL_ORDER_GRB: return RGBW32(g, r, b, w);
-        case COL_ORDER_RGB: return RGBW32(r, g, b, w);
-        case COL_ORDER_BRG: return RGBW32(b, r, g, w);
-        case COL_ORDER_RBG: return RGBW32(r, b, g, w);
-        case COL_ORDER_GBR: return RGBW32(g, b, r, w);
-        case COL_ORDER_BGR: return RGBW32(b, g, r, w);
-        default: return RGBW32(r, g, b, w); // default to RGB order
-    }
-    #else
-    return RGBW32(r, g, b, w); // default to RGB order
-    #endif
+  uint8_t r = _data[offset + 0];
+  uint8_t g = _data[offset + 1];
+  uint8_t b = _data[offset + 2];
+  uint8_t w = _rgbw ? _data[offset + 3] : 0;
+  #ifndef WLEDMM_REMAP_AT_OUTPUT
+  switch (co) {
+  case COL_ORDER_GRB: return RGBW32(g, r, b, w);
+  case COL_ORDER_RGB: return RGBW32(r, g, b, w);
+  case COL_ORDER_BRG: return RGBW32(b, r, g, w);
+  case COL_ORDER_RBG: return RGBW32(r, b, g, w);
+  case COL_ORDER_GBR: return RGBW32(g, b, r, w);
+  case COL_ORDER_BGR: return RGBW32(b, g, r, w);
+  default: return RGBW32(r, g, b, w); // default to RGB order
+  }
+  #else
+  return RGBW32(r, g, b, w); // default to RGB order
+  #endif
+}
+
+bool BusNetwork::ensureCapacity(uint32_t requiredPixels) {
+  if (requiredPixels <= _bufferCapacity) return true;  // Already big enough
+
+  uint32_t newSize = (requiredPixels * _UDPchannels) + 15;
+  byte* newData = (byte*)heap_caps_calloc_prefer(
+    newSize, sizeof(byte), 3,
+    MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
+    MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
+    MALLOC_CAP_INTERNAL
+  );
+
+  if (newData == nullptr) return false;
+
+  // Copy existing data
+  if (_data) {
+    memcpy(newData, _data, _bufferCapacity * _UDPchannels);
+  }
+
+  // Atomic-ish swap
+  _valid = false;
+  vTaskDelay(pdMS_TO_TICKS(50));  // Let in-flight ops finish
+
+  byte* old = _data;
+  _data = newData;
+  _bufferCapacity = requiredPixels;
+  _valid = true;
+
+  if (old) heap_caps_free(old);
+  return true;
 }
 
 void IRAM_ATTR BusNetwork::show() {
   if (!WLED_CONNECTED) return;
   if (!_valid || !canShow()) return;
-  if (_len != _outputs * _leds_per_output) return;
+  if (uint32_t(Segment::maxWidth * Segment::maxHeight) < _len) _len = uint32_t(Segment::maxWidth * Segment::maxHeight);
+  if (!ensureCapacity(Segment::maxWidth * Segment::maxHeight)) {
+    return;
+  }
   _broadcastLock = true;
   realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _fps_limit, _colorOrder, false);
   _broadcastLock = false;
@@ -599,11 +647,15 @@ uint8_t BusNetwork::getPins(uint8_t* pinArray) const {
 }
 
 void BusNetwork::cleanup() {
-  _type = I_NONE;
   _valid = false;
+  _type = I_NONE;
+
+  vTaskDelay(pdMS_TO_TICKS(100));  // Let in-flight operations finish
+
   if (_data != nullptr) heap_caps_free(_data);
   _data = nullptr;
   _len = 0;
+  _bufferCapacity = 0;
 }
 
 // ***************************************************************************

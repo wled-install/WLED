@@ -19,7 +19,7 @@
 #include "wled.h"
 
 #ifndef ARTNETMAP_MAX_OUTPUTS
-#define ARTNETMAP_MAX_OUTPUTS 64
+#define ARTNETMAP_MAX_OUTPUTS 1024
 #endif
 
 class ArtNetMapUsermod : public Usermod {
@@ -29,7 +29,7 @@ private:
   // Configuration
   uint16_t numOutputs = 0;
   uint16_t startUniverse[ARTNETMAP_MAX_OUTPUTS];
-  uint16_t ledsPerOutput[ARTNETMAP_MAX_OUTPUTS];
+  uint32_t ledsPerOutput[ARTNETMAP_MAX_OUTPUTS];
 
   // Global settings
   char targetIP[16] = "255.255.255.255";
@@ -49,9 +49,9 @@ private:
   static const char _currentPreset[];
 
   // Calculate universes needed for LED count
-  uint16_t calcUniverses(uint16_t leds) {
+  uint16_t calcUniverses(uint32_t leds) {
     if (leds == 0) return 0;
-    uint16_t ledsPerUni = channelsPerUniverse / 3;
+    uint32_t ledsPerUni = channelsPerUniverse / 3;
     return (leds + ledsPerUni - 1) / ledsPerUni;
   }
 
@@ -83,7 +83,7 @@ private:
   }
 
   // Generate sequential outputs
-  void generateSequential(uint16_t count, uint16_t universesPerOutput, uint16_t leds) {
+  void generateSequential(uint16_t count, uint16_t universesPerOutput, uint32_t leds) {
     numOutputs = min((uint16_t)ARTNETMAP_MAX_OUTPUTS, count);
     for (uint16_t i = 0; i < numOutputs; i++) {
       startUniverse[i] = i * universesPerOutput;
@@ -128,7 +128,7 @@ private:
     File f = WLED_FS.open(filename, "r");
     if (!f) return false;
 
-    // Read metadata
+    // Read metadata line
     String line = f.readStringUntil('\n');
     StaticJsonDocument<128> doc;
     if (deserializeJson(doc, line)) {
@@ -141,30 +141,31 @@ private:
     strlcpy(targetIP, doc["ip"] | "255.255.255.255", sizeof(targetIP));
     padMode = doc["pad"] | 0;
 
-    // Read startUniverse array
+    // Read startUniverse array - parse manually to avoid JSON memory limits
     line = f.readStringUntil('\n');
-    DynamicJsonDocument arr1(1024);
-    if (!deserializeJson(arr1, line)) {
+    if (line.length() > 2 && line[0] == '[') {
       uint16_t i = 0;
-      for (JsonVariant v : arr1.as<JsonArray>()) {
-        if (i >= numOutputs) break;
-        startUniverse[i++] = v.as<uint16_t>();
+      char* ptr = (char*)line.c_str() + 1;  // Skip '['
+      while (i < numOutputs && *ptr && *ptr != ']') {
+        startUniverse[i++] = strtoul(ptr, &ptr, 10);
+        if (*ptr == ',') ptr++;  // Skip comma
       }
     }
 
-    // Read ledsPerOutput array
+    // Read ledsPerOutput array - parse manually
     line = f.readStringUntil('\n');
-    DynamicJsonDocument arr2(1024);
-    if (!deserializeJson(arr2, line)) {
+    if (line.length() > 2 && line[0] == '[') {
       uint16_t i = 0;
-      for (JsonVariant v : arr2.as<JsonArray>()) {
-        if (i >= numOutputs) break;
-        ledsPerOutput[i++] = v.as<uint16_t>();
+      char* ptr = (char*)line.c_str() + 1;  // Skip '['
+      while (i < numOutputs && *ptr && *ptr != ']') {
+        ledsPerOutput[i++] = strtoul(ptr, &ptr, 10);
+        if (*ptr == ',') ptr++;  // Skip comma
       }
     }
 
     f.close();
     strlcpy(currentPreset, name, sizeof(currentPreset));
+    USER_PRINTF("ArtNetMap: Loaded preset with %d outputs, first LED count: %lu\n", numOutputs, ledsPerOutput[0]);
     return true;
   }
 
@@ -192,9 +193,10 @@ public:
   }
 
   // Getters for external Art-Net code
+  inline bool isEnabled() { return enabled; }
   inline uint16_t getNumOutputs() { return numOutputs; }
   inline uint16_t getStartUniverse(uint16_t idx) { return idx < numOutputs ? startUniverse[idx] : 0; }
-  inline uint16_t getLedsPerOutput(uint16_t idx) { return idx < numOutputs ? ledsPerOutput[idx] : 0; }
+  inline uint32_t getLedsPerOutput(uint16_t idx) { return idx < numOutputs ? ledsPerOutput[idx] : 0; }
   inline uint16_t getUniversesForOutput(uint16_t idx) { return idx < numOutputs ? calcUniverses(ledsPerOutput[idx]) : 0; }
   inline const char* getTargetIP() { return targetIP; }
   inline uint16_t getChannelsPerUniverse() { return channelsPerUniverse; }
@@ -202,7 +204,7 @@ public:
 
   // Direct array access
   inline uint16_t* getStartUniverseArray() { return startUniverse; }
-  inline uint16_t* getLedsPerOutputArray() { return ledsPerOutput; }
+  inline uint32_t* getLedsPerOutputArray() { return ledsPerOutput; }
 
   void setup() override {
     if (!enabled) return;
@@ -312,10 +314,10 @@ public:
   }
 };
 
-// String constants
-const char ArtNetMapUsermod::_name[]          PROGMEM = "ArtNetMap";
-const char ArtNetMapUsermod::_enabled[]       PROGMEM = "enabled";
-const char ArtNetMapUsermod::_currentPreset[] PROGMEM = "currentPreset";
+// String constants (inline to avoid multiple definition when header included in multiple TUs)
+inline const char ArtNetMapUsermod::_name[]          PROGMEM = "ArtNetMap";
+inline const char ArtNetMapUsermod::_enabled[]       PROGMEM = "enabled";
+inline const char ArtNetMapUsermod::_currentPreset[] PROGMEM = "currentPreset";
 
 #ifndef USERMOD_ID_ARTNETMAP
 #define USERMOD_ID_ARTNETMAP 4200
@@ -325,7 +327,7 @@ const char ArtNetMapUsermod::_currentPreset[] PROGMEM = "currentPreset";
 // Web page implementation
 // ============================================================================
 
-void ArtNetMapUsermod::servePage(AsyncWebServerRequest* request) {
+inline void ArtNetMapUsermod::servePage(AsyncWebServerRequest* request) {
   AsyncResponseStream* response = request->beginResponseStream("text/html");
 
   response->print(F("<!DOCTYPE html><html><head>"
@@ -452,7 +454,7 @@ void ArtNetMapUsermod::servePage(AsyncWebServerRequest* request) {
     response->printf("<tr><td class='output-num'>%d</td>", i + 1);
     response->printf("<td class='output-name'>Output %d (%d-%d)</td>", i + 1, startUniverse[i], endUni);
     response->printf("<td><input type='number' class='uni-input' value='%d' onchange='updateRow(%d,this.value,null)'></td>", startUniverse[i], i);
-    response->printf("<td><input type='number' class='led-input' value='%d' onchange='updateRow(%d,null,this.value)'></td>", ledsPerOutput[i], i);
+    response->printf("<td><input type='number' class='led-input' value='%lu' onchange='updateRow(%d,null,this.value)'></td>", (unsigned long)ledsPerOutput[i], i);
     response->printf("<td class='uni-range'>U%d-%d</td>", startUniverse[i], endUni);
     response->printf("<td><button class='test-btn' onclick='testOutput(%d)'>Test</button></td></tr>", i);
   }
@@ -536,7 +538,7 @@ void ArtNetMapUsermod::servePage(AsyncWebServerRequest* request) {
 // API implementation
 // ============================================================================
 
-void ArtNetMapUsermod::handleApi(AsyncWebServerRequest* request) {
+inline void ArtNetMapUsermod::handleApi(AsyncWebServerRequest* request) {
   String action = request->arg("a");
 
   StaticJsonDocument<256> doc;
@@ -545,14 +547,14 @@ void ArtNetMapUsermod::handleApi(AsyncWebServerRequest* request) {
   if (action == "gen") {
     uint16_t count = request->arg("c").toInt();
     uint16_t unis = request->arg("u").toInt();
-    uint16_t leds = request->arg("l").toInt();
+    uint32_t leds = strtoul(request->arg("l").c_str(), NULL, 10);
     generateSequential(count, unis, leds);
-    USER_PRINTF("ArtNetMap: Generated %d outputs\n", count);
+    USER_PRINTF("ArtNetMap: Generated %d outputs with %lu LEDs each\n", count, leds);
   } else if (action == "upd") {
     uint16_t idx = request->arg("i").toInt();
     if (idx < numOutputs) {
       if (request->hasArg("u")) startUniverse[idx] = request->arg("u").toInt();
-      if (request->hasArg("l")) ledsPerOutput[idx] = request->arg("l").toInt();
+      if (request->hasArg("l")) ledsPerOutput[idx] = strtoul(request->arg("l").c_str(), NULL, 10);
     }
   } else if (action == "test") {
     testingOutput = request->arg("i").toInt();
