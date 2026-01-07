@@ -154,7 +154,7 @@ void ArtNetReceiver::_process_frame_internal() {
       if (!bus->isOk()) return;
       uint8_t* busPixelData = bus->getPixelData();
       uint32_t busLedCount = bus->getLength();
-      uint32_t bus_len_bytes = busLedCount * 3;
+      uint32_t bus_len_bytes = bus->getPixelDataSize();
 
       #if defined(CONFIG_IDF_TARGET_ESP32P4)
       // You will need p4_mul16x16.S for this to work.

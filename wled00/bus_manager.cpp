@@ -39,6 +39,19 @@ void setBitArray(uint8_t* byteArray, size_t numBits, bool value) {  // set all b
   else memset(byteArray, 0x00, len);
 }
 
+static inline void* allocAlignedBuffer(size_t size, uint32_t caps_primary, uint32_t caps_fallback = MALLOC_CAP_INTERNAL) {
+  size_t PPA_CACHE_LINE = 64;
+  size_t alignedSize = (size + PPA_CACHE_LINE - 1) & ~(PPA_CACHE_LINE - 1);
+
+  void* ptr = heap_caps_aligned_calloc(PPA_CACHE_LINE, alignedSize, 1, caps_primary);
+  if (!ptr && caps_fallback) {
+    ptr = heap_caps_aligned_calloc(PPA_CACHE_LINE, alignedSize, 1, caps_fallback);
+    USER_PRINTLN("Warning! allocAlignedBuffer hit fallback.");
+  }
+  return ptr;
+}
+
+
 //WLEDMM: #define DEBUGOUT(x) netDebugEnabled?NetDebug.print(x):Serial.print(x) not supported in this file as netDebugEnabled not in scope
 #if 0
 //colors.cpp
@@ -482,11 +495,10 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
   uint32_t minPixels = uint32_t(Segment::maxWidth * Segment::maxHeight);
   uint32_t allocPixels = max(bc.count, minPixels);
 
-  _data = (byte*)heap_caps_calloc_prefer(
-    (allocPixels * _UDPchannels) + 15, sizeof(byte), 3,
+  _data = (byte*)allocAlignedBuffer(
+    allocPixels * _UDPchannels,
     MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
-    MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
-    MALLOC_CAP_INTERNAL
+    MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD
   );
 
   // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
@@ -600,11 +612,10 @@ bool BusNetwork::ensureCapacity(uint32_t requiredPixels) {
   if (requiredPixels <= _bufferCapacity) return true;  // Already big enough
 
   uint32_t newSize = (requiredPixels * _UDPchannels) + 15;
-  byte* newData = (byte*)heap_caps_calloc_prefer(
-    newSize, sizeof(byte), 3,
+  byte* newData = (byte*)allocAlignedBuffer(
+    newSize,
     MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
-    MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
-    MALLOC_CAP_INTERNAL
+    MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD
   );
 
   if (newData == nullptr) return false;
@@ -676,7 +687,12 @@ BusParallelIO::BusParallelIO(BusConfig& bc, const ColorOrderMap& com) : Bus(bc.t
   }
   _channels = _rgbw ? 4 : 3;
   // _data = (byte*)heap_caps_calloc_prefer((bc.count * _UDPchannels) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-  _data = (byte*)heap_caps_calloc_prefer((bc.count * _channels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  // _data = (byte*)heap_caps_calloc_prefer((bc.count * _channels) + 15, sizeof(byte), 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD, MALLOC_CAP_INTERNAL);
+  _data = (byte*)allocAlignedBuffer(
+    bc.count * _channels,
+    MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD,
+    MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_32BIT | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SIMD
+  );
   if (_data == nullptr) return;
   _len = bc.count;
   _colorOrder = bc.colorOrder;

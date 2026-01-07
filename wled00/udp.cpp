@@ -685,13 +685,17 @@ static inline void processPixelData(
   uint_fast32_t bufferOffset,
   uint8_t bri,
   bool isRGBW,
-  uint8_t color_order
+  uint8_t color_order,
+  uint32_t srcPixelCount  // Add this parameter - total pixels in src buffer
 ) {
   const uint8_t bpp = isRGBW ? 4 : 3;
 
   #ifdef WLEDMM_REMAP_AT_OUTPUT
   uint32_t* mappingTable = strip.getCustomMappingTable();
-  const bool hasMappingTable = (mappingTable != nullptr);
+  uint32_t  mappingTableSize = strip.getCustomMappingTableSize();
+
+  // Must have valid table AND valid size
+  const bool hasMappingTable = (mappingTable != nullptr && mappingTableSize > 0);
   const bool needsColorReorder = (color_order != COL_ORDER_RGB);
   const bool fullBrightness = (bri == 255);
 
@@ -727,14 +731,38 @@ static inline void processPixelData(
   }
 
   // Slow path: mapping and/or color reorder
-  const uint16_t numPixels = packetSize / bpp;
+  const uint_fast16_t numPixels = packetSize / bpp;
   const uint32_t startPixel = bufferOffset / bpp;
 
   for (uint_fast16_t i = 0; i < numPixels; ++i) {
     const uint8_t* pixel;
+
     if (hasMappingTable) {
-      pixel = src + (mappingTable[startPixel + i] * bpp);
+      uint32_t idx = startPixel + i;
+
+      // Bounds check index into mapping table
+      if (idx >= mappingTableSize) {
+        dest += bpp;
+        continue;
+      }
+
+      uint32_t map = mappingTable[idx];
+
+      // Skip unmapped pixels (UINT32_MAX = no mapping)
+      if (map == UINT32_MAX) {
+        dest += bpp;
+        continue;
+      }
+
+      // Bounds check mapped pixel index into source buffer
+      if (map >= srcPixelCount) {
+        dest += bpp;
+        continue;
+      }
+
+      pixel = src + (map * bpp);
     } else {
+      // No mapping table, just color reorder
       pixel = src + bufferOffset + (i * bpp);
     }
 
@@ -751,7 +779,6 @@ static inline void processPixelData(
     }
     dest += bpp;
   }
-
   #else
   // No WLEDMM_REMAP_AT_OUTPUT - simple path
   #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -946,7 +973,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
       packet_buffer[8] = (packetSize >> 8) & 0xFF;
       packet_buffer[9] = packetSize & 0xFF;
 
-      processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+      processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
 
       if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN)) {
         DEBUG_PRINTLN(F("DDP writeTo error"));
@@ -1064,7 +1091,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
       packet_buffer[113] = (universe >> 8) & 0xFF;
       packet_buffer[114] = universe & 0xFF;
 
-      processPixelData(packet_buffer + E131_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+      processPixelData(packet_buffer + E131_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
 
       IPAddress dest = e131_multicast ? e131MulticastIP(universe) : client;
 
@@ -1134,7 +1161,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
     if (artnetMap && artnetMap->isEnabled() && artnetMap->getNumOutputs() > 0) {
       // Use usermod configuration - each output has its own start universe and LED count
       uint16_t numOutputs = artnetMap->getNumOutputs();
-
+      // length = artnetMap->getTotalLeds();
       for (uint_fast16_t output = 0; output < numOutputs; output++) {
         uint_fast16_t universe = artnetMap->getStartUniverse(output);
         uint_fast16_t output_leds = artnetMap->getLedsPerOutput(output);
@@ -1152,7 +1179,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
           packet_buffer[16] = (packetSize >> 8) & 0xFF;
           packet_buffer[17] = packetSize & 0xFF;
 
-          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
 
           if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
             USER_PRINTLN(F("Art-Net writeTo error"));
@@ -1191,9 +1218,9 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
 
           #ifdef REALTIME_TESTING_ZEROS
           uint8_t test_bri = 0;
-          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, test_bri, isRGBW, color_order);
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, test_bri, isRGBW, color_order, length);
           #else
-          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order);
+          processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
           #endif
 
           if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {

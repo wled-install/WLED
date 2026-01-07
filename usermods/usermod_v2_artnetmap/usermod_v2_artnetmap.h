@@ -73,15 +73,6 @@ private:
     return numOutputs > 0 ? maxUni + 1 : 0;
   }
 
-  // Get total LED count
-  uint32_t getTotalLeds() {
-    uint32_t total = 0;
-    for (uint16_t i = 0; i < numOutputs; i++) {
-      total += ledsPerOutput[i];
-    }
-    return total;
-  }
-
   // Generate sequential outputs
   void generateSequential(uint16_t count, uint16_t universesPerOutput, uint32_t leds) {
     numOutputs = min((uint16_t)ARTNETMAP_MAX_OUTPUTS, count);
@@ -183,6 +174,16 @@ private:
   void handleApi(AsyncWebServerRequest* request);
 
 public:
+
+  // Get total LED count
+  uint32_t getTotalLeds() {
+    uint32_t total = 0;
+    for (uint16_t i = 0; i < numOutputs; i++) {
+      total += ledsPerOutput[i];
+    }
+    return total;
+  }
+
 
   ArtNetMapUsermod(bool enabled) : Usermod("ArtNetMap", enabled) {
     // Initialize arrays

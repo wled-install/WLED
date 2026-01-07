@@ -1412,7 +1412,8 @@ bool Segment::ppaFill(uint32_t color) {
 
   const bool isRGBW = bus->hasWhite();
   const uint8_t bpp = isRGBW ? 4 : 3;
-  const uint32_t bufferSize = matrixWidth * matrixHeight * bpp;
+  // const uint32_t bufferSize = matrixWidth * matrixHeight * bpp;
+  const uint32_t bufferSize = bus->getPixelDataSize();
 
   // Convert WLED color (WRGB: W[31:24] R[23:16] G[15:8] B[7:0]) 
   // to PPA's ARGB8888 format
@@ -1888,6 +1889,54 @@ void WS2812FX::waitUntilIdle(void) {
 #else
   return;
 #endif
+}
+
+void WS2812FX::createLedmapBinaryCache() {
+  #ifndef WLED_DISABLE_2D
+  USER_PRINTLN(F("Creating ledmap binary caches..."));
+
+  for (uint8_t n = 0; n < 10; n++) {
+    char jsonFile[32], binFile[32];
+
+    if (n == 0) {
+      strcpy(jsonFile, "/ledmap.json");
+      strcpy(binFile, "/ledmap.bin");
+    } else {
+      sprintf(jsonFile, "/ledmap%d.json", n);
+      sprintf(binFile, "/ledmap%d.bin", n);
+    }
+
+    if (!WLED_FS.exists(jsonFile)) continue;
+
+    // Check if binary is up to date
+    File jf = WLED_FS.open(jsonFile, "r");
+    if (!jf) continue;
+    uint32_t jsonModTime = (uint32_t)jf.getLastWrite();
+    jf.close();
+
+    if (WLED_FS.exists(binFile)) {
+      File bf = WLED_FS.open(binFile, "r");
+      if (bf) {
+        uint32_t magic = 0, storedModTime = 0;
+        bf.read((uint8_t*)&magic, 4);
+        bf.seek(8);  // Skip width/height
+        bf.read((uint8_t*)&storedModTime, 4);
+        bf.close();
+
+        if (magic == 0x50414D4C && storedModTime == jsonModTime) {
+          USER_PRINTF("  %s: binary cache up to date\n", jsonFile);
+          continue;  // Already cached and valid
+        }
+      }
+    }
+
+    // Need to create/update binary cache - do a full deserialize which will save it
+    USER_PRINTF("  %s: creating binary cache...\n", jsonFile);
+    deserializeMap(n);
+  }
+
+  USER_PRINTLN(F("Ledmap binary cache complete"));
+  #endif
 }
 
 void WS2812FX::service() {
@@ -2583,166 +2632,197 @@ void WS2812FX::loadCustomPalettes() {
 
 //load custom mapping table from JSON file (called from finalizeInit() or deserializeState())
 bool WS2812FX::deserializeMap(uint8_t n) {
-  // 2D support creates its own ledmap (on the fly) if a ledmap.json exists it will overwrite built one.
-  // if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-    char fileName[32] = { '\0' };
-    //WLEDMM: als support segment name ledmaps
-    bool isFile = false;;
-    if (n < 10) {
-      strcpy_P(fileName, PSTR("/ledmap"));
-      if (n) sprintf(fileName + 7, "%d", n); //WLEDMM: trick to not include 0 in ledmap.json
-      strcat(fileName, ".json");
-      isFile = WLED_FS.exists(fileName);
-    } else { //WLEDMM add segment name as ledmap.name
-      uint8_t segment_index = 0;
-      for (segment& seg : _segments) {
-        if (n == 10 + segment_index && !isFile && seg.name != nullptr) {
-          sprintf_P(fileName, PSTR("/%s.json"), seg.name);
-          isFile = WLED_FS.exists(fileName);
+  #ifndef WLED_DISABLE_2D
+
+  // Build filenames
+  char jsonFile[32], binFile[32];
+  bool isFile = false;
+
+  if (n < 10) {
+    strcpy_P(jsonFile, PSTR("/ledmap"));
+    if (n) sprintf(jsonFile + 7, "%d", n);
+    strcat(jsonFile, ".json");
+
+    strcpy_P(binFile, PSTR("/ledmap"));
+    if (n) sprintf(binFile + 7, "%d", n);
+    strcat(binFile, ".bin");
+
+    isFile = WLED_FS.exists(jsonFile);
+  } else {
+    uint8_t segIdx = 0;
+    for (segment& seg : _segments) {
+      if (n == 10 + segIdx && seg.name != nullptr) {
+        sprintf_P(jsonFile, PSTR("/%s.json"), seg.name);
+        sprintf_P(binFile, PSTR("/%s.bin"), seg.name);
+        isFile = WLED_FS.exists(jsonFile);
+        break;
+      }
+      segIdx++;
+    }
+  }
+
+  if (!isFile) {
+    if (!isMatrix && !n) {
+      customMappingSize = 0;
+      loadedLedmap = 0;
+    }
+    return false;
+  }
+
+  uint16_t width = 0, height = 0;
+  uint32_t mapSize = 0;
+
+  // === TRY BINARY CACHE FIRST ===
+  if (WLED_FS.exists(binFile)) {
+    File f = WLED_FS.open(binFile, "r");
+    if (f) {
+      uint32_t magic = 0, storedModTime = 0;
+
+      f.read((uint8_t*)&magic, 4);
+      f.read((uint8_t*)&width, 2);
+      f.read((uint8_t*)&height, 2);
+      f.read((uint8_t*)&storedModTime, 4);
+
+      File jf = WLED_FS.open(jsonFile, "r");
+      uint32_t jsonModTime = jf ? (uint32_t)jf.getLastWrite() : 0;
+      if (jf) jf.close();
+
+      if (magic == 0x50414D4C && storedModTime == jsonModTime && width > 0 && height > 0) {
+        mapSize = (uint32_t)width * height;
+
+        if (customMappingTable) heap_caps_free(customMappingTable);
+        customMappingTable = (uint32_t*)heap_caps_malloc(mapSize * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+
+        if (customMappingTable && f.read((uint8_t*)customMappingTable, mapSize * sizeof(uint32_t)) == mapSize * sizeof(uint32_t)) {
+          customMappingSize = mapSize;
+          customMappingTableSize = mapSize;
+          loadedLedmap = n;
+          f.close();
+
+          if (isMatrix && (width != Segment::maxWidth || height != Segment::maxHeight)) {
+            Segment::maxWidth = width;
+            Segment::maxHeight = height;
+            resetSegments(true);
+          }
+
+          USER_PRINTF("Loaded %s from binary (%ux%u)\n", binFile, width, height);
+          return true;
         }
-        if (isFile) break;
-        segment_index++;
       }
+      f.close();
     }
+  }
 
-    if (!isFile) {
-      // erase custom mapping if selecting nonexistent ledmap.json (n==0)
-      //WLEDMM: doubt this is necessary as return false causes setupMatrix to deal with this !!!!
-      if (!isMatrix && !n) {
-        customMappingSize = 0;
-        loadedLedmap = 0; //WLEDMM
-      }
-      // xSemaphoreGive(busMutex);
-      return false;
-    }
+  // === JSON FALLBACK ===
+  if (!requestJSONBufferLock(7)) return false;
 
-    if (!requestJSONBufferLock(7)) return false;
+  File f = WLED_FS.open(jsonFile, "r");
+  if (!f) {
+    releaseJSONBufferLock();
+    return false;
+  }
 
-    // WLEDMM: before changing maps, make sure our strip is _not_ servicing effects in parallel
-    // if (strip.isServicing()) {
-    //   USER_PRINTLN(F("deserializeMap(): strip is still drawing effects, waiting ..."));
-    //   strip.waitUntilIdle();
-    // }
+  USER_PRINTF("Reading LED map from %s\n", jsonFile);
+  uint32_t jsonModTime = (uint32_t)f.getLastWrite();
 
-    //WLEDMM: change upstream code: do not load complete ledmaps in json as this blows up memory, use file read instead
-    //read the file
-    File f;
+  // Parse dimensions
+  char buf[32];
+  if (isMatrix) {
+    memset(buf, 0, sizeof(buf));
+    f.find("\"width\":");
+    f.readBytesUntil('\n', buf, sizeof(buf));
+    width = atoi(cleanUpName(buf));
 
-    f = WLED_FS.open(fileName, "r");
-    if (!f) {
-      releaseJSONBufferLock();
-      // xSemaphoreGive(busMutex);
-      return false; //if file does not exist just exit
-    }
-
-    USER_PRINT(F("Reading LED map from ")); //WLEDMM use USER_PRINT
-    USER_PRINTLN(fileName);
-
-    if (isMatrix) {
-      //WLEDMM: read width and height
-      memset(fileName, 0, sizeof(fileName));              // clear old buffer - readBytesUntil() does not terminate strings !!!
-      f.find("\"width\":");
-      f.readBytesUntil('\n', fileName, sizeof(fileName)); //hack: use fileName as we have this allocated already
-      uint16_t maxWidth = atoi(cleanUpName(fileName));
-      //DEBUG_PRINTF(" (\"width\": %s) ", fileName)
-
-      memset(fileName, 0, sizeof(fileName));              // clear old buffer
-      f.find("\"height\":");
-      f.readBytesUntil('\n', fileName, sizeof(fileName));
-      uint16_t maxHeight = atoi(cleanUpName(fileName));
-      //DEBUG_PRINTF(" (\"height\": %s) \n", fileName)
+    memset(buf, 0, sizeof(buf));
+    f.find("\"height\":");
+    f.readBytesUntil('\n', buf, sizeof(buf));
+    height = atoi(cleanUpName(buf));
 
     #ifndef WLEDMM_NO_MAP_RESET
-    //WLEDMM: support ledmap file properties width and height: if found change segment
-      if (maxWidth * maxHeight > 0) {
-        Segment::maxWidth = maxWidth;
-        Segment::maxHeight = maxHeight;
-        resetSegments(true); //WLEDMM not makeAutoSegments() as we only want to change bounds
-      } else
-        setUpMatrix(); //reset segment sizes to panels
-    #endif
+    if (width * height > 0) {
+      Segment::maxWidth = width;
+      Segment::maxHeight = height;
+      resetSegments(true);
+    } else {
+      setUpMatrix();
     }
-
-    USER_PRINTF("deserializeMap %d x %d\n", Segment::maxWidth, Segment::maxHeight);
-
-    //WLEDMM recreate customMappingTable if more space needed
-    if (Segment::maxWidth * Segment::maxHeight > customMappingTableSize) {
-      uint32_t size = max(ledmapMaxSize, uint32_t(Segment::maxWidth * Segment::maxHeight)); // TroyHacks
-      USER_PRINTF("deserializemap customMappingTable alloc %u from %u\n", size, customMappingTableSize);
-      //if (customMappingTable != nullptr) delete[] customMappingTable;
-      //customMappingTable = new(std::nothrow) uint16_t[size];
-
-      // don't use new / delete
-      if ((size > 0) && (customMappingTable != nullptr)) {
-      #if defined(ARDUINO_ARCH_ESP32)
-        customMappingTable = (uint32_t*)heap_caps_realloc_prefer(customMappingTable, size * sizeof(uint32_t), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
-      #else
-        customMappingTable = (uint32_t*)reallocf(customMappingTable, sizeof(uint32_t) * size);  // reallocf will free memory if it cannot resize
-      #endif
-      }
-      if ((size > 0) && (customMappingTable == nullptr)) { // second try
-        DEBUG_PRINTLN("deserializeMap: trying to get fresh memory block.");
-      #if defined(ARDUINO_ARCH_ESP32)
-        customMappingTable = (uint32_t*)heap_caps_calloc_prefer(size, sizeof(uint32_t), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
-      #else
-        customMappingTable = (uint16_t*)calloc(size, sizeof(uint16_t));
-      #endif
-        if (customMappingTable == nullptr) {
-          DEBUG_PRINTLN("deserializeMap: alloc failed!");
-          errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
-        }
-      }
-      if (customMappingTable != nullptr) customMappingTableSize = size;
-    }
-
-    if (customMappingTable != nullptr) {
-      customMappingSize = Segment::maxWidth * Segment::maxHeight;
-      // WLEDMM reset mapping table before loading
-      //memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint16_t)); // FFFF = no pixel
-
-    #ifndef WLEDMM_INVERSE_MAPS
-      for (unsigned i = 0; i < customMappingTableSize; i++) customMappingTable[i] = i;     // "neutral" 1:1 mapping
-    #else
-      memset(customMappingTable, UINT32_MAX, customMappingTableSize * sizeof(uint32_t)); // TroyHacks fill with equivelent to -1 (max uint32_t)
     #endif
+  }
 
-      //WLEDMM: find the map values
-      f.find("\"map\":[");
-      uint32_t i = 0;
-      do { //for each element in the array
-        int mapi = f.readStringUntil(',').toInt();
-        // USER_PRINTF(", %d(%d)", mapi, i);
+  if (width == 0) width = Segment::maxWidth;
+  if (height == 0) height = Segment::maxHeight;
+  mapSize = (uint32_t)Segment::maxWidth * Segment::maxHeight;
 
-      #ifndef WLEDMM_INVERSE_MAPS
-        if (i < customMappingSize) customMappingTable[i++] = (uint32_t)(mapi < 0 ? UINT32_MAX : mapi);  // WLEDMM do not write past array bounds
-      #else
-        if (i < customMappingSize) customMappingTable[mapi] = (uint32_t)(i++);  // Reverse map logic - instead of every position, we only have the remapped ones
-      #endif
+  USER_PRINTF("deserializeMap %d x %d\n", Segment::maxWidth, Segment::maxHeight);
 
-      } while (f.available());
+  // Allocate
+  if (mapSize > customMappingTableSize) {
+    uint32_t size = max(ledmapMaxSize, mapSize);
+    USER_PRINTF("deserializeMap alloc %u from %u\n", size, customMappingTableSize);
 
-      loadedLedmap = n;
+    if (customMappingTable) heap_caps_free(customMappingTable);
+    customMappingTable = (uint32_t*)heap_caps_malloc(size * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+
+    if (!customMappingTable) {
+      USER_PRINTLN(F("deserializeMap: alloc failed!"));
+      errorFlag = ERR_LOW_MEM;
       f.close();
-      USER_PRINTF("Custom ledmap: %d size=%d\n", loadedLedmap, customMappingSize);
-    #ifdef WLED_DEBUG_MAPS
-      for (uint32_t j = 0; j < customMappingSize; j++) { // fixing a minor warning: declaration of 'i' shadows a previous local
-        if (!(j % Segment::maxWidth)) DEBUG_PRINTLN();
-        DEBUG_PRINTF("%4d,", customMappingTable[j]);
-      }
-      DEBUG_PRINTLN();
-    #endif
-
-    } else { // memory allocation error
-      customMappingTableSize = 0;
-      USER_PRINTLN(F("Deserializemap: Ledmap alloc error."));
-      USER_FLUSH();
+      releaseJSONBufferLock();
+      return false;
     }
-  //   xSemaphoreGive(busMutex);
-  // }
+    customMappingTableSize = size;
+  }
+
+  customMappingSize = mapSize;
+
+  // Initialize
+  #ifndef WLEDMM_INVERSE_MAPS
+  for (uint32_t i = 0; i < customMappingTableSize; i++) customMappingTable[i] = i;
+  #else
+  memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint32_t));
+  #endif
+
+  // Parse map
+  f.seek(0);
+  f.find("\"map\":[");
+  uint32_t i = 0;
+  do {
+    int mapi = f.readStringUntil(',').toInt();
+    #ifndef WLEDMM_INVERSE_MAPS
+    if (i < customMappingSize) customMappingTable[i++] = (uint32_t)(mapi < 0 ? UINT32_MAX : mapi);
+    #else
+    if (i < customMappingSize && mapi >= 0 && (uint32_t)mapi < customMappingSize) customMappingTable[mapi] = i++;
+    #endif
+  } while (f.available());
+
+  loadedLedmap = n;
+  f.close();
+
+  USER_PRINTF("Custom ledmap: %d size=%u\n", loadedLedmap, customMappingSize);
+
+  // === SAVE BINARY CACHE ===
+  size_t needed = 12 + mapSize * sizeof(uint32_t);
+  if (WLED_FS.totalBytes() - WLED_FS.usedBytes() > needed + 10240) {
+    File bf = WLED_FS.open(binFile, "w");
+    if (bf) {
+      uint32_t magic = 0x50414D4C;
+      bf.write((uint8_t*)&magic, 4);
+      bf.write((uint8_t*)&width, 2);
+      bf.write((uint8_t*)&height, 2);
+      bf.write((uint8_t*)&jsonModTime, 4);
+      bf.write((uint8_t*)customMappingTable, mapSize * sizeof(uint32_t));
+      bf.close();
+      USER_PRINTF("Saved binary cache %s\n", binFile);
+    }
+  }
+
   releaseJSONBufferLock();
   return true;
-}
 
+  #else
+  return false;
+  #endif
+}
 
 WS2812FX* WS2812FX::instance = nullptr;
 

@@ -573,12 +573,9 @@ void background_loop_blocking(void* pvParameters) {
     }
 
     if (loadLedmap) {
-      if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-        if (!strip.deserializeMap(loadedLedmap) && strip.isMatrix) strip.setUpMatrix();
-        strip.enumerateLedmaps(); //WLEDMM
-        loadLedmap = false;
-      }
-      xSemaphoreGive(busMutex);
+      if (strip.isMatrix && !strip.deserializeMap(loadedLedmap)) strip.setUpMatrix();
+      // strip.enumerateLedmaps(); //WLEDMM TroyHacks: Removed in favor of cache maps.
+      loadLedmap = false;
     }
 
     if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
@@ -1748,7 +1745,9 @@ void WLED::setup() {
     if (sdcarderr == ESP_OK) {
       ImageCacheManager::getInstance().startPreload("/sdcard");
     }
-      
+
+    strip.createLedmapBinaryCache();
+
     xSemaphoreGive(busMutex);
 
     xTaskCreatePinnedToCore(

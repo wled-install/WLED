@@ -139,7 +139,7 @@ inline bool ppaEffectBegin(PPAEffectContext& ctx) {
   if (!bus->isOk()) return false;
 
   ctx.busPixelData = bus->getPixelData();
-  ctx.busPixelSize = ctx.max_width * ctx.max_height * 3;
+  ctx.busPixelSize = bus->getPixelDataSize();
 
   if (ctx.busPixelData == nullptr || ctx.busPixelSize == 0) {
     ctx.valid = false;
@@ -9751,7 +9751,7 @@ uint16_t mode_PPA_IMAGEPLAYER() {
   if (bus) {
     if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
-    busPixelSize = SEGMENT.length() * 3;
+    busPixelSize = bus->getPixelDataSize();
     if (busPixelData == NULL || busPixelSize == 0) return 1;
   } else {
     return 1;
@@ -10274,7 +10274,7 @@ uint16_t mode_PRO_LINK() {
   if (bus) {
     if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
-    busPixelSize = SEGMENT.length() * 3;
+    busPixelSize = bus->getPixelDataSize();
     if (!busPixelData || busPixelSize == 0) return 1;
   } else {
     return 1;
@@ -10576,7 +10576,7 @@ uint16_t mode_DJLight_Circles(void) {
   if (bus) {
     if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
-    busPixelSize = SEGMENT.length() * 3;
+    busPixelSize = bus->getPixelDataSize();
     if (!busPixelData || busPixelSize == 0) return FRAMETIME;
   } else {
     return FRAMETIME;
@@ -10786,7 +10786,7 @@ uint16_t mode_DJLight_Circles(void) {
     srm_config.in.pic_h = rows;
     srm_config.in.block_w = qw;
     srm_config.in.block_h = qh;
-    srm_config.out.block_offset_x = qw;
+    srm_config.out.block_offset_x = cols - qw;
     srm_config.out.block_offset_y = 0;
     srm_config.mirror_x = true;
     srm_config.mirror_y = false;
@@ -10796,7 +10796,7 @@ uint16_t mode_DJLight_Circles(void) {
     srm_config.in.block_w = cols;
     srm_config.in.block_h = qh;
     srm_config.out.block_offset_x = 0;
-    srm_config.out.block_offset_y = qh;
+    srm_config.out.block_offset_y = rows - qh;
     srm_config.mirror_x = false;
     srm_config.mirror_y = true;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config));
@@ -10843,7 +10843,7 @@ uint16_t IRAM_ATTR mode_AkemiPPA() {
   if (bus) {
     if (!bus->isOk()) return false;
     busPixelData = bus->getPixelData();
-    busPixelSize = SEGMENT.length() * 3;
+    busPixelSize = bus->getPixelDataSize();
     if (busPixelData == NULL || busPixelSize == 0) return mode_static();
   } else {
     return mode_static();

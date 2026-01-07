@@ -337,6 +337,7 @@ void handleDMXData(uint16_t uni, uint16_t dmxChannels, uint8_t* e131_data, uint8
           if (bus) {
             if (!bus->isOk()) return;
             busPixelData = bus->getPixelData();
+            busPixelSize = bus->getPixelDataSize();
             if (busPixelData == NULL || busPixelSize == 0) return;
           } else {
             return;

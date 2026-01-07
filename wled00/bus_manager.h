@@ -160,8 +160,9 @@ class Bus {
     inline  bool     isOffRefreshRequired() const { return _needsRefresh; }
     //inline  bool     containsPixel(uint32_t pix) const { return pix >= _start && pix < _start+_len; } // WLEDMM not used, plus wrong - it does not consider skipped pixels
     virtual uint32_t getMaxPixels() const { return MAX_LEDS_PER_BUS; }
-    virtual byte*    getPixelData() { return nullptr; } // TroyHacks
-
+    virtual byte* getPixelData() { return nullptr; } // TroyHacks
+    virtual uint32_t getPixelDataSize() { return 0; } // TroyHacks
+    static constexpr size_t PPA_CACHE_LINE = 64;
     virtual bool hasRGB() const {
       if ((_type >= TYPE_WS2812_1CH && _type <= TYPE_WS2812_WWA) || _type == TYPE_ANALOG_1CH || _type == TYPE_ANALOG_2CH || _type == TYPE_ONOFF) return false;
       return true;
@@ -351,6 +352,16 @@ class BusNetwork : public Bus {
 
     byte* getPixelData() override { return _data; }
     
+    uint32_t getPixelDataSize() override {
+      uint32_t rawSize = _len * (_rgbw ? 4 : 3);
+      #if defined(SOC_PPA_SUPPORTED)
+      // Always return aligned size on P4
+      return (rawSize + PPA_CACHE_LINE - 1) & ~(PPA_CACHE_LINE - 1);
+      #else
+      return rawSize;
+      #endif
+    }
+
     void show();
 
     bool canShow() override {
@@ -418,6 +429,16 @@ public:
   uint32_t __attribute__((pure)) getPixelColorRestored(uint32_t pix) const override { return getPixelColor(pix); }  // WLEDMM BusNetwork ignores brightness
 
   byte* getPixelData() override { return _data; }
+
+  uint32_t getPixelDataSize() override {
+    uint32_t rawSize = _len * (_rgbw ? 4 : 3);
+    #if defined(SOC_PPA_SUPPORTED)
+    // Always return aligned size on P4
+    return (rawSize + PPA_CACHE_LINE - 1) & ~(PPA_CACHE_LINE - 1);
+    #else
+    return rawSize;
+    #endif
+  }
 
   void show();
 
