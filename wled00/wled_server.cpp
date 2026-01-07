@@ -207,13 +207,53 @@ void initServer()
 
   // "/settings/settings.js&p=x" request also handled by serveSettings()
 
-  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (handleIfNoneMatchCacheHeader(request)) return;
-    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/css", PAGE_settingsCss, PAGE_settingsCss_length);
-    response->addHeader(FPSTR(s_content_enc),"gzip");
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", PAGE_settingsCss, PAGE_settingsCss_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
     setStaticContentCacheHeaders(response);
     request->send(response);
   });
+
+  server.on("/ace.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (handleIfNoneMatchCacheHeader(request)) return;
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", aceJs, aceJs_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
+    setStaticContentCacheHeaders(response);
+    request->send(response);
+    });
+
+  server.on("/mode-html.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (handleIfNoneMatchCacheHeader(request)) return;
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", modehtmlJs, modehtmlJs_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
+    setStaticContentCacheHeaders(response);
+    request->send(response);
+    });
+
+  server.on("/worker-html.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (handleIfNoneMatchCacheHeader(request)) return;
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", workerhtmlJs, workerhtmlJs_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
+    setStaticContentCacheHeaders(response);
+    request->send(response);
+    });
+
+  server.on("/mode-json.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (handleIfNoneMatchCacheHeader(request)) return;
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", modejsonlJs, modejsonlJs_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
+    setStaticContentCacheHeaders(response);
+    request->send(response);
+    });
+
+  server.on("/worker-json.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (handleIfNoneMatchCacheHeader(request)) return;
+    AsyncWebServerResponse* response = request->beginResponse_P(200, "text/css", workerjsonJs, workerjsonJs_length);
+    response->addHeader(FPSTR(s_content_enc), "gzip");
+    setStaticContentCacheHeaders(response);
+    request->send(response);
+    });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request){
     if(!handleFileRead(request, "/favicon.ico"))
