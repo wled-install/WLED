@@ -10264,6 +10264,8 @@ uint16_t mode_PRO_LINK() {
   const uint32_t width = SEGMENT.virtualWidth();
   const uint32_t height = SEGMENT.virtualHeight();
 
+  if (width < 128 || height < 128) return mode_static(); // this isn't for little matrix sizes. <3
+
   // Allocate WLED Effect Data
   if (!SEGENV.allocateData(4)) return mode_static();
 
