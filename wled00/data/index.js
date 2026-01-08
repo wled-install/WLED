@@ -815,6 +815,18 @@ ${i.e32core1code ? inforow("Core1 rst reason  ☾",i.e32core1code, " "+i.e32core
 	}
 }
 
+function setLedmap() {
+  var sel = gId("ledmapSel");
+  var lck = gId("ledmapLock");
+  if (!sel || !lck) return;
+
+  var obj = {
+    "ledmap": parseInt(sel.value),
+    "lm_lock": lck.checked // This key "lm_lock" must match your server implementation
+  };
+  requestJson(obj);
+}
+
 function populateSegments(s)
 {
 	var cn = "";
@@ -970,11 +982,12 @@ function populateSegments(s)
 	gId('segutil2').style.display = "block"; // (segCount > 1) ? "block":"none"; // rsbtn parent // WLED-MM P4 Always show segment reset for production reasons. 
 
   if (Array.isArray(li.maps) && li.maps.length > 0) {
-    let cont = `Ledmap: <select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`;
+    // WLEDMM: added ID 'ledmapSel' and changed onchange to helper function
+    let cont = `<div class="sel-p">Ledmap: <select id="ledmapSel" class="sel-sg" onchange="setLedmap()">`;
+
     for (const k of li.maps) {
       let name;
       if (k.n) {
-        // Use name from JSON if available
         name = k.n;
       } else if (k.id === 0) {
         name = 'Default';
@@ -986,7 +999,19 @@ function populateSegments(s)
       const selected = (ledmapNr === k.id) ? ' selected' : '';
       cont += `<option value="${k.id}"${selected}>${name}</option>`;
     }
-    cont += "</select></div>";
+    cont += `</select>`;
+
+    // WLEDMM: Add Map Lock Checkbox
+    let isLocked = s.lm_lock ? "checked" : "";
+
+    cont += `<label class="check revchkl" style="margin-left:10px; display:inline-flex; align-items:center;">
+              Lock
+              <input type="checkbox" id="ledmapLock" onchange="setLedmap()" ${isLocked}>
+              <span class="checkmark"></span>
+             </label>`;
+
+    cont += `</div>`;
+
     gId("ledmap").innerHTML = cont;
     gId("ledmap").classList.remove('hide');
   } else {

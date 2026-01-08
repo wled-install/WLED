@@ -404,6 +404,10 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
   USER_PRINTF("deserializeState %s\n", temp.c_str());
   #endif
 
+  if (loadedLedmap_lock) {
+    root["ledmap"] = loadedLedmap;
+  }
+  
   bool stateResponse = root[F("v")] | false;
 
   //WLEDMM: store netDebug, also if not WLED_DEBUG 
@@ -552,6 +556,11 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
   //WLEDMM
   loadedLedmap = root[F("ledmap")] | loadedLedmap;
   loadLedmap = loadedLedmap>=0; //WLEDMM included 0 to switch back to default
+  if (root.containsKey("lm_lock")) {
+    loadedLedmap_lock = root[F("lm_lock")].as<bool>();
+    USER_PRINT(F("JSON lm_lock received. New state: "));
+    USER_PRINTLN(loadedLedmap_lock ? "LOCKED" : "UNLOCKED");
+  }
 
   byte ps = root[F("psave")];
   if (ps > 0 && ps < 251) savePreset(ps, nullptr, root);
@@ -773,6 +782,7 @@ void serializeState(JsonObject root, bool forPreset, bool includeBri, bool segme
     }
   }
   root[F("ledmap")] = loadedLedmap; //WLEDMM ledmaps will be stored in json so dropdown can display it
+  root[F("lm_lock")] = loadedLedmap_lock; //WLEDMM ledmap lock so we can override a preset's "use default map" or other specific LED map
 }
 
 // begin WLEDMM

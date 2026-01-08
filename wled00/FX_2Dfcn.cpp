@@ -43,7 +43,7 @@ void WS2812FX::setUpMatrix() {
       return;
     }
 
-    USER_PRINTF("setUpMatrix: %d x %d\n", Segment::maxWidth, Segment::maxHeight);
+    USER_PRINTF("setUpMatrix: %d x %d loadedLedmap = %d\n", Segment::maxWidth, Segment::maxHeight, loadedLedmap);
 
     // Check if mapping table is necessary
     bool needLedMap = (loadedLedmap > 0);
@@ -156,19 +156,20 @@ void WS2812FX::setUpMatrix() {
         #endif
 
         // Check if mapping table is identity (safety net for edge cases)
-        bool isIdentity = true;
-        for (uint32_t i = 0; i < customMappingSize && isIdentity; i++) {
-          if (customMappingTable[i] != i) isIdentity = false;
+        if (loadedLedmap == 0) {
+          bool isIdentity = true;
+          for (uint32_t i = 0; i < customMappingSize && isIdentity; i++) {
+            if (customMappingTable[i] != i) isIdentity = false;
+          }
+          if (isIdentity) {
+            free(customMappingTable);
+            customMappingTable = nullptr;
+            USER_PRINTF("setUpMatrix: customMappingTable is identity - dropping %u bytes.\n", customMappingTableSize * sizeof(uint32_t));
+            customMappingTableSize = 0;
+            customMappingSize = 0;
+            if (!loadedLedmap_lock) loadedLedmap = 0;
+          }
         }
-        if (isIdentity) {
-          free(customMappingTable);
-          customMappingTable = nullptr;
-          USER_PRINTF("setUpMatrix: customMappingTable is identity - dropping %u bytes.\n", customMappingTableSize * sizeof(uint32_t));
-          customMappingTableSize = 0;
-          customMappingSize = 0;
-          loadedLedmap = 0;
-        }
-
       } else {
         // Memory allocation error
         customMappingTableSize = 0;

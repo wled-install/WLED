@@ -29,6 +29,9 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
 
   //long vid = doc[F("vid")]; // 2010020
 
+  loadedLedmap = doc[F("loadedLedmap")] | loadedLedmap;
+  loadedLedmap_lock = doc[F("loadedLedmap_lock")].as<bool>() | loadedLedmap_lock;
+
   #ifdef WLED_USE_ETHERNET
   JsonObject ethernet = doc[F("eth")];
   CJSON(ethernetType, ethernet["type"]);
@@ -664,6 +667,8 @@ void serializeConfig() {
   rev.add(0); //minor settings revision
 
   doc[F("vid")] = VERSION;
+  doc[F("loadedLedmap")] = loadedLedmap;
+  doc[F("loadedLedmap_lock")] = loadedLedmap_lock;
 
   JsonObject id = doc.createNestedObject("id");
   id[F("mdns")] = cmDNS;

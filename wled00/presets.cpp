@@ -151,71 +151,6 @@ void handlePresets() {
   JsonObject fdo;
   const char* filename = getFileName(tmpPreset < 255);
 
-  /*
-   * The following code is no longer needed as handlePreset() is never run from
-   * network callback.
-   * **************************************************************************
-   *
-    //crude way to determine if this was called by a network request
-    uint8_t core = 1;
-    #ifdef ARDUINO_ARCH_ESP32
-      #if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S2)
-      // this does not make sense on single core
-      core = xPortGetCoreID();
-      // begin WLEDMM specific
-      //      loopTask (arduino main loop) sometimes runs on core #1
-      if ((core == 1) && (strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) == 0)) {
-        DEBUG_PRINTF("[applyPreset] called from loopTask on core %d; forcing core = 0\n", (int)core);
-        core = 0;
-      }
-      //      async_tcp (network requests) sometimes runs on core #0
-      if ((core == 0) && (strncmp(pcTaskGetTaskName(NULL), "async_tcp", 9) == 0)) {
-        DEBUG_PRINTF("[applyPreset] called from async_tcp on core %d; forcing core = 1\n", (int)core);
-        core = 1;
-      }
-      // end WLEDMM specific
-      #endif
-    #endif
-    //only allow use of fileDoc from the core responsible for network requests (AKA HTTP JSON API)
-    //do not use active network request doc from preset called by main loop (playlist, schedule, ...)
-    if (fileDoc && core && force && tmpPreset < 255) {
-      DEBUG_PRINT(F("Force applying preset: "));
-      DEBUG_PRINTLN(presetToApply);
-
-      presetToApply     = 0; //clear request for preset
-      callModeToApply   = 0;
-
-      // this will overwrite doc with preset content but applyPreset() is the last in such case and content of doc is no longer needed
-      errorFlag = readObjectFromFileUsingId(filename, tmpPreset, fileDoc) ? ERR_NONE : ERR_FS_PLOAD;
-
-      JsonObject fdo = fileDoc->as<JsonObject>();
-
-      //HTTP API commands
-      const char* httpwin = fdo["win"];
-      if (httpwin) {
-        String apireq = "win"; // reduce flash string usage
-        apireq += F("&IN&"); // internal call
-        apireq += httpwin;
-        handleSet(nullptr, apireq, false); // may call applyPreset() via PL=
-        setValuesFromFirstSelectedSeg(); // fills legacy values
-        changePreset = true;
-      } else {
-        if (!fdo["seg"].isNull()) unloadPlaylist(); // if preset contains "seg" we must unload playlist
-        if (!fdo["seg"].isNull() || !fdo["on"].isNull() || !fdo["bri"].isNull() || !fdo["ps"].isNull() || !fdo[F("playlist")].isNull()) changePreset = true;
-        fdo.remove("ps"); //remove load request for presets to prevent recursive crash
-
-        deserializeState(fdo, tmpMode, tmpPreset);  // may call applyPreset() which will overwrite presetToApply
-      }
-
-      if (!errorFlag && changePreset) presetCycCurr = currentPreset = tmpPreset;
-
-      colorUpdated(tmpMode);
-      return;
-    }
-
-    if (force) return; // something went wrong with force option (most likely WS request), quit and wait for async load
-  */
-  // allocate buffer
   if (!requestJSONBufferLock(9)) return;  // will also assign fileDoc
 
   presetToApply = 0; //clear request for preset
@@ -252,6 +187,10 @@ void handlePresets() {
   }
   // if (haveLocked) suspendStripService = false; // WLEDMM unlock effects after presets file was loaded
   fdo = fileDoc->as<JsonObject>();
+
+  if (loadedLedmap_lock) {
+    changePreset = true; // force the override
+  }
 
   //HTTP API commands
   const char* httpwin = fdo["win"];

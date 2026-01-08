@@ -2702,7 +2702,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   if (!isFile) {
     if (!n) {
       customMappingSize = 0;
-      loadedLedmap = 0;
+      if (!loadedLedmap_lock) loadedLedmap = 0;
       if (isMatrix) {
         setUpMatrix();
         resetSegments(true);
