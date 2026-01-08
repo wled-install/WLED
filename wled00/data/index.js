@@ -41,6 +41,8 @@ var ctx = null; // WLEDMM
 var ledmapNr = -1; //WLEDMM
 var ledmapFileNames = []; //WLEDMM
 let nodesData = []; //WLEDMM
+var cachedLedmapID = -1; // WLED-MM-P4
+var cachedLedmapData = null; // WLED-MM-P4
 let ibtglChecked = false; //WLEDMM include brightness checkbox default state
 let sbtglChecked = false; //WLEDMM segment bounds checkbox default state
 let sbchkChecked = false; //WLEDMM checked segments only checkbox default state 
@@ -1575,226 +1577,254 @@ function updateLen(s, draw=true) //WLEDMM conditionally draw segment view
 }
 
 //WLEDMM
+//WLEDMM
 function drawSegmentView() {
 
-	var px, py, pw, ph;
-	var topLeftX, topLeftY;
+  var px, py, pw, ph;
+  var topLeftX, topLeftY;
 
-	function initSegmentVars(p) {
-		px = parseInt(gId("seg"+p+"s").value); //first led x
-		if (!gId("seg"+p+"sY")) return false; //no draw for 1D segments (yet)
-		py = parseInt(gId("seg"+p+"sY").value); //first led y
-		pw = parseInt(gId("seg"+p+"e").value - gId("seg"+p+"s").value); //width
-		ph = parseInt(gId("seg"+p+"eY").value - gId("seg"+p+"sY").value); //height
-		// console.log("sergment", p, px, py, pw, ph);
-		topLeftX = px*ppL;
-		topLeftY = py*ppL;
-		// console.log("rect", p, topLeftX, topLeftY, pw*ppL, ph*ppL);
-		return true;
-	}
+  function initSegmentVars(p) {
+    px = parseInt(gId("seg" + p + "s").value); //first led x
+    if (!gId("seg" + p + "sY")) return false; //no draw for 1D segments (yet)
+    py = parseInt(gId("seg" + p + "sY").value); //first led y
+    pw = parseInt(gId("seg" + p + "e").value - gId("seg" + p + "s").value); //width
+    ph = parseInt(gId("seg" + p + "eY").value - gId("seg" + p + "sY").value); //height
+    topLeftX = px * ppL;
+    topLeftY = py * ppL;
+    return true;
+  }
 
-	//calc max height and width
-	var maxWidth = 0;
-	var maxHeight = 0;
-	for (let p=0; p<gId("segcont").children.length; p++) {
-		if (!initSegmentVars(p)) break;
-		maxWidth = Math.max(maxWidth, px + pw);
-		maxHeight = Math.max(maxHeight, py + ph);
-	}
+  //calc max height and width
+  var maxWidth = 0;
+  var maxHeight = 0;
+  for (let p = 0; p < gId("segcont").children.length; p++) {
+    if (!initSegmentVars(p)) break;
+    maxWidth = Math.max(maxWidth, px + pw);
+    maxHeight = Math.max(maxHeight, py + ph);
+  }
 
-	canvasPeek = gId("canvasPeek");
-	if (!ctx) {
-		//WLEDMM: add canvas, initialize and set UI
-		var canvas = gId("canvasSegments");
-		ctx = canvas.getContext('2d');
-	}
+  canvasPeek = gId("canvasPeek");
+  if (!ctx) {
+    //WLEDMM: add canvas, initialize and set UI
+    var canvas = gId("canvasSegments");
+    ctx = canvas.getContext('2d');
+  }
 
-	let segments = gId("Segments");
-	let windowWidth = Math.min(window.innerWidth*0.98, maxWidth*30);
-	let windowWidthFactor = maxWidth > maxHeight?1:maxWidth/maxHeight;
-	ctx.canvas.width = (segments.offsetWidth > 800?windowWidth:300) * windowWidthFactor; //Mobile and non pc mode gets 300, pc 800
-	ctx.canvas.height = ctx.canvas.width / maxWidth * maxHeight;
-	canvasPeek.width = ctx.canvas.width;
-	canvasPeek.height = ctx.canvas.height;
-	ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  let segments = gId("Segments");
+  let windowWidth = Math.min(window.innerWidth * 0.98, maxWidth * 30);
+  let windowWidthFactor = maxWidth > maxHeight ? 1 : maxWidth / maxHeight;
+  ctx.canvas.width = (segments.offsetWidth > 800 ? windowWidth : 300) * windowWidthFactor; //Mobile and non pc mode gets 300, pc 800
+  ctx.canvas.height = ctx.canvas.width / maxWidth * maxHeight;
+  canvasPeek.width = ctx.canvas.width;
+  canvasPeek.height = ctx.canvas.height;
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-	var ppL = ctx.canvas.width / maxWidth; //pixels per led
-	// console.log("dim", ctx.canvas.width , maxWidth, ctx.canvas.height , maxHeight, ppL);
+  var ppL = ctx.canvas.width / maxWidth; //pixels per led
 
-	var colorArray = [[255,0,0], [0,255,0], [0,0,255], [255,0,255], [255,165,0], [255,255,0]];
-	//               ["red",     "green",   "blue",    "magenta",   "orange",    "yellow"];
+  var colorArray = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255], [255, 165, 0], [255, 255, 0]];
+  //              ["red",      "green",   "blue",    "magenta",   "orange",    "yellow"];
 
-	for (let p=0; p<gId("segcont").children.length; p++) {
-		// console.log(gId("P"+p+"X").value, gId("P"+p+"Y").value, gId("P"+p+"W").value, gId("P"+p+"H").value, gId("P"+p+"B").value, gId("P"+p+"R").value, gId("P"+p+"V").value, gId("P"+p+"S").checked);
+  for (let p = 0; p < gId("segcont").children.length; p++) {
+    if (!initSegmentVars(p)) break;
 
-		if (!initSegmentVars(p)) break;
+    if (gId("segcont").children.length > 1) { //Estetic: Don't draw surrounding box if only one segment
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "white";
+      ctx.strokeRect(topLeftX, topLeftY, pw * ppL, ph * ppL);
+    }
 
-		if (gId("segcont").children.length > 1) { //Estetic: Don't draw surrounding box if only one segment
-			ctx.lineWidth = 3;
-			ctx.strokeStyle="white";
-			ctx.strokeRect(topLeftX, topLeftY, pw*ppL, ph*ppL);
-		}
+    var fx = parseInt(gId("seg" + p + "fx").value);
 
-		var fx = parseInt(gId("seg"+p+"fx").value);
+    var grp = parseInt(gId("seg" + p + "grp").value); //reverseX
+    var spc = parseInt(gId("seg" + p + "spc").value); //reverseX
 
-		var grp = parseInt(gId("seg"+p+"grp").value); //reverseX
-		var spc = parseInt(gId("seg"+p+"spc").value); //reverseX
+    var rx = gId("seg" + p + "rev").checked; //reverseX
+    var ry = gId("seg" + p + "rY").checked; //reverseY
+    var mx = gId("seg" + p + "mi").checked; //mirrorX
+    var my = gId("seg" + p + "mY").checked; //mirrorY
+    var tp = gId("seg" + p + "tp").checked; //mirrorY
 
-		var rx = gId("seg"+p+"rev").checked; //reverseX
-		var ry = gId("seg"+p+"rY").checked; //reverseY
-		var mx = gId("seg"+p+"mi").checked; //mirrorX
-		var my = gId("seg"+p+"mY").checked; //mirrorY
-		var tp = gId("seg"+p+"tp").checked; //mirrorY
+    ctx.lineWidth = 1;
+    if (mx) {
+      ctx.beginPath();
+      ctx.moveTo(topLeftX + pw / 2 * ppL, topLeftY);
+      ctx.lineTo(topLeftX + pw / 2 * ppL, topLeftY + ph * ppL);
+      ctx.stroke();
+    }
+    if (my) {
+      ctx.beginPath();
+      ctx.moveTo(topLeftX, topLeftY + ph / 2 * ppL);
+      ctx.lineTo(topLeftX + pw * ppL, topLeftY + ph / 2 * ppL);
+      ctx.stroke();
+    }
+    if (ry) {
+      ctx.beginPath();
+      ctx.moveTo(topLeftX + pw / 8 * ppL + 10, topLeftY + 10);
+      ctx.lineTo(topLeftX + pw / 8 * ppL, topLeftY);
+      ctx.lineTo(topLeftX + pw / 8 * ppL, topLeftY + ph * ppL);
+      ctx.lineTo(topLeftX + pw / 8 * ppL - 10, topLeftY + ph * ppL - 10);
+      ctx.stroke();
+    }
+    if (rx) {
+      ctx.beginPath();
+      ctx.moveTo(topLeftX + 10, topLeftY + ph / 8 * ppL + 10);
+      ctx.lineTo(topLeftX, topLeftY + ph / 8 * ppL);
+      ctx.lineTo(topLeftX + pw * ppL, topLeftY + ph / 8 * ppL);
+      ctx.lineTo(topLeftX + pw * ppL - 10, topLeftY + ph / 8 * ppL - 10);
+      ctx.stroke();
+    }
+    if (tp) {
+      ctx.beginPath();
+      ctx.moveTo(topLeftX, topLeftY);
+      ctx.lineTo(topLeftX + pw * ppL, topLeftY + ph * ppL);
+      ctx.stroke();
+    }
 
-		ctx.lineWidth = 1;
-		if (mx) {
-			ctx.beginPath();
-			ctx.moveTo(topLeftX + pw/2*ppL, topLeftY);
-			ctx.lineTo(topLeftX + pw/2*ppL, topLeftY + ph*ppL);
-			ctx.stroke();
-		}
-		if (my) {
-			ctx.beginPath();
-			ctx.moveTo(topLeftX, topLeftY + ph/2*ppL);
-			ctx.lineTo(topLeftX + pw*ppL, topLeftY + ph/2*ppL);
-			ctx.stroke();
-		}
-		if (ry) {
-			ctx.beginPath();
-			ctx.moveTo(topLeftX + pw/8*ppL+10, topLeftY+10);
-			ctx.lineTo(topLeftX + pw/8*ppL, topLeftY);
-			ctx.lineTo(topLeftX + pw/8*ppL, topLeftY + ph*ppL);
-			ctx.lineTo(topLeftX + pw/8*ppL-10, topLeftY + ph*ppL-10);
-			ctx.stroke();
-		}
-		if (rx) {
-			ctx.beginPath();
-			ctx.moveTo(topLeftX+10, topLeftY + ph/8*ppL+10);
-			ctx.lineTo(topLeftX, topLeftY + ph/8*ppL);
-			ctx.lineTo(topLeftX + pw*ppL, topLeftY + ph/8*ppL);
-			ctx.lineTo(topLeftX + pw*ppL-10, topLeftY + ph/8*ppL-10);
-			ctx.stroke();
-		}
-		if (tp) {
-			ctx.beginPath();
-			ctx.moveTo(topLeftX, topLeftY);
-			ctx.lineTo(topLeftX + pw*ppL, topLeftY + ph*ppL);
-			ctx.stroke();
-		}
+    let groupLength = grp + spc;
 
-		let groupLength = grp+spc;
+    //make a string from [x,y,z] adjusted by brightness
+    function rgbToString(colorRGB, brightness) {
+      function colorAdjust(color) { return 55 + 150 * color / 255 * brightness; }
+      return `rgb(${colorAdjust(colorRGB[0])},${colorAdjust(colorRGB[1])}, ${colorAdjust(colorRGB[2])})`;
+    }
 
-		//make a string from [x,y,z] adjusted by brightness
-		function rgbToString(colorRGB, brightness) {
-			function colorAdjust(color) {return 55+150*color/255*brightness;}
-			return `rgb(${colorAdjust(colorRGB[0])},${colorAdjust(colorRGB[1])}, ${colorAdjust(colorRGB[2])})`;
-		}
+    //draw leds
+    var counter = 0;
+    for (let y = 0; y < ph; y += groupLength) {
+      for (let x = 0; x < pw; x += groupLength) {
+        for (let j = 0; j < grp; j++) {   // grouping vertically
+          for (let g = 0; g < grp; g++) { // grouping horizontally
+            let xX = (x + g), yY = (y + j);
+            ctx.fillStyle = rgbToString(colorArray[p % colorArray.length], counter / ph / pw);
+            ctx.beginPath();
+            ctx.arc(topLeftX + ppL / 2 + xX * ppL, topLeftY + ppL / 2 + yY * ppL, ppL * 0.4, 0, 2 * Math.PI);
+            ctx.fill();
+            counter++;
+          }
+        }
+      }
+    }
 
-		//draw leds
-		var counter = 0;
-		for (let y=0; y<ph; y+=groupLength) {
-			for (let x=0; x<pw; x+=groupLength) {
-				for (let j = 0; j < grp; j++) {   // grouping vertically
-					for (let g = 0; g < grp; g++) { // grouping horizontally
-						let xX = (x+g), yY = (y+j);
-						ctx.fillStyle = rgbToString(colorArray[p%colorArray.length], counter/ph/pw);
-						ctx.beginPath();
-						ctx.arc(topLeftX + ppL/2 + xX*ppL, topLeftY + ppL/2 + yY * ppL, ppL*0.4, 0, 2 * Math.PI);
-						ctx.fill();
-						counter++;
-					}
-				}
-			}
-		}
+  } // for each segment
 
-	} // for each segment
+  if (gId("segcont").children.length > 1) { //Only show this if more then one segment
+    gId("MD").innerHTML = "total W*H=LC: " + maxWidth + " x " + maxHeight + " = " + maxWidth * maxHeight;
+  }
+  gId("MD").style.display = gId("segcont").children.length > 1 ? "inline" : "none"
 
-	if (gId("segcont").children.length > 1) { //Only show this if more then one segment
-		gId("MD").innerHTML = "total W*H=LC: " + maxWidth + " x " + maxHeight + " = " + maxWidth * maxHeight;
-	}
-	gId("MD").style.display = gId("segcont").children.length > 1?"inline":"none"
+  function post() {
+    for (let p = 0; p < gId("segcont").children.length; p++) {
+      if (!initSegmentVars(p)) break;
 
-	function post() {
-		for (let p=0; p<gId("segcont").children.length; p++) {
-			if (!initSegmentVars(p)) break;
-			
-			if (gId("segcont").children.length>1) { //only show number and name if more than one segment
-				ctx.font = '40px Arial'; 
-				ctx.fillStyle = "orange";
-				ctx.fillText(p, topLeftX + pw/2*ppL - 10, topLeftY + ph/2*ppL + 10);
+      if (gId("segcont").children.length > 1) { //only show number and name if more than one segment
+        ctx.font = '40px Arial';
+        ctx.fillStyle = "orange";
+        ctx.fillText(p, topLeftX + pw / 2 * ppL - 10, topLeftY + ph / 2 * ppL + 10);
 
-				//show name of fx
-				ctx.font = '20px Arial'; 
-				ctx.fillStyle = "white";
-				var name = eJson.find((o)=>{return o.id==fx}).name;
-				ctx.fillText(name, topLeftX+10, topLeftY + ph*ppL - 10);
-			}
-		}	
-	}
+        //show name of fx
+        ctx.font = '20px Arial';
+        ctx.fillStyle = "white";
+        var name = eJson.find((o) => { return o.id == fx }).name;
+        ctx.fillText(name, topLeftX + 10, topLeftY + ph * ppL - 10);
+      }
+    }
+  }
 
-	//draw the ledmap
+  // --- NEW LOGIC: Render function extracted from fetch callback ---
+  // This allows us to call it on fresh fetch OR cache hit
+  var renderMapData = function (ledmapJson) {
+    var counter = 0;
+    var noMap = [];
+    for (let i = 0; i < maxWidth * maxHeight; i++) noMap.push(i); //initially add all pixels in array
+    var colorArray = ["yellow", "green", "magenta", "orange"];
+
+    var customMappingTable = [];
+    for (let i = 0; i < maxWidth * maxHeight; i++) customMappingTable.push(-1); //init with noshow
+    for (let i = 0; i < maxWidth * maxHeight; i++)
+      if (ledmapJson["map"][i] >= 0) customMappingTable[ledmapJson["map"][i]] = i;
+
+    for (let i = 0; i < customMappingTable.length; i++) {
+      let mapIndex = customMappingTable[i];
+      if (mapIndex != -1) {
+        ctx.font = parseInt(ppL / 3) + 'px Arial';
+        ctx.fillStyle = "white";
+        if (lastinfo.outputs != null) {
+          var ledcount = 0;
+          for (let o = 0; o < lastinfo.outputs.length; o++) {
+            ledcount += lastinfo.outputs[o];
+            if (counter >= ledcount)
+              ctx.fillStyle = colorArray[o % colorArray.length];
+          }
+        }
+        x = mapIndex % maxWidth;
+        y = parseInt(mapIndex / maxWidth);
+        ctx.fillText(counter, topLeftX + ppL / 2 + x * ppL - ppL * 0.3, topLeftY + ppL / 2 + y * ppL);
+        //remove the found pixels from noMap
+        const index = noMap.indexOf(mapIndex);
+        if (index > -1) noMap.splice(index, 1); // 2nd parameter means remove one item only
+      }
+      counter++;
+    }
+    //WLEDMM: make pixels not in ledmap black
+    for (let i = 0; i < noMap.length; i++) {
+      x = noMap[i] % maxWidth;
+      y = parseInt(noMap[i] / maxWidth);
+      ctx.fillStyle = "black";
+      ctx.beginPath();
+      ctx.arc(topLeftX + ppL / 2 + x * ppL, topLeftY + ppL / 2 + y * ppL, ppL * 0.4, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  };
+
+  //draw the ledmap
   let mapExists = lastinfo.maps && lastinfo.maps.some(m => m.id === ledmapNr);
   if (ledmapNr >= 0 && mapExists && ctx) {
-		var fileName;
-		if (ledmapNr==0)
-			fileName = "ledmap.json"; //0 is ledmap.json, not ledmap0.json
-		else if (ledmapNr<10)
-			fileName = "ledmap"+ledmapNr+".json";
-		else
-			fileName = ledmapFileNames[ledmapNr-10];
 
-		fetchAndExecute((loc?`http://${locip}`:'.') + "/", fileName, null, function(parms,text) {
-			var ledmapJson = JSON.parse(text);
-			var counter = 0;
-			var noMap = [];
-			for (let i=0;i<maxWidth * maxHeight;i++) noMap.push(i); //initially add all pixels in array
-			var colorArray = ["yellow",     "green",     "magenta",   "orange"];
+    // --- NEW LOGIC: CACHE CHECK ---
+    if (ledmapNr === cachedLedmapID) {
+      // We already tried this ID. 
+      // If cachedLedmapData is valid, use it. 
+      // If it is null, it means previous fetch failed/404, so we skip fetch (stopping the loop).
+      if (cachedLedmapData) {
+        renderMapData(cachedLedmapData);
+      }
+      post();
+    } else {
+      // Cache Miss: Perform Fetch
+      var fileName;
+      if (ledmapNr == 0)
+        fileName = "ledmap.json"; //0 is ledmap.json, not ledmap0.json
+      else if (ledmapNr < 10)
+        fileName = "ledmap" + ledmapNr + ".json";
+      else
+        fileName = ledmapFileNames[ledmapNr - 10];
 
-			var customMappingTable = [];
-			for (let i=0;i<maxWidth * maxHeight;i++) customMappingTable.push(-1); //init with noshow
-			for (let i=0;i<maxWidth * maxHeight;i++)
-				if (ledmapJson["map"][i]>=0) customMappingTable[ledmapJson["map"][i]] = i;
-
-			for (let i=0;i<customMappingTable.length;i++) {
-				let mapIndex = customMappingTable[i];
-				if (mapIndex != -1) {
-					ctx.font = parseInt(ppL/3) + 'px Arial'; 
-					ctx.fillStyle = "white";
-					if (lastinfo.outputs!=null) {
-						var ledcount = 0;
-						for (let o=0; o<lastinfo.outputs.length;o++) {
-							ledcount+=lastinfo.outputs[o];
-							if (counter >= ledcount)
-								ctx.fillStyle = colorArray[o%colorArray.length];
-						}
-					}
-					x = mapIndex%maxWidth;
-					y = parseInt(mapIndex/maxWidth);
-					ctx.fillText(counter, topLeftX + ppL/2 + x*ppL-ppL*0.3, topLeftY + ppL/2 + y * ppL);
-					//remove the found pixels from noMap
-					const index = noMap.indexOf(mapIndex);
-					if (index > -1) noMap.splice(index, 1); // 2nd parameter means remove one item only
-				}
-				counter++;
-			}
-			//WLEDMM: make pixels not in ledmap black
-			for (let i=0;i<noMap.length;i++) {
-				x = noMap[i]%maxWidth;
-				y = parseInt(noMap[i]/maxWidth);
-				ctx.fillStyle = "black";
-				ctx.beginPath();
-				ctx.arc(topLeftX + ppL/2 + x*ppL, topLeftY + ppL/2 + y * ppL, ppL*0.4, 0, 2 * Math.PI);
-				ctx.fill();
-			}
-			post();
-		}, function(parms,error) { //error handling
-			console.log("drawledmap error fetching " + fileName +": ", error);
-			// downloadGHFile("LM", fileName, true, false); WLEDMM: remove as this has too much impact
-			post();
-		});
-	}
-	else
-		post();
+      fetchAndExecute((loc ? `http://${locip}` : '.') + "/", fileName, null, function (parms, text) {
+        try {
+          var ledmapJson = JSON.parse(text);
+          // Update cache on success
+          cachedLedmapData = ledmapJson;
+          cachedLedmapID = ledmapNr;
+          renderMapData(ledmapJson);
+        } catch (e) {
+          console.log("JSON Parse Error", e);
+          // Flag as checked but failed to prevent loops
+          cachedLedmapData = null;
+          cachedLedmapID = ledmapNr;
+        }
+        post();
+      }, function (parms, error) { //error handling
+        console.log("drawledmap error fetching " + fileName + ": ", error);
+        // Flag as checked but failed to prevent loops
+        cachedLedmapData = null;
+        cachedLedmapID = ledmapNr;
+        post();
+      });
+    }
+  }
+  else {
+    post();
+  }
 }
 
 // updates background color of currently selected preset
@@ -2651,8 +2681,9 @@ ${makePlSel(plJson[i].end?plJson[i].end:0, true)}
 	<span class="checkmark"></span>
 </label>`;
     if (Array.isArray(lastinfo.maps) && lastinfo.maps.length > 0) {
-      content += `<div class="lbl-l">Ledmap: <div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
+      content += `<div class="lbl-l">Ledmap: <div class="sel-p"><select class="sel-p" id="p${i}lmp"><!--<option value="">Unchanged</option>-->`;
       for (const k of lastinfo.maps) {
+        console.log(`k.id=${k.id} (${typeof k.id}), ledmapNr=${ledmapNr} i=${i} (${typeof ledmapNr}), match=${k.id == ledmapNr}`);
         let name;
         if (k.n) {
           name = k.n;
@@ -2663,7 +2694,7 @@ ${makePlSel(plJson[i].end?plJson[i].end:0, true)}
         } else {
           name = ledmapFileNames[k.id - 10] || ('ledmap' + k.id);
         }
-        const selected = (i > 0 && pJson[i].ledmap === k.id) ? ' selected' : '';
+        const selected = (ledmapNr === k.id) ? ' selected' : '';
         content += `<option value="${k.id}"${selected}>${name}</option>`;
       }
       content += "</select></div></div>";

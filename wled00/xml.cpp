@@ -1,6 +1,8 @@
 #include "wled.h"
 #include "wled_ethernet.h"
-
+#ifdef USERMOD_ARTNETMAP
+#include "../usermods/usermod_v2_artnetmap/usermod_v2_artnetmap.h"
+#endif
 /*
  * Sending XML status files to client
  */
@@ -240,6 +242,15 @@ void appendGPIOinfo() {
     oappendi(NUM_DIGITAL_PINS); //WLEDMM include pin 17 for Analog
   #endif
   oappend(SET_F(";"));
+
+  #ifdef USERMOD_ARTNETMAP
+  ArtNetMapUsermod* artnetMap = (ArtNetMapUsermod*)usermods.lookup(USERMOD_ID_ARTNETMAP);
+  if (artnetMap && artnetMap->isEnabled()) {
+    oappend(SET_F("d.artnetMap_enabled=1;"));
+  }
+  #else
+  oappend(SET_F("d.artnetMap_enabled=0;"));
+  #endif
 
   #ifdef SOC_PARLIO_SUPPORTED
   oappend(SET_F("d.max_parlio="));

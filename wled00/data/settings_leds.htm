@@ -507,26 +507,35 @@
               let max_leds_per_universe = uniSize;
               let max_leds_per_output = max_leds_per_universe * 8;
               let wled_universes = total_leds / uniSize;
-              if (outputs > 1) {
-                if (universes_per_output <= 8) {
-                  gId("dig" + n + "W").innerHTML += `<br />Set your ${netProtocol} Hardware to ${universes_per_output} universes per output.`;
-                  if (universes_per_output > 6) gId("dig" + n + "W").innerHTML += `(6 may be your max)`;
-                } else {
-                  gId("dig" + n + "W").innerHTML += `<br />Your ${netProtocol} Hardware likely does not allow ${universes_per_output} universes per output.<br />A max of 6 universes is common, sometimes 8, some are 4.`;
-                }
-                if (universes_per_output <= 8) {
-                  if (isRGBW) {
-                    let max_fps = (Math.floor(25000 / leds_per_output)) - 1;
-                    if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for SK6812 pixels. (Suggest max ${max_fps})`;
+              if (typeDef.name.includes("Art-Net") && d.artnetMap_enabled == 1) {
+                gId("dig" + n + "W").innerHTML += `<br />ArtNetMap is Enabled. Set your "Outputs" to 1 and your<br />physical LED count to both "Length" and "LEDs Per Output"`;
+                gId("dig" + n + "W").innerHTML += `<br />FPS limit will need manual tuning.`;
+                gId("dig" + n + "W").innerHTML += `<br />Access the advanced Art-Net mapping system <a href="/artnetmap" target=_blank">here.</a>`;
+              } else if (typeDef.name.includes("DDP")) {
+                gId("dig" + n + "W").innerHTML += `<br />DDP is Enabled. Set your "Outputs" to 1 and your<br />physical LED count to both "Length" and "LEDs Per Output"`;
+                gId("dig" + n + "W").innerHTML += `<br />FPS limit will need manual tuning.`;
+              } else {
+                if (outputs > 1) {
+                  if (universes_per_output <= 8) {
+                    gId("dig" + n + "W").innerHTML += `<br />Set your ${netProtocol} Hardware to ${universes_per_output} universes per output.`;
+                    if (universes_per_output > 6) gId("dig" + n + "W").innerHTML += `(6 may be your max)`;
                   } else {
-                    let max_fps = (Math.floor(33333 / leds_per_output)) - 1;
-                    if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for WS281x pixels. (Suggest max ${max_fps})`;
+                    gId("dig" + n + "W").innerHTML += `<br />Your ${netProtocol} Hardware likely does not allow ${universes_per_output} universes per output.<br />A max of 6 universes is common, sometimes 8, some are 4.`;
                   }
+                  if (universes_per_output <= 8) {
+                    if (isRGBW) {
+                      let max_fps = (Math.floor(25000 / leds_per_output)) - 1;
+                      if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for SK6812 pixels. (Suggest max ${max_fps})`;
+                    } else {
+                      let max_fps = (Math.floor(33333 / leds_per_output)) - 1;
+                      if (fps_limit > max_fps) gId("dig" + n + "W").innerHTML += `<br />FPS limit may be too high for WS281x pixels. (Suggest max ${max_fps})`;
+                    }
+                  }
+                } else if (outputs == 1) {
+                  gId("dig" + n + "W").innerHTML += `<br />WLED/FPP-style ${netProtocol} output enabled.`;
+                } else if (outputs < 1) {
+                  gId("dig" + n + "W").innerHTML += "<br />You need at least 1 output!";
                 }
-              } else if (outputs == 1) {
-                gId("dig" + n + "W").innerHTML += `<br />WLED/FPP-style ${netProtocol} output enabled.`;
-              } else if (outputs < 1) {
-                gId("dig" + n + "W").innerHTML += "<br />You need at least 1 output!";
               }
 
               if (outputs * leds_per_output != total_leds) {
