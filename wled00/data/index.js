@@ -967,15 +967,29 @@ function populateSegments(s)
 	if (!isM && !noNewSegs && (cfg.comp.seglen?parseInt(gId(`seg${lSeg}s`).value):0)+parseInt(gId(`seg${lSeg}e`).value)<ledCount) gId(`segr${lSeg}`).classList.remove("hide");
 	gId('segutil2').style.display = "block"; // (segCount > 1) ? "block":"none"; // rsbtn parent // WLED-MM P4 Always show segment reset for production reasons. 
 
-	if (Array.isArray(li.maps) && li.maps.length>0) { //WLEDMM >0 instead of 1 to show also first ledmap. Attention: WLED AC has isM check, in MM Matrices are supported so do not check on isM
-		let cont = `Ledmap: <select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`; //WLEDMM remove <option value="" selected>Unchanged</option>
-		for (const k of (li.maps||[])) cont += `<option value="${k.id}"${(i>0 && ledmapNr==k.id)?" selected":""}>${k.id==0?'Default':(k.id<10?'ledmap'+k.id+'.json':ledmapFileNames[k.id-10])}</option>`; //WLEDMM set ledmap selected, use ledmapFileNames
-		cont += "</select></div>";
-		gId("ledmap").innerHTML = cont;
-		gId("ledmap").classList.remove('hide');
-	} else {
-		gId("ledmap").classList.add('hide');
-	}
+  if (Array.isArray(li.maps) && li.maps.length > 0) {
+    let cont = `Ledmap: <select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`;
+    for (const k of li.maps) {
+      let name;
+      if (k.n) {
+        // Use name from JSON if available
+        name = k.n;
+      } else if (k.id === 0) {
+        name = 'Default';
+      } else if (k.id < 10) {
+        name = 'ledmap' + k.id + '.json';
+      } else {
+        name = ledmapFileNames[k.id - 10] || ('ledmap' + k.id);
+      }
+      const selected = (ledmapNr === k.id) ? ' selected' : '';
+      cont += `<option value="${k.id}"${selected}>${name}</option>`;
+    }
+    cont += "</select></div>";
+    gId("ledmap").innerHTML = cont;
+    gId("ledmap").classList.remove('hide');
+  } else {
+    gId("ledmap").classList.add('hide');
+  }
 }
 
 function populateEffects()
@@ -2636,11 +2650,24 @@ ${makePlSel(plJson[i].end?plJson[i].end:0, true)}
 	<input type="checkbox" id="p${i}sbchk" ${sbchkChecked?"checked":""}> <!--WLEDMM-->
 	<span class="checkmark"></span>
 </label>`;
-		if (Array.isArray(lastinfo.maps) && lastinfo.maps.length>0) { //WLEDMM >0 instead of 1 to show also first ledmap. Attention: WLED AC has isM check, in MM Matrices are supported so do not check on isM
-			content += `<div class="lbl-l">Ledmap: <div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
-			for (const k of (lastinfo.maps||[])) content += `<option value="${k.id}"${(i>0 && pJson[i].ledmap==k.id)?" selected":""}>${k.id==0?'Default':(k.id<10?'ledmap'+k.id+'.json':ledmapFileNames[k.id-10])}</option>`;
-			content += "</select></div></div>";
-		}
+    if (Array.isArray(lastinfo.maps) && lastinfo.maps.length > 0) {
+      content += `<div class="lbl-l">Ledmap: <div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
+      for (const k of lastinfo.maps) {
+        let name;
+        if (k.n) {
+          name = k.n;
+        } else if (k.id === 0) {
+          name = 'Default';
+        } else if (k.id < 10) {
+          name = 'ledmap' + k.id + '.json';
+        } else {
+          name = ledmapFileNames[k.id - 10] || ('ledmap' + k.id);
+        }
+        const selected = (i > 0 && pJson[i].ledmap === k.id) ? ' selected' : '';
+        content += `<option value="${k.id}"${selected}>${name}</option>`;
+      }
+      content += "</select></div></div>";
+    }
 	}
 
 	return `<input type="text" class="ptxt ${i==0?'show':''}" id="p${i}txt" autocomplete="off" maxlength=32 value="${(i>0)?pName(i):""}" placeholder="Enter name..."/>

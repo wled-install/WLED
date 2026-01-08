@@ -1895,7 +1895,7 @@ void WS2812FX::createLedmapBinaryCache() {
   #ifndef WLED_DISABLE_2D
   USER_PRINTLN(F("Creating ledmap binary caches..."));
 
-  for (uint8_t n = 0; n < 10; n++) {
+  for (uint8_t n = 0; n < WLED_MAX_LEDMAPS; n++) {
     char jsonFile[32], binFile[32];
 
     if (n == 0) {
@@ -1914,25 +1914,63 @@ void WS2812FX::createLedmapBinaryCache() {
     uint32_t jsonModTime = (uint32_t)jf.getLastWrite();
     jf.close();
 
+    bool needsRebuild = true;
+
     if (WLED_FS.exists(binFile)) {
       File bf = WLED_FS.open(binFile, "r");
-      if (bf) {
+      if (bf && bf.size() >= 44) {
         uint32_t magic = 0, storedModTime = 0;
         bf.read((uint8_t*)&magic, 4);
         bf.seek(8);  // Skip width/height
         bf.read((uint8_t*)&storedModTime, 4);
-        bf.close();
 
         if (magic == 0x50414D4C && storedModTime == jsonModTime) {
           USER_PRINTF("  %s: binary cache up to date\n", jsonFile);
-          continue;  // Already cached and valid
+          needsRebuild = false;
+
+          // Read the name from existing cache
+          if (n > 0) {  // ledmapNames is [WLED_MAX_LEDMAPS-1], index 0 = ledmap1
+            char name[33] = { 0 };
+            bf.read((uint8_t*)name, 32);
+            name[32] = '\0';
+
+            // Free old name if exists
+            if (ledmapNames[n - 1]) {
+              delete[] ledmapNames[n - 1];
+              ledmapNames[n - 1] = nullptr;
+            }
+
+            // Allocate and copy if name is not empty
+            if (name[0] != '\0') {
+              ledmapNames[n - 1] = new char[strlen(name) + 1];
+              if (ledmapNames[n - 1]) {
+                strcpy(ledmapNames[n - 1], name);
+              }
+            }
+          }
         }
+        bf.close();
       }
     }
 
-    // Need to create/update binary cache - do a full deserialize which will save it
-    USER_PRINTF("  %s: creating binary cache...\n", jsonFile);
-    deserializeMap(n);
+    if (needsRebuild) {
+      // Need to create/update binary cache - do a full deserialize which will save it
+      USER_PRINTF("  %s: creating binary cache...\n", jsonFile);
+      deserializeMap(n);
+
+      // After deserialize, the name should be in loadedLedmapName
+      // Copy it to ledmapNames array
+      if (n > 0 && loadedLedmapName[0] != '\0') {
+        if (ledmapNames[n - 1]) {
+          delete[] ledmapNames[n - 1];
+          ledmapNames[n - 1] = nullptr;
+        }
+        ledmapNames[n - 1] = new char[strlen(loadedLedmapName) + 1];
+        if (ledmapNames[n - 1]) {
+          strcpy(ledmapNames[n - 1], loadedLedmapName);
+        }
+      }
+    }
   }
 
   USER_PRINTLN(F("Ledmap binary cache complete"));
@@ -2662,15 +2700,21 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   }
 
   if (!isFile) {
-    if (!isMatrix && !n) {
+    if (!n) {
       customMappingSize = 0;
       loadedLedmap = 0;
+      if (isMatrix) {
+        setUpMatrix();
+        resetSegments(true);
+      }
+      interfaceUpdateCallMode = CALL_MODE_WS_SEND;
     }
     return false;
   }
 
   uint16_t width = 0, height = 0;
   uint32_t mapSize = 0;
+  char mapName[33] = { 0 };  // 32 chars + null terminator
 
   // === TRY BINARY CACHE FIRST ===
   if (WLED_FS.exists(binFile)) {
@@ -2682,6 +2726,8 @@ bool WS2812FX::deserializeMap(uint8_t n) {
       f.read((uint8_t*)&width, 2);
       f.read((uint8_t*)&height, 2);
       f.read((uint8_t*)&storedModTime, 4);
+      f.read((uint8_t*)mapName, 32);
+      mapName[32] = '\0';  // Ensure null termination
 
       File jf = WLED_FS.open(jsonFile, "r");
       uint32_t jsonModTime = jf ? (uint32_t)jf.getLastWrite() : 0;
@@ -2697,15 +2743,21 @@ bool WS2812FX::deserializeMap(uint8_t n) {
           customMappingSize = mapSize;
           customMappingTableSize = mapSize;
           loadedLedmap = n;
+
           f.close();
 
+          bool dimensionsChanged = false;
           if (isMatrix && (width != Segment::maxWidth || height != Segment::maxHeight)) {
             Segment::maxWidth = width;
             Segment::maxHeight = height;
             resetSegments(true);
+            dimensionsChanged = true;
           }
 
-          USER_PRINTF("Loaded %s from binary (%ux%u)\n", binFile, width, height);
+          USER_PRINTF("Loaded %s from binary (%ux%u) name: %s\n", binFile, width, height, mapName);
+          if (dimensionsChanged) {
+            interfaceUpdateCallMode = CALL_MODE_WS_SEND;
+          }
           return true;
         }
       }
@@ -2725,17 +2777,39 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   USER_PRINTF("Reading LED map from %s\n", jsonFile);
   uint32_t jsonModTime = (uint32_t)f.getLastWrite();
 
+  // Parse name
+  char buf[33];
+  memset(buf, 0, sizeof(buf));
+  f.find("\"n\":");
+  if (f.peek() == '"') {
+    f.read();  // Skip opening quote
+    size_t len = f.readBytesUntil('"', buf, 32);
+    buf[len] = '\0';
+    strncpy(mapName, buf, 32);
+    mapName[32] = '\0';
+  }
+
+  // If no name found, use filename as fallback
+  if (mapName[0] == '\0') {
+    const char* fname = jsonFile + 1;  // Skip leading '/'
+    const char* dot = strrchr(fname, '.');
+    size_t len = dot ? (size_t)(dot - fname) : strlen(fname);
+    if (len > 32) len = 32;
+    strncpy(mapName, fname, len);
+    mapName[len] = '\0';
+  }
+
   // Parse dimensions
-  char buf[32];
+  f.seek(0);
   if (isMatrix) {
     memset(buf, 0, sizeof(buf));
     f.find("\"width\":");
-    f.readBytesUntil('\n', buf, sizeof(buf));
+    f.readBytesUntil('\n', buf, sizeof(buf) - 1);
     width = atoi(cleanUpName(buf));
 
     memset(buf, 0, sizeof(buf));
     f.find("\"height\":");
-    f.readBytesUntil('\n', buf, sizeof(buf));
+    f.readBytesUntil('\n', buf, sizeof(buf) - 1);
     height = atoi(cleanUpName(buf));
 
     #ifndef WLEDMM_NO_MAP_RESET
@@ -2743,8 +2817,10 @@ bool WS2812FX::deserializeMap(uint8_t n) {
       Segment::maxWidth = width;
       Segment::maxHeight = height;
       resetSegments(true);
+      interfaceUpdateCallMode = CALL_MODE_WS_SEND;
     } else {
       setUpMatrix();
+      interfaceUpdateCallMode = CALL_MODE_WS_SEND;
     }
     #endif
   }
@@ -2753,7 +2829,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   if (height == 0) height = Segment::maxHeight;
   mapSize = (uint32_t)Segment::maxWidth * Segment::maxHeight;
 
-  USER_PRINTF("deserializeMap %d x %d\n", Segment::maxWidth, Segment::maxHeight);
+  USER_PRINTF("deserializeMap %d x %d name: %s\n", Segment::maxWidth, Segment::maxHeight, mapName);
 
   // Allocate
   if (mapSize > customMappingTableSize) {
@@ -2774,6 +2850,12 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   }
 
   customMappingSize = mapSize;
+
+  // Store the loaded name
+  if (loadedLedmapName) {
+    strncpy(loadedLedmapName, mapName, 32);
+    loadedLedmapName[32] = '\0';
+  }
 
   // Initialize
   #ifndef WLEDMM_INVERSE_MAPS
@@ -2798,10 +2880,10 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   loadedLedmap = n;
   f.close();
 
-  USER_PRINTF("Custom ledmap: %d size=%u\n", loadedLedmap, customMappingSize);
+  USER_PRINTF("Custom ledmap: %d size=%u name=%s\n", loadedLedmap, customMappingSize, mapName);
 
   // === SAVE BINARY CACHE ===
-  size_t needed = 12 + mapSize * sizeof(uint32_t);
+  size_t needed = 44 + mapSize * sizeof(uint32_t);  // Updated header size: 12 + 32 = 44
   if (WLED_FS.totalBytes() - WLED_FS.usedBytes() > needed + 10240) {
     File bf = WLED_FS.open(binFile, "w");
     if (bf) {
@@ -2810,6 +2892,12 @@ bool WS2812FX::deserializeMap(uint8_t n) {
       bf.write((uint8_t*)&width, 2);
       bf.write((uint8_t*)&height, 2);
       bf.write((uint8_t*)&jsonModTime, 4);
+
+      // Write name (padded to 32 bytes)
+      char nameBuf[32] = { 0 };
+      strncpy(nameBuf, mapName, 32);
+      bf.write((uint8_t*)nameBuf, 32);
+
       bf.write((uint8_t*)customMappingTable, mapSize * sizeof(uint32_t));
       bf.close();
       USER_PRINTF("Saved binary cache %s\n", binFile);

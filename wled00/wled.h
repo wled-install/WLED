@@ -850,6 +850,7 @@ WLED_GLOBAL volatile bool suspendStripService _INIT(false); // WLEDMM temporaril
 WLED_GLOBAL volatile bool OTAisRunning _INIT(false);        // WLEDMM temporarily stop led updates during OTA
 #ifndef ESP8266
 WLED_GLOBAL char *ledmapNames[WLED_MAX_LEDMAPS-1] _INIT_N(({nullptr}));
+WLED_GLOBAL char loadedLedmapName[33] _INIT_N(({ 0 }));
 #endif
 WLED_GLOBAL uint32_t ledmapMaxSize _INIT(0); //WLEDMM TroyHacks
 #if WLED_MAX_LEDMAPS>16
