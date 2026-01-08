@@ -641,12 +641,16 @@ bool BusNetwork::ensureCapacity(uint32_t requiredPixels) {
 void IRAM_ATTR BusNetwork::show() {
   if (!WLED_CONNECTED) return;
   if (!_valid || !canShow()) return;
-  if (uint32_t(Segment::maxWidth * Segment::maxHeight) < _len) _len = uint32_t(Segment::maxWidth * Segment::maxHeight);
-  if (!ensureCapacity(Segment::maxWidth * Segment::maxHeight)) {
+
+  uint32_t mapSize = uint32_t(Segment::maxWidth) * Segment::maxHeight;
+  uint32_t temp_len = min(_len, mapSize);
+
+  if (!ensureCapacity(temp_len)) {  // Only need capacity for what we're actually sending
     return;
   }
+
   _broadcastLock = true;
-  realtimeBroadcast(_UDPtype, _client, _len, _data, _bri, _rgbw, _outputs, _leds_per_output, _fps_limit, _colorOrder, false);
+  realtimeBroadcast(_UDPtype, _client, temp_len, _data, _bri, _rgbw, _outputs, _leds_per_output, _fps_limit, _colorOrder, false);
   _broadcastLock = false;
 }
 
