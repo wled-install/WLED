@@ -750,7 +750,6 @@ static inline void processPixelData(
 
       // Skip unmapped pixels (UINT32_MAX = no mapping)
       if (map == UINT32_MAX) {
-        dest += bpp;
         continue;
       }
 

@@ -977,6 +977,7 @@ class WS2812FX {  // 96 bytes
       setTargetFps(uint8_t fps),
       enumerateLedmaps(); //WLEDMM (from fcn_declare)
       void createLedmapBinaryCache();
+      void invertMappingTable();
 
     void setColor(uint8_t slot, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0) { setColor(slot, RGBW32(r,g,b,w)); }
     void fill(uint32_t c) { for (int i = 0; i < getLengthTotal(); i++) setPixelColor(i, c); } // fill whole strip with color (inline)

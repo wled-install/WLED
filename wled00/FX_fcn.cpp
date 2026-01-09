@@ -2668,6 +2668,47 @@ void WS2812FX::loadCustomPalettes() {
   }
 }
 
+#ifdef WLEDMM_REMAP_AT_OUTPUT
+void WS2812FX::invertMappingTable() {
+  if (!customMappingTable || customMappingSize == 0) return;
+  
+  // Count real pixels (non-UINT32_MAX entries)
+  uint32_t realPixelCount = 0;
+  for (uint32_t i = 0; i < customMappingSize; i++) {
+    if (customMappingTable[i] != UINT32_MAX) realPixelCount++;
+  }
+  
+  USER_PRINTF("Inverting map: %u real pixels from %u logical positions\n", 
+              realPixelCount, customMappingSize);
+  
+  // Allocate compact inverted table (only space for real pixels)
+  uint32_t* inverted = (uint32_t*)heap_caps_malloc(realPixelCount * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+  if (!inverted) {
+    USER_PRINTLN("invertMappingTable: allocation failed!");
+    return;
+  }
+  
+  // Initialize as unmapped
+  memset(inverted, 0xFF, realPixelCount * sizeof(uint32_t));
+  
+  // Build inverse mapping: inverted[physicalLED] = logicalPos
+  for (uint32_t logicalPos = 0; logicalPos < customMappingSize; logicalPos++) {
+    uint32_t physicalLED = customMappingTable[logicalPos];
+    if (physicalLED != UINT32_MAX && physicalLED < realPixelCount) {
+      inverted[physicalLED] = logicalPos;
+    }
+  }
+  
+  // Replace table with compact inverted version
+  heap_caps_free(customMappingTable);
+  customMappingTable = inverted;
+  customMappingSize = realPixelCount;
+  customMappingTableSize = realPixelCount;
+  
+  USER_PRINTF("Inverted map now: %u entries\n", customMappingSize);
+}
+#endif
+
 //load custom mapping table from JSON file (called from finalizeInit() or deserializeState())
 bool WS2812FX::deserializeMap(uint8_t n) {
   #ifndef WLED_DISABLE_2D
@@ -2745,6 +2786,9 @@ bool WS2812FX::deserializeMap(uint8_t n) {
           loadedLedmap = n;
 
           f.close();
+          #ifdef WLEDMM_REMAP_AT_OUTPUT
+          invertMappingTable();
+          #endif
 
           bool dimensionsChanged = false;
           if (isMatrix && (width != Segment::maxWidth || height != Segment::maxHeight)) {
@@ -2812,7 +2856,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
     f.readBytesUntil('\n', buf, sizeof(buf) - 1);
     height = atoi(cleanUpName(buf));
 
-    #ifndef WLEDMM_NO_MAP_RESET
+#ifndef WLEDMM_NO_MAP_RESET
     if (width * height > 0) {
       Segment::maxWidth = width;
       Segment::maxHeight = height;
@@ -2822,7 +2866,7 @@ bool WS2812FX::deserializeMap(uint8_t n) {
       setUpMatrix();
       interfaceUpdateCallMode = CALL_MODE_WS_SEND;
     }
-    #endif
+#endif
   }
 
   if (width == 0) width = Segment::maxWidth;
@@ -2852,29 +2896,23 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   customMappingSize = mapSize;
 
   // Store the loaded name
-  if (loadedLedmapName) {
+  if (loadedLedmapName){
     strncpy(loadedLedmapName, mapName, 32);
     loadedLedmapName[32] = '\0';
   }
 
-  // Initialize
-  #ifndef WLEDMM_INVERSE_MAPS
-  for (uint32_t i = 0; i < customMappingTableSize; i++) customMappingTable[i] = i;
-  #else
-  memset(customMappingTable, 0xFF, customMappingTableSize * sizeof(uint32_t));
-  #endif
+  // Initialize - maps are always logical-to-physical format
+  for (uint32_t i = 0; i < customMappingTableSize; i++)
+    customMappingTable[i] = i;
 
   // Parse map
   f.seek(0);
   f.find("\"map\":[");
   uint32_t i = 0;
-  do {
+  do{
     int mapi = f.readStringUntil(',').toInt();
-    #ifndef WLEDMM_INVERSE_MAPS
-    if (i < customMappingSize) customMappingTable[i++] = (uint32_t)(mapi < 0 ? UINT32_MAX : mapi);
-    #else
-    if (i < customMappingSize && mapi >= 0 && (uint32_t)mapi < customMappingSize) customMappingTable[mapi] = i++;
-    #endif
+    if (i < customMappingSize)
+      customMappingTable[i++] = (uint32_t)(mapi < 0 ? UINT32_MAX : mapi);
   } while (f.available());
 
   loadedLedmap = n;
@@ -2905,9 +2943,16 @@ bool WS2812FX::deserializeMap(uint8_t n) {
   }
 
   releaseJSONBufferLock();
+
+#ifdef WLEDMM_REMAP_AT_OUTPUT
+  if (customMappingTable != nullptr && customMappingSize > 0) {
+    invertMappingTable();
+  }
+#endif
+
   return true;
 
-  #else
+#else
   return false;
   #endif
 }

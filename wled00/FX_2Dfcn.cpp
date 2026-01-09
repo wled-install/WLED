@@ -184,6 +184,13 @@ void WS2812FX::setUpMatrix() {
       }
     }
   }
+  
+  #ifdef WLEDMM_REMAP_AT_OUTPUT
+  if (customMappingTable != nullptr && customMappingSize > 0) {
+    invertMappingTable();
+  }
+  #endif
+
   #else
   isMatrix = false;
   #endif
