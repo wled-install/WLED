@@ -9493,6 +9493,7 @@ uint16_t mode_2DPaintbrush() {
 } // mode_2DPaintbrush()
 static const char _data_FX_MODE_2DPAINTBRUSH[] PROGMEM = "Paintbrush ☾@Oscillator Offset,# of lines,Fade Rate,,Min Length,Color Chaos,Anti-aliasing,Phase Chaos;!,,Peaks;!;2f;sx=160,ix=255,c1=80,c2=255,c3=0,pal=72,o1=0,o2=1,o3=0";
 
+#ifndef ENABLE_VL53L8CX
 uint16_t mode_GEQPPA() {
   #ifdef SOC_PPA_SUPPORTED
 
@@ -9621,6 +9622,259 @@ uint16_t mode_GEQPPA() {
   return FRAMETIME;
 }
 static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,SEGMENT.custom1,SEGMENT.custom2,SEGMENT.custom3_0-31,Overlay,Check 2,Check 3;!,,Peaks;!;2f;sx=0,ix=0,c1=0,c2=0,c3=0,pal=72,o1=0,o2=0,o3=0";
+#else
+uint16_t mode_GEQPPA() {
+  #ifdef SOC_PPA_SUPPORTED
+
+  if (!strip.isMatrix) return mode_static();
+
+  // Initialize PPA context
+  PPAEffectContext ctx;
+  if (!ppaEffectBegin(ctx)) return mode_static();
+
+  static uint16_t pre_width = 0;
+  static uint16_t pre_height = 0;
+  static uint32_t renderbuffer_size = 0;
+  static uint8_t* renderbuffer = nullptr;
+
+  if (!SEGENV.allocateData(4)) return mode_static();
+  if (SEGENV.call == 0) {
+    SEGMENT.setUpLeds();
+  }
+
+  // Get base fill config
+  ppa_fill_oper_config_t fill_config = ppaGetFillConfig(ctx);
+
+  // Clear buffer
+  // ppaEffectClear(ctx);
+
+  // Handle overlay mode
+  if (SEGMENT.check1 && SEGMENT.intensity != 255) {
+    if (SEGMENT.intensity == 0) return FRAMETIME;
+
+    if (ctx.width != pre_width || ctx.height != pre_height) {
+      if (renderbuffer != nullptr) {
+        heap_caps_free(renderbuffer);
+        renderbuffer = nullptr;
+      }
+      renderbuffer_size = ctx.width * ctx.height * 4;
+      renderbuffer = (uint8_t*)heap_caps_calloc(renderbuffer_size, sizeof(byte),
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED);
+      pre_height = ctx.height;
+      pre_width = ctx.width;
+    }
+
+    fill_config.out.buffer = renderbuffer;
+    fill_config.out.buffer_size = renderbuffer_size;
+    fill_config.out.pic_w = ctx.width;
+    fill_config.out.pic_h = ctx.height;
+    fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_ARGB8888;
+    fill_config.fill_argb_color.a = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+  } else {
+    ppaEffectClear(ctx);
+  }
+
+  // Get audio data
+  um_data_t* um_data = getAudioData();
+  uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+
+  uint8_t scaler = 1;
+
+  // Pre-computed interpolated grid - static so it persists between calls
+  static uint16_t interpolated_distances[16][16];
+
+  if (vl53l8cx_NewDataReady) {
+    vl53l8cx_NewDataReady = false;
+    sensor_vl53l8cx_top.get_ranging_data(&vl53l8cx_Results);
+
+    // Pre-compute ALL interpolated values once using integer math
+    for (int row = 0; row < 16; row++) {
+      for (int col = 0; col < 16; col++) {
+        int x8_scaled = (col * 7 * 256) / 15;
+        int y8_scaled = (row * 7 * 256) / 15;
+
+        int x0 = x8_scaled >> 8;
+        int y0 = y8_scaled >> 8;
+        int x1 = min(x0 + 1, 7);
+        int y1 = min(y0 + 1, 7);
+
+        uint8_t fx = x8_scaled & 0xFF;
+        uint8_t fy = y8_scaled & 0xFF;
+
+        uint16_t d00 = vl53l8cx_Results.distance_mm[y0 * 8 + x0];
+        uint16_t d10 = vl53l8cx_Results.distance_mm[y0 * 8 + x1];
+        uint16_t d01 = vl53l8cx_Results.distance_mm[y1 * 8 + x0];
+        uint16_t d11 = vl53l8cx_Results.distance_mm[y1 * 8 + x1];
+
+        uint8_t s00 = vl53l8cx_Results.target_status[y0 * 8 + x0];
+        uint8_t s10 = vl53l8cx_Results.target_status[y0 * 8 + x1];
+        uint8_t s01 = vl53l8cx_Results.target_status[y1 * 8 + x0];
+        uint8_t s11 = vl53l8cx_Results.target_status[y1 * 8 + x1];
+
+        // Get FAR_PLANE value for invalid readings
+        uint16_t far_val = SEGMENT.custom2 * 20;
+        if (far_val <= SEGMENT.custom1 * 20) far_val = SEGMENT.custom1 * 20 + 100;
+
+        if (s00 != 5 && s00 != 9) d00 = far_val;
+        if (s10 != 5 && s10 != 9) d10 = far_val;
+        if (s01 != 5 && s01 != 9) d01 = far_val;
+        if (s11 != 5 && s11 != 9) d11 = far_val;
+
+        // Bilinear interpolation using integer math
+        uint32_t d0 = (d00 * (256 - fx) + d10 * fx) >> 8;
+        uint32_t d1 = (d01 * (256 - fx) + d11 * fx) >> 8;
+        interpolated_distances[row][col] = (d0 * (256 - fy) + d1 * fy) >> 8;
+      }
+    }
+  }
+
+  // Near and far clipping planes (in mm)
+  uint16_t NEAR_PLANE = SEGMENT.custom1 * 20;
+  uint16_t FAR_PLANE = SEGMENT.custom2 * 20;
+
+  if (FAR_PLANE <= NEAR_PLANE) {
+    FAR_PLANE = NEAR_PLANE + 100;
+  }
+
+  uint16_t range = FAR_PLANE - NEAR_PLANE;
+
+  // Draw 16x16 grid - now just lookup pre-computed values!
+  for (int row = 0; row < 16; row++) {
+    for (int col = 0; col < 16; col++) {
+      int display_col = SEGMENT.check2 ? (15 - col) : col;
+
+      // Just lookup the pre-computed distance - no calculation needed!
+      uint16_t dist = interpolated_distances[row][col];
+
+      int x_start = (display_col * ctx.width) / (16 * scaler);
+      int x_end = ((display_col + 1) * ctx.width) / (16 * scaler);
+      int y_start = (row * ctx.height) / (16 * scaler);
+      int y_end = ((row + 1) * ctx.height) / (16 * scaler);
+
+      int cell_width = x_end - x_start;
+      int cell_height = y_end - y_start;
+
+      if (cell_width == 0 || cell_height == 0) continue;
+
+      uint8_t brightness;
+
+      if (SEGMENT.check3) {
+        // Middle-normalized mode
+        uint16_t mid_point = (NEAR_PLANE + FAR_PLANE) / 2;
+
+        if (dist < NEAR_PLANE || dist > FAR_PLANE) {
+          brightness = 0;
+        } else {
+          int32_t distance_from_mid = abs((int32_t)dist - (int32_t)mid_point);
+          uint16_t half_range = range / 2;
+          if (distance_from_mid >= half_range) {
+            brightness = 0;
+          } else {
+            brightness = 255 - ((distance_from_mid * 255) / half_range);
+          }
+        }
+      } else {
+        // Standard mode
+        if (dist <= NEAR_PLANE) {
+          brightness = 0;  // Too close = black (outside clipping plane)
+        } else if (dist >= FAR_PLANE) {
+          brightness = 0;  // Too far = black (outside clipping plane)
+        } else {
+          brightness = 255 - (((dist - NEAR_PLANE) * 255) / range);
+        }
+      }
+
+      // CRITICAL: If distance says black (outside clipping planes), stay black
+      if (brightness == 0) {
+        fill_config.out.block_offset_x = x_start;
+        fill_config.fill_block_w = cell_width;
+        fill_config.out.block_offset_y = y_start;
+        fill_config.fill_block_h = cell_height;
+
+        fill_config.fill_argb_color.r = 0;
+        fill_config.fill_argb_color.g = 0;
+        fill_config.fill_argb_color.b = 0;
+        fill_config.fill_argb_color.a = SEGMENT.intensity;
+
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+        continue;  // Skip audio processing
+      }
+
+      // Only apply audio if distance is within valid range
+      int audio_idx = col;
+      uint8_t audio_level = fftResult[0]; // fftResult[audio_idx];
+
+      // Get palette color based on frequency band
+      uint8_t palette_index = (audio_idx * 256) / 16;
+
+      // Combine distance brightness with audio level
+      uint8_t combined_brightness = (brightness * audio_level) / 255;
+
+      // Get color from palette with combined brightness
+      CRGB color = ColorFromPalette(SEGPALETTE, palette_index, combined_brightness);
+
+      fill_config.out.block_offset_x = x_start;
+      fill_config.fill_block_w = cell_width;
+      fill_config.out.block_offset_y = y_start;
+      fill_config.fill_block_h = cell_height;
+
+      fill_config.fill_argb_color.r = color.r;
+      fill_config.fill_argb_color.g = color.g;
+      fill_config.fill_argb_color.b = color.b;
+      fill_config.fill_argb_color.a = SEGMENT.intensity;
+
+      ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+    }
+  }
+
+  // Blend overlay if enabled
+  if (SEGMENT.check1 && SEGMENT.intensity != 255 && SEGMENT.intensity != 0) {
+    ppa_blend_oper_config_t blend_config = {};
+    blend_config.in_bg.buffer = ctx.effectBuffer;
+    blend_config.in_bg.pic_w = ctx.render_pic_w;
+    blend_config.in_bg.pic_h = ctx.render_pic_h;
+    blend_config.in_bg.block_w = ctx.width;
+    blend_config.in_bg.block_h = ctx.height;
+    blend_config.in_bg.block_offset_x = 0;
+    blend_config.in_bg.block_offset_y = 0;
+    blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.in_fg.buffer = renderbuffer;
+    blend_config.in_fg.pic_w = ctx.width;
+    blend_config.in_fg.pic_h = ctx.height;
+    blend_config.in_fg.block_w = ctx.width;
+    blend_config.in_fg.block_h = ctx.height;
+    blend_config.in_fg.block_offset_x = 0;
+    blend_config.in_fg.block_offset_y = 0;
+    blend_config.bg_rgb_swap = 0;
+    blend_config.bg_byte_swap = 0;
+    blend_config.fg_rgb_swap = 0;
+    blend_config.fg_byte_swap = 0;
+    blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+    blend_config.out.buffer = ctx.effectBuffer;
+    blend_config.out.buffer_size = ctx.effectBufferSize;
+    blend_config.out.pic_w = ctx.render_pic_w;
+    blend_config.out.pic_h = ctx.render_pic_h;
+    blend_config.out.block_offset_x = 0;
+    blend_config.out.block_offset_y = 0;
+    blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
+    blend_config.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+    blend_config.bg_ck_en = false;
+    blend_config.fg_ck_en = false;
+    blend_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
+  }
+
+  // Apply all segment transforms and copy to output
+  ppaEffectEnd(ctx);
+
+  #endif
+  return FRAMETIME;
+}
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,Near Clip (x20mm),Far Clip (x20mm),SEGMENT.custom3_0-31,Overlay,Mirror Mode,Middle Range;!,,Peaks;!;2f;sx=0,ix=0,c1=3,c2=50,c3=0,pal=11,o1=0,o2=1,o3=0";
+#endif
 
 #include <algorithm>
 #include <dirent.h>

@@ -326,6 +326,10 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator<char>>;
   #define WLED_RELEASE_NAME mdev_release
 #endif
 
+#if defined(ENABLE_VL53L8CX)
+#include <vl53l8cx.h>
+#endif
+
 #ifdef CONFIG_SOC_PPA_SUPPORTED
 #include "esp_heap_caps.h"
 #include "driver/ppa.h"
@@ -858,6 +862,15 @@ WLED_GLOBAL uint32_t ledmapMaxSize _INIT(0); //WLEDMM TroyHacks
 WLED_GLOBAL uint32_t ledMaps _INIT(0); // bitfield representation of available ledmaps
 #else
 WLED_GLOBAL uint16_t ledMaps _INIT(0); // bitfield representation of available ledmaps
+#endif
+
+#if defined(ENABLE_VL53L8CX)
+#define LPN_PIN 23
+WLED_GLOBAL VL53L8CX sensor_vl53l8cx_top _INIT_N(((&Wire, LPN_PIN)));
+WLED_GLOBAL uint8_t vl53l8cx_res _INIT(VL53L8CX_RESOLUTION_8X8);
+WLED_GLOBAL uint8_t vl53l8cx_NewDataReady _INIT(0);
+WLED_GLOBAL VL53L8CX_ResultsData vl53l8cx_Results;
+#define TOF_INT_PIN 5
 #endif
 
 // Usermod manager

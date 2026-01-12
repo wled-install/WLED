@@ -1075,6 +1075,12 @@ const char* wifi_band_mode_to_string(wifi_band_mode_t mode) {
   }
 }
 
+#ifdef ENABLE_VL53L8CX
+void IRAM_ATTR tofISR() {
+  vl53l8cx_NewDataReady = true;
+}
+#endif
+
 void WLED::setup() {
 
   #ifdef WLED_DEBUG
@@ -1763,14 +1769,27 @@ void WLED::setup() {
     xTaskCreatePinnedToCore(
     background_loop_nonblocking,  // Task function
     "Background",     // Name
-    5000,             // Stack size in words (was 24000)
+    10000,             // Stack size in words (was 24000)
     NULL,             // Parameters
     1,                // Priority
     NULL,             // Task handle (optional)
     0                 // Core ID (0 or 1)
     );
 
-    //#endif
+    #if defined(ENABLE_VL53L8CX)
+    pinMode(TOF_INT_PIN, INPUT_PULLUP);
+    sensor_vl53l8cx_top.begin();
+    sensor_vl53l8cx_top.init();
+    sensor_vl53l8cx_top.set_resolution(vl53l8cx_res);
+    sensor_vl53l8cx_top.set_detection_thresholds_enable(0);
+    sensor_vl53l8cx_top.set_ranging_mode(VL53L8CX_RANGING_MODE_AUTONOMOUS);
+    sensor_vl53l8cx_top.set_external_sync_pin_enable(1);
+    sensor_vl53l8cx_top.calibrate_xtalk(3, 1, 1000); // this "fails" but does something important anyway. 
+    sensor_vl53l8cx_top.set_ranging_frequency_hz(30);
+    sensor_vl53l8cx_top.start_ranging();
+    attachInterrupt(digitalPinToInterrupt(TOF_INT_PIN), tofISR, FALLING);
+    #endif
+
     // WLEDMM end
 } // endsetup
 
@@ -1807,7 +1826,11 @@ void WLED::beginStrip() {
 }
 
 void WLED::initAP(bool resetAP) {
-  USER_PRINTLN("In initAP!");
+  
+  #if defined(WLED_USE_ETHERNET_ONLY)
+  return; // we can't start the AP in Ethernet-only mode as there's no WIFi
+  #endif
+
   if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
     return;
 
@@ -2175,10 +2198,12 @@ void WLED::handleConnection() {
       wifiStartAttempted = true;
       return;
     }
+    #if !defined(WLED_USE_ETHERNET_ONLY)
     if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
       USER_PRINTLN(F("Not connected, starting AP."));
       initAP();
     }
+    #endif
   }
 
   // Initialize interfaces when we have ANY connection

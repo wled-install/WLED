@@ -76,7 +76,7 @@ void setup() {
     xTaskCreatePinnedToCore(
       wledCore0Entry,
       "wled_main",
-      6000,      
+      12000,      
       NULL,
       1,          // Priority 1 (Standard Arduino)
       NULL,
