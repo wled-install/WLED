@@ -661,6 +661,10 @@ class ES8388Source : public I2SSource {
 */
 class ES8311Source : public I2SSource {
   private:
+    bool es7210_present() {
+      Wire.beginTransmission(0x40);
+      return (Wire.endTransmission() == 0);
+    }
     // I2C initialization functions for es8311
     void _es8311I2cBegin() {
       Wire.setClock(100000);
@@ -670,13 +674,99 @@ class ES8311Source : public I2SSource {
       #ifndef ES8311_ADDR
         #define ES8311_ADDR 0x18
       #endif
-      Wire.beginTransmission(ES8311_ADDR);
+      if (ES7210_present) {
+        Wire.beginTransmission(0x40);
+      } else {
+        Wire.beginTransmission(ES8311_ADDR);
+      }
       Wire.write((uint8_t)reg);
       Wire.write((uint8_t)val);
       uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
       if (i2cErr != 0) {
         DEBUGSR_PRINTF("AR: ES8311 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, ES8311_ADDR, reg, val);
       }
+    }
+
+    void es7210_init_22k_24bit() {
+      _es8311I2cBegin();
+
+      // --- 1. RESET ---
+      _es8311I2cWrite(0x00, 0xFF); // Reset all
+      vTaskDelay(pdMS_TO_TICKS(10));
+      _es8311I2cWrite(0x00, 0x32); // Normal operation, analog power on
+
+      // --- 2. CLOCK CONFIGURATION (PLL MODE) ---
+      // We use the PLL to boost the slow 22k MCLK up to a stable analog speed.
+      _es8311I2cWrite(0x01, 0x20); // Turn MCLK on
+      _es8311I2cWrite(0x02, 0x08); // ENABLE PLL (Critical for low sample rates)
+
+      // Clock Dividers (0x10 = Divide by 16). 
+      // Because PLL boosts the clock high, we need to divide it hard to get back to 22k.
+      _es8311I2cWrite(0x03, 0x10);
+      _es8311I2cWrite(0x04, 0x10);
+      _es8311I2cWrite(0x05, 0x00);
+
+      // --- 3. FORMAT & MODE ---
+      _es8311I2cWrite(0x08, 0x00); // Slave Mode
+      _es8311I2cWrite(0x09, 0x30); // ADC Control 1
+      _es8311I2cWrite(0x0A, 0x30); // ADC Control 2
+      _es8311I2cWrite(0x11, 0x80); // 32-bit I2S format
+      _es8311I2cWrite(0x12, 0x00); // Output ADC1/2 on SDOUT
+
+      // --- 4. ANALOG CONFIG ---
+      _es8311I2cWrite(0x22, 0x0A); // HPF
+      _es8311I2cWrite(0x23, 0x2A); // HPF
+      _es8311I2cWrite(0x40, 0xC3); // Analog Power & Bias enabled
+      _es8311I2cWrite(0x41, 0x7F); // Vref enabled
+
+      // --- 5. GAIN CONTROL ---
+      // 0x00 = 0dB
+      // 0x10 = 24dB 
+      // 0x13 = 28dB (Current)
+      // If audio is distorted, lower this to 0x10 or 0x08!
+      _es8311I2cWrite(0x43, 0x1E); // Mic 1 Gain
+      _es8311I2cWrite(0x44, 0x1E); // Mic 2 Gain
+
+      // Note: You don't strictly need to set Gains 45/46 if you are only using ADC1/2 (Reg 0x12=0x00)
+      // but it doesn't hurt to set them.
+      _es8311I2cWrite(0x45, 0x1E);
+      _es8311I2cWrite(0x46, 0x1E);
+
+      // --- 6. MIC POWER ---
+      _es8311I2cWrite(0x47, 0x08); // Mic 1 Bias Power
+      _es8311I2cWrite(0x48, 0x08); // Mic 2 Bias Power
+      _es8311I2cWrite(0x49, 0x08); // Mic 3 Bias Power
+      _es8311I2cWrite(0x4A, 0x08); // Mic 4 Bias Power
+      _es8311I2cWrite(0x4B, 0x0F); // ADC 1/2 Power Up
+      _es8311I2cWrite(0x4C, 0x0F); // ADC 3/4 Power Up
+
+      // --- 6. ALC (Auto Gain) CONFIG ---
+
+      // Reg 0x18: ALC Control 1
+      // Bit 7: Enable (1=On)
+      // Bit 6: Mode (0=Normal)
+      // Bits 5-4: Unused
+      // Bits 3-0: Target Level (The volume it tries to maintain)
+      //    0000 = -4.5dB (Loudest target)
+      //    1011 = -22.5dB (Quieter target)
+      //    Setting to 0xC0 (Enable + Target -4.5dB)
+      // _es8311I2cWrite(0x18, 0xC0);
+
+      // Reg 0x19: Gain Limits
+      // Bits 7-4: Max Gain (How much it's allowed to boost)
+      //    0000 = -6.5dB (No boost allowed)
+      //    1111 = +35.5dB (Huge boost allowed)
+      // Bits 3-0: Min Gain (How much it's allowed to cut)
+      //    Setting 0xF0 (Max boost +35dB, Min gain -12dB)
+      // _es8311I2cWrite(0x19, 0xF0);
+
+      // Reg 0x1A: Time Settings (Attack / Decay)
+      // How fast it reacts to loud sounds (Attack) vs quiet sounds (Decay)
+      // 0x22 is a good default for voice.
+      // _es8311I2cWrite(0x1A, 0x22);
+
+      // --- 7. START ---
+      _es8311I2cWrite(0x00, 0xC1); // Run State
     }
 
     void _es8311InitAdc() {
@@ -745,10 +835,14 @@ class ES8311Source : public I2SSource {
         return;
       }
 
-      // First route mclk, then configure ADC over I2C, then configure I2S
-      _es8311InitAdc();
-      delay(100); // wait a bit after init
-      _es8311InitAdc();
+      if (es7210_present()) {
+        USER_PRINTLN("Overriding ES8311 becasue an ES7210 is present.");  
+        // _es8311InitAdc();
+        ES7210_present = true;
+        es7210_init_22k_24bit();
+      } else {
+        _es8311InitAdc();
+      }
       I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
     }
 
