@@ -505,25 +505,6 @@ void WLED::reset()
 void background_loop_blocking(void* pvParameters) {
   for (;;) {
 
-    #ifdef WLED_DEBUG
-    // esp_log_level_set("*",ESP_LOG_VERBOSE);
-    static unsigned long maxUsermodMillis = 0;
-    static uint16_t avgUsermodMillis = 0;
-    static unsigned long maxStripMillis = 0;
-    static uint16_t avgStripMillis = 0;
-    #endif
-
-
-    // if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-      // usermods.loop();
-    //   xSemaphoreGive(busMutex);
-    // }
-
-    #ifdef WLED_DEBUG
-    usermodMillis = millis() - usermodMillis;
-    avgUsermodMillis += usermodMillis;
-    if (usermodMillis > maxUsermodMillis) maxUsermodMillis = usermodMillis;
-    #endif
 
     if (doCloseFile) {
       if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
@@ -588,16 +569,6 @@ void background_loop_blocking(void* pvParameters) {
       }
 
     }
-
-    // static TickType_t lastPrint = 30000;
-
-    // if (xTaskGetTickCount() - lastPrint > pdMS_TO_TICKS(30000)) {
-    //   lastPrint = xTaskGetTickCount();
-    //   if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
-    //     dumpAllTaskHWMs();
-    //     xSemaphoreGive(busMutex);
-    //   }
-    // }
 
     vTaskDelay(1);
 
