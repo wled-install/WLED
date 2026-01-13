@@ -8,10 +8,12 @@ void scanI2C(TwoWire& wire) {
     // Audio codecs from WLED AudioReactive
     {0x10, "ES8388"},
     {0x13, "ES7243"},
-    {0x18, "ES8311 (ESP32-P4 common on-board mic)"},
+    {0x18, "ES8311 (common ESP32-P4 on-board mic codec)"},
     {0x1A, "WM8978/AC101"},
-
+    {0x40, "ES7210 (common ESP32-P4 audio processor) but also matches INA219/HDC1080/PCA9685"},
+    
     // Common sensors & devices
+    {0x14, "GT911 Touch Panel Controller (alt)"},
     {0x19, "LIS3DH (alt)"},
     {0x1C, "MMA8452Q"},
     {0x1D, "ADXL345/MMA8452Q"},
@@ -23,7 +25,6 @@ void scanI2C(TwoWire& wire) {
     {0x39, "APDS9960/TSL2561"},
     {0x3C, "SSD1306 OLED"},
     {0x3D, "SSD1306 OLED (alt)"},
-    {0x40, "INA219/HDC1080/PCA9685"},
     {0x44, "SHT30/SHT31"},
     {0x48, "ADS1115/TMP102/PCF8591"},
     {0x49, "ADS1115 (alt)/TSL2561"},
@@ -36,6 +37,7 @@ void scanI2C(TwoWire& wire) {
     {0x5A, "MLX90614/CCS811/MPR121"},
     {0x5B, "CCS811 (alt)/MPR121"},
     {0x5C, "AM2320/BH1750 (alt)"},
+    {0x5D, "GT911 Touch Panel Controller"},
     {0x60, "SI1145/MCP4725"},
     {0x62, "SCD30/TSL2591"},
     {0x68, "DS3231 RTC/MPU6050/ICM20948"},
@@ -48,9 +50,10 @@ void scanI2C(TwoWire& wire) {
 
   auto getName = [&](uint8_t addr) -> const char* {
     for (int i = 0; i < knownCount; i++) {
+      if (addr == 0x40) ES7210_present = true;
       if (knownDevices[i].addr == addr) return knownDevices[i].name;
     }
-    return nullptr;
+    return nullptr; 
     };
 
   Serial.println(F("\n--- I2C Scan ---"));
@@ -65,6 +68,7 @@ void scanI2C(TwoWire& wire) {
     }
   }
   Serial.printf("--- %d device(s) found ---\n\n", found);
+  if (ES7210_present) USER_PRINTLN("ES7210_present == true");
 }
 
 //helper to get int value at a position in string

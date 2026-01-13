@@ -367,6 +367,8 @@ WLED_GLOBAL int   prolink_presetOffset  _INIT(0);
 WLED_GLOBAL bool  prolink_presetMover   _INIT(false);
 #endif
 
+WLED_GLOBAL bool ES7210_present _INIT(false); // we'll check for this during boot I2C scan.
+
 // Global Variable definitions
 WLED_GLOBAL char versionString[] _INIT(TOSTRING(WLED_VERSION));
 WLED_GLOBAL char releaseString[] _INIT_PROGMEM(TOSTRING(WLED_RELEASE_NAME)); //WLEDMM: to show on update page // somehow this will not work if using "const char releaseString[]
