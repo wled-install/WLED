@@ -865,12 +865,14 @@ WLED_GLOBAL uint16_t ledMaps _INIT(0); // bitfield representation of available l
 #endif
 
 #if defined(ENABLE_VL53L8CX)
+#define TOF_INT_PIN 5
 #define LPN_PIN 23
 WLED_GLOBAL VL53L8CX sensor_vl53l8cx_top _INIT_N(((&Wire, LPN_PIN)));
 WLED_GLOBAL uint8_t vl53l8cx_res _INIT(VL53L8CX_RESOLUTION_8X8);
 WLED_GLOBAL uint8_t vl53l8cx_NewDataReady _INIT(0);
 WLED_GLOBAL VL53L8CX_ResultsData vl53l8cx_Results;
-#define TOF_INT_PIN 5
+WLED_GLOBAL bool vl53l8cx_data_available _INIT(false);
+WLED_GLOBAL SemaphoreHandle_t vl53l8cxMutex;
 #endif
 
 // Usermod manager

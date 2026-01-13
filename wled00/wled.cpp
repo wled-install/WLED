@@ -1079,6 +1079,27 @@ const char* wifi_band_mode_to_string(wifi_band_mode_t mode) {
 void IRAM_ATTR tofISR() {
   vl53l8cx_NewDataReady = true;
 }
+
+void sensorTask(void* parameter) {
+  for (;;) {
+    // Check if data is ready (polling or interrupt)
+    if (vl53l8cx_NewDataReady) {
+
+      // Read data into a LOCAL buffer first (slow, blocking part)
+      VL53L8CX_ResultsData tempResults;
+      sensor_vl53l8cx_top.get_ranging_data(&tempResults);
+
+      // Quickly copy to global variable (protected)
+      xSemaphoreTake(vl53l8cxMutex, portMAX_DELAY);
+      memcpy(&vl53l8cx_Results, &tempResults, sizeof(VL53L8CX_ResultsData));
+      vl53l8cx_data_available = true;
+      xSemaphoreGive(vl53l8cxMutex);
+    }
+
+    // Prevent watchdog starvation
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+  }
+}
 #endif
 
 void WLED::setup() {
@@ -1788,6 +1809,17 @@ void WLED::setup() {
     sensor_vl53l8cx_top.set_ranging_frequency_hz(30);
     sensor_vl53l8cx_top.start_ranging();
     attachInterrupt(digitalPinToInterrupt(TOF_INT_PIN), tofISR, FALLING);
+
+    vl53l8cxMutex = xSemaphoreCreateMutex();
+    xTaskCreatePinnedToCore(
+      sensorTask,     // Function
+      "VL53l8CXTask", // Name
+      8000,           // Stack size
+      NULL,           // Params
+      1,              // Priority (Low)
+      NULL,           // Handle
+      0               // Core 0 (App Core) or 1
+    );
     #endif
 
     // WLEDMM end
