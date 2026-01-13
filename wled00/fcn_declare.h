@@ -397,6 +397,7 @@ void userLoop();
 bool is_sdcard_mounted(void);
 
 //util.cpp
+void scanI2C(TwoWire& wire = Wire);
 void dumpAllTaskHWMs(void);
 #define inoise8 perlin8   // fastled legacy alias
 #define inoise16 perlin16 // fastled legacy alias

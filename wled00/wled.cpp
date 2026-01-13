@@ -1622,11 +1622,9 @@ void WLED::setup() {
   DEBUG_PRINT(F("heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
 
   if (strcmp(clientSSID, DEFAULT_CLIENT_SSID) == 0) {
+    #ifndef WLED_USE_ETHERNET_ONLY
     showWelcomePage = true;
-    // WiFi.persistent(false);
-    // #ifdef WLED_USE_ETHERNET
-    // WiFi.onEvent(WiFiEvent);
-    // #endif
+    #endif
   }
 
   // fill in unique mdns default
@@ -1733,11 +1731,7 @@ void WLED::setup() {
     USER_PRINTLN(F("\n"));
     #endif
 
-    USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
-    USER_PRINTLN(F("WLED initialization done.\n"));
-    serial_drain();
-    Serial.flush();
-    delay(50);
+    scanI2C(Wire);
 
     err_t sdcarderr = mount_sdcard();
     if (sdcarderr == ESP_OK) {
@@ -1793,6 +1787,13 @@ void WLED::setup() {
     );
     #endif
 
+    USER_PRINT(F("Free heap ")); USER_PRINTLN(ESP.getFreeHeap());USER_PRINTLN();
+    USER_PRINTLN(F("WLED initialization done.\n"));
+
+    serial_drain();
+    Serial.flush();
+    delay(50);
+    
     // WLEDMM end
 } // endsetup
 

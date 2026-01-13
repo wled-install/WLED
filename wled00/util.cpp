@@ -2,6 +2,70 @@
 #include "fcn_declare.h"
 #include "const.h"
 
+void scanI2C(TwoWire& wire) {
+  struct I2CDevice { uint8_t addr; const char* name; };
+  static const I2CDevice knownDevices[] = {
+    // Audio codecs from WLED AudioReactive
+    {0x10, "ES8388"},
+    {0x13, "ES7243"},
+    {0x18, "ES8311 (ESP32-P4 common on-board mic)"},
+    {0x1A, "WM8978/AC101"},
+
+    // Common sensors & devices
+    {0x19, "LIS3DH (alt)"},
+    {0x1C, "MMA8452Q"},
+    {0x1D, "ADXL345/MMA8452Q"},
+    {0x20, "PCF8574/TCA6408"},
+    {0x23, "BH1750"},
+    {0x27, "PCF8574/LCD"},
+    {0x29, "VL53L0X/VL53L1X/VL53L8CX"},
+    {0x38, "FT6336/AHT10/VEML6070"},
+    {0x39, "APDS9960/TSL2561"},
+    {0x3C, "SSD1306 OLED"},
+    {0x3D, "SSD1306 OLED (alt)"},
+    {0x40, "INA219/HDC1080/PCA9685"},
+    {0x44, "SHT30/SHT31"},
+    {0x48, "ADS1115/TMP102/PCF8591"},
+    {0x49, "ADS1115 (alt)/TSL2561"},
+    {0x4A, "MAX44009"},
+    {0x50, "AT24C32 EEPROM"},
+    {0x51, "PCF8563 RTC"},
+    {0x52, "Nunchuk/VL53L8CX (LP)"},
+    {0x53, "ADXL345 (alt)"},
+    {0x57, "MAX30102"},
+    {0x5A, "MLX90614/CCS811/MPR121"},
+    {0x5B, "CCS811 (alt)/MPR121"},
+    {0x5C, "AM2320/BH1750 (alt)"},
+    {0x60, "SI1145/MCP4725"},
+    {0x62, "SCD30/TSL2591"},
+    {0x68, "DS3231 RTC/MPU6050/ICM20948"},
+    {0x69, "MPU6050 (alt)/ICM20948"},
+    {0x76, "BME280/BMP280/MS5611"},
+    {0x77, "BME280/BMP180/BMP085"},
+    {0x78, "S11059"},
+  };
+  const int knownCount = sizeof(knownDevices) / sizeof(knownDevices[0]);
+
+  auto getName = [&](uint8_t addr) -> const char* {
+    for (int i = 0; i < knownCount; i++) {
+      if (knownDevices[i].addr == addr) return knownDevices[i].name;
+    }
+    return nullptr;
+    };
+
+  Serial.println(F("\n--- I2C Scan ---"));
+  int found = 0;
+  for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+    wire.beginTransmission(addr);
+    if (wire.endTransmission() == 0) {
+      found++;
+      Serial.printf("  0x%02X: ", addr);
+      const char* name = getName(addr);
+      Serial.println(name ? name : "Unknown");
+    }
+  }
+  Serial.printf("--- %d device(s) found ---\n\n", found);
+}
 
 //helper to get int value at a position in string
 int getNumVal(const String* req, uint32_t pos)
