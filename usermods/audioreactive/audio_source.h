@@ -240,12 +240,16 @@ class I2SSource : public AudioSource {
 
     virtual void initialize(int8_t i2swsPin = I2S_PIN_NO_CHANGE, int8_t i2ssdPin = I2S_PIN_NO_CHANGE, int8_t i2sckPin = I2S_PIN_NO_CHANGE, int8_t mclkPin = I2S_PIN_NO_CHANGE) {
       DEBUGSR_PRINTLN("I2SSource:: initialize().");
-      if (i2swsPin != I2S_PIN_NO_CHANGE && i2ssdPin != I2S_PIN_NO_CHANGE) {
-        if (!pinManager.allocatePin(i2swsPin, true, PinOwner::UM_Audioreactive) ||
-            !pinManager.allocatePin(i2ssdPin, false, PinOwner::UM_Audioreactive)) { // #206
-          ERRORSR_PRINTF("\nAR: Failed to allocate I2S pins: ws=%d, sd=%d\n",  i2swsPin, i2ssdPin); 
-          return;
-        }
+
+      if (i2swsPin == I2S_PIN_NO_CHANGE || i2ssdPin == I2S_PIN_NO_CHANGE || i2sckPin == I2S_PIN_NO_CHANGE) {
+        USER_PRINTLN("I2SSource:: Pins not configured, skipping initialization.");
+        return;
+      }
+
+      if (!pinManager.allocatePin(i2swsPin, true, PinOwner::UM_Audioreactive) ||
+        !pinManager.allocatePin(i2ssdPin, false, PinOwner::UM_Audioreactive)) {
+        ERRORSR_PRINTF("\nAR: Failed to allocate I2S pins: ws=%d, sd=%d\n", i2swsPin, i2ssdPin);
+        return;
       }
 
       // i2ssckPin needs special treatment, since it might be unused on PDM mics
@@ -260,7 +264,7 @@ class I2SSource : public AudioSource {
           #warning this MCU does not support PDM microphones
           #endif
         #endif
-        #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3)
+        #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         // This is an I2S PDM microphone, these microphones only use a clock and
         // data line, to make it simpler to debug, use the WS pin as CLK and SD pin as DATA
         // example from espressif: https://github.com/espressif/esp-idf/blob/release/v4.4/examples/peripherals/i2s/i2s_audio_recorder_sdcard/main/i2s_recorder_main.c
