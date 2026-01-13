@@ -1514,9 +1514,9 @@ class AudioReactive : public Usermod {
       if(printMinVal) {
         PLOT_PRINTF("%04d:minVal ", minVal);  // printed with value first, then label, so negative values can be seen in Serial Monitor but don't throw off y axis in Serial Plotter
       }
-      if(mapValuesToPlotterSpace)
+      if(mapValuesToPlotterSpace) {
         PLOT_PRINTF("max:%04d ", (printMaxVal ? 17 : 16)*256); // print line above the maximum value we expect to see on the plotter to avoid autoscaling y axis
-      else {
+      } else {
         PLOT_PRINTF("max:%04d ", 256);
       }
       PLOT_PRINTLN();
