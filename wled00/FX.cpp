@@ -10484,8 +10484,6 @@ uint16_t mode_PRO_LINK() {
   const uint32_t width = SEGMENT.virtualWidth();
   const uint32_t height = SEGMENT.virtualHeight();
 
-  if (width < 128 || height < 128) return mode_static(); // this isn't for little matrix sizes. <3
-
   // Allocate WLED Effect Data
   if (!SEGENV.allocateData(4)) return mode_static();
 
@@ -10501,6 +10499,32 @@ uint16_t mode_PRO_LINK() {
   } else {
     return 1;
   }
+
+  // --- 2. FAST BACKGROUND FILL (PPA) ---
+  // Fill the whole screen with background color (or black) using PPA 
+  ppa_fill_oper_config_t fill_config = {};
+  fill_config.out.buffer = busPixelData;
+  fill_config.out.buffer_size = busPixelSize;
+  fill_config.out.pic_w = width;
+  fill_config.out.pic_h = height;
+  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
+  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
+  fill_config.fill_block_w = width;
+  fill_config.fill_block_h = height;
+
+  if (SEGMENT.speed > 0) {
+    CHSV hsvColor(SEGMENT.speed, 255, (float)prolink_beat_flash_brightness);
+    CRGB rgbColor = hsvColor;
+    fill_config.fill_argb_color.r = rgbColor.r;
+    fill_config.fill_argb_color.g = rgbColor.g;
+    fill_config.fill_argb_color.b = rgbColor.b;
+  } else {
+    // Fast zero out
+    fill_config.fill_argb_color.val = 0;
+  }
+  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
+
+  if (width < 128 || height < 128) return FRAMETIME; // this isn't for little matrix sizes so just do beat flash.
 
   // --- STATIC CACHE (Persists between frames) ---
   // We use static to avoid allocating these on the stack every 16ms
@@ -10553,31 +10577,6 @@ uint16_t mode_PRO_LINK() {
   } else if (!prolink_artwork_valid) {
     has_valid_cache = false; // Invalidate if prolink says no artwork
   }
-
-  // --- 2. FAST BACKGROUND FILL (PPA) ---
-  // Fill the whole screen with background color (or black) using PPA 
-  ppa_fill_oper_config_t fill_config = {};
-  fill_config.out.buffer = busPixelData;
-  fill_config.out.buffer_size = busPixelSize;
-  fill_config.out.pic_w = width;
-  fill_config.out.pic_h = height;
-  fill_config.out.fill_cm = PPA_FILL_COLOR_MODE_RGB888;
-  fill_config.mode = PPA_TRANS_MODE_BLOCKING;
-  fill_config.fill_block_w = width;
-  fill_config.fill_block_h = height;
-
-  if (SEGMENT.speed > 0) {
-    CHSV hsvColor(SEGMENT.speed, 255, (float)prolink_beat_flash_brightness);
-    CRGB rgbColor = hsvColor;
-    fill_config.fill_argb_color.r = rgbColor.r;
-    fill_config.fill_argb_color.g = rgbColor.g;
-    fill_config.fill_argb_color.b = rgbColor.b;
-  } else {
-    // Fast zero out
-    fill_config.fill_argb_color.val = 0;
-  }
-  ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_fill(ppa_fill_handle, &fill_config));
-
 
   // --- 3. ARTWORK BLIT (PPA) ---
   // Only blit if we have a valid cached bitmap
