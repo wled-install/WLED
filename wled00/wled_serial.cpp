@@ -266,8 +266,16 @@ void handleSerial() {
         USER_PRINT(max);
         USER_PRINT(" = ");
         for (int i = 0; i < 16; i++) {
-          fftBinAverage[i] = mapf(fftBinAverage[i], min, max, (max / min), 1.00f);
-          USER_PRINTF("%1.2f, ", fftBinAverage[i]);
+          USER_PRINTF("%5.2f, ", fftBinAverage[i]);
+        }
+        USER_PRINTLN();
+        USER_PRINT(min);
+        USER_PRINT(",");
+        USER_PRINT(max);
+        USER_PRINT(" = ");
+        for (int i = 0; i < 16; i++) {
+          fftBinAverage[i] = mapf(fftBinAverage[i], min, max, (max / min), 0) + 1.70f;
+          USER_PRINTF("%5.2f, ", fftBinAverage[i]);
         }
         USER_PRINTLN();
       }
