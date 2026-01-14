@@ -714,8 +714,8 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x41, 0x70);  // 0x70 standard bias (0x7F is max)
 
       // --- 6. GAIN (no ALC) ---
-      _es8311I2cWrite(0x43, 0x14);
-      _es8311I2cWrite(0x44, 0x14);
+      _es8311I2cWrite(0x43, 0x18);
+      _es8311I2cWrite(0x44, 0x18);
       _es8311I2cWrite(0x16, 0x00);  // ALC off
 
       // --- 7. MIC POWER ---
