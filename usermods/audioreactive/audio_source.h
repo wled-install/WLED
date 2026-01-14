@@ -687,86 +687,48 @@ class ES8311Source : public I2SSource {
       }
     }
 
-    void es7210_init_22k_24bit() {
+    void es7210_init_22k_32bit() {
       _es8311I2cBegin();
 
       // --- 1. RESET ---
-      _es8311I2cWrite(0x00, 0xFF); // Reset all
+      _es8311I2cWrite(0x00, 0xFF);
       vTaskDelay(pdMS_TO_TICKS(10));
-      _es8311I2cWrite(0x00, 0x32); // Normal operation, analog power on
+      _es8311I2cWrite(0x00, 0x32);
 
-      // --- 2. CLOCK CONFIGURATION (PLL MODE) ---
-      // We use the PLL to boost the slow 22k MCLK up to a stable analog speed.
-      _es8311I2cWrite(0x01, 0x20); // Turn MCLK on
-      _es8311I2cWrite(0x02, 0x08); // ENABLE PLL (Critical for low sample rates)
+      // --- 2. SLAVE MODE (clocks from ESP32) ---
+      _es8311I2cWrite(0x08, 0x00);  // Slave mode
+      // _es8311I2cWrite(0x06, 0x04);  // DLL off (not needed in slave mode)
 
-      // Clock Dividers (0x10 = Divide by 16). 
-      // Because PLL boosts the clock high, we need to divide it hard to get back to 22k.
-      _es8311I2cWrite(0x03, 0x10);
-      _es8311I2cWrite(0x04, 0x10);
-      _es8311I2cWrite(0x05, 0x00);
+      // --- 3. I2S FORMAT ---
+      _es8311I2cWrite(0x09, 0x30);  // Timing control
+      _es8311I2cWrite(0x0A, 0x30);  // Timing control
+      _es8311I2cWrite(0x11, 0x80);  // 32-bit I2S
+      _es8311I2cWrite(0x12, 0x00);  // MIC1/2 on SDOUT1
 
-      // --- 3. FORMAT & MODE ---
-      _es8311I2cWrite(0x08, 0x00); // Slave Mode
-      _es8311I2cWrite(0x09, 0x30); // ADC Control 1
-      _es8311I2cWrite(0x0A, 0x30); // ADC Control 2
-      _es8311I2cWrite(0x11, 0x80); // 32-bit I2S format
-      _es8311I2cWrite(0x12, 0x00); // Output ADC1/2 on SDOUT
+      // --- 4. HIGH PASS FILTER ---
+      _es8311I2cWrite(0x22, 0x0A);
+      _es8311I2cWrite(0x23, 0x2A);
 
-      // --- 4. ANALOG CONFIG ---
-      _es8311I2cWrite(0x22, 0x0A); // HPF
-      _es8311I2cWrite(0x23, 0x2A); // HPF
-      _es8311I2cWrite(0x40, 0xC3); // Analog Power & Bias enabled
-      _es8311I2cWrite(0x41, 0x7F); // Vref enabled
+      // --- 5. ANALOG POWER ---
+      _es8311I2cWrite(0x40, 0xC3);
+      _es8311I2cWrite(0x41, 0x70);  // 0x70 standard bias (0x7F is max)
 
-      // --- 5. GAIN CONTROL ---
-      // 0x00 = 0dB
-      // 0x10 = 24dB 
-      // 0x13 = 28dB (Current)
-      // If audio is distorted, lower this to 0x10 or 0x08!
-      _es8311I2cWrite(0x43, 0x1E); // Mic 1 Gain
-      _es8311I2cWrite(0x44, 0x1E); // Mic 2 Gain
+      // --- 6. GAIN (no ALC) ---
+      _es8311I2cWrite(0x43, 0x14);
+      _es8311I2cWrite(0x44, 0x14);
+      _es8311I2cWrite(0x16, 0x00);  // ALC off
 
-      // Note: You don't strictly need to set Gains 45/46 if you are only using ADC1/2 (Reg 0x12=0x00)
-      // but it doesn't hurt to set them.
-      _es8311I2cWrite(0x45, 0x1E);
-      _es8311I2cWrite(0x46, 0x1E);
+      // --- 7. MIC POWER ---
+      _es8311I2cWrite(0x47, 0x08);  // MIC1 power
+      _es8311I2cWrite(0x48, 0x08);  // MIC2 power
+      _es8311I2cWrite(0x49, 0x00);  // MIC3 OFF
+      _es8311I2cWrite(0x4A, 0x00);  // MIC4 OFF
+      _es8311I2cWrite(0x4B, 0x0F);  // ADC1/2 power
+      _es8311I2cWrite(0x4C, 0x00);  // ADC3/4 OFF
 
-      // --- 6. MIC POWER ---
-      _es8311I2cWrite(0x47, 0x08); // Mic 1 Bias Power
-      _es8311I2cWrite(0x48, 0x08); // Mic 2 Bias Power
-      _es8311I2cWrite(0x49, 0x08); // Mic 3 Bias Power
-      _es8311I2cWrite(0x4A, 0x08); // Mic 4 Bias Power
-      _es8311I2cWrite(0x4B, 0x0F); // ADC 1/2 Power Up
-      _es8311I2cWrite(0x4C, 0x0F); // ADC 3/4 Power Up
-
-      // --- 6. ALC (Auto Gain) CONFIG ---
-
-      // Reg 0x18: ALC Control 1
-      // Bit 7: Enable (1=On)
-      // Bit 6: Mode (0=Normal)
-      // Bits 5-4: Unused
-      // Bits 3-0: Target Level (The volume it tries to maintain)
-      //    0000 = -4.5dB (Loudest target)
-      //    1011 = -22.5dB (Quieter target)
-      //    Setting to 0xC0 (Enable + Target -4.5dB)
-      // _es8311I2cWrite(0x18, 0xC0);
-
-      // Reg 0x19: Gain Limits
-      // Bits 7-4: Max Gain (How much it's allowed to boost)
-      //    0000 = -6.5dB (No boost allowed)
-      //    1111 = +35.5dB (Huge boost allowed)
-      // Bits 3-0: Min Gain (How much it's allowed to cut)
-      //    Setting 0xF0 (Max boost +35dB, Min gain -12dB)
-      // _es8311I2cWrite(0x19, 0xF0);
-
-      // Reg 0x1A: Time Settings (Attack / Decay)
-      // How fast it reacts to loud sounds (Attack) vs quiet sounds (Decay)
-      // 0x22 is a good default for voice.
-      // _es8311I2cWrite(0x1A, 0x22);
-
-      // --- 7. START ---
-      _es8311I2cWrite(0x00, 0xC1); // Run State
+      // --- 8. START ---
+      _es8311I2cWrite(0x00, 0x71);
+      _es8311I2cWrite(0x00, 0x41);
     }
 
     void _es8311InitAdc() {
@@ -810,9 +772,28 @@ class ES8311Source : public I2SSource {
       _es8311I2cWrite(0x00, 0b10000000); // *** RESET (This is very required! Thanks to ESPHome for the hint!)
     }
 
-  public:
-    ES8311Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
-      I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
+    void es8311_disable() {
+      Wire.setClock(100000);
+
+      Wire.beginTransmission(0x18);
+      Wire.write(0x00);
+      Wire.write(0x1F);  // Hold in reset
+      Wire.endTransmission();
+
+      Wire.beginTransmission(0x18);
+      Wire.write(0x0D);
+      Wire.write(0x00);  // Power down analog
+      Wire.endTransmission();
+
+      Wire.beginTransmission(0x18);
+      Wire.write(0x0C);
+      Wire.write(0x00);  // Power down digital
+      Wire.endTransmission();
+    }
+
+public:
+  ES8311Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster = true) :
+    I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
       _config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
     };
 
@@ -836,10 +817,10 @@ class ES8311Source : public I2SSource {
       }
 
       if (es7210_present()) {
-        USER_PRINTLN("Overriding ES8311 becasue an ES7210 is present.");  
-        // _es8311InitAdc();
+        USER_PRINTLN("Overriding ES8311 becasue an ES7210 is present.");
+        es8311_disable();
         ES7210_present = true;
-        es7210_init_22k_24bit();
+        es7210_init_22k_32bit();
       } else {
         _es8311InitAdc();
       }
