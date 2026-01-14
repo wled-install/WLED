@@ -185,6 +185,11 @@ void WS2812FX::setUpMatrix() {
     }
   }
   
+  
+  if (bakeMap && customMappingTable != nullptr && customMappingTableSize > 0) {
+    saveBakedLedMap("Panel_Map", Segment::maxWidth, Segment::maxHeight, customMappingTable, customMappingTableSize);
+  }
+
   #ifdef WLEDMM_REMAP_AT_OUTPUT
   if (customMappingTable != nullptr && customMappingSize > 0) {
     invertMappingTable();

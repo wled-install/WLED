@@ -397,6 +397,7 @@ void userLoop();
 bool is_sdcard_mounted(void);
 
 //util.cpp
+bool saveBakedLedMap(const char* name, uint16_t width, uint16_t height, uint32_t* mappingTable, uint32_t tableSize, const char* filename = "/panel_map.json");
 void scanI2C(TwoWire& wire = Wire);
 void dumpAllTaskHWMs(void);
 #define inoise8 perlin8   // fastled legacy alias
