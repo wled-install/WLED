@@ -982,7 +982,7 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
     eth_is_connected = false;
     // USER_PRINTLN("Event: Ethernet Started");
   } else {
-    USER_PRINTF("Event: Ethernet Undeclared Error %d\n", event_id);
+    USER_PRINTF("Event: Ethernet Undeclared Event %d\n", event_id);
   }
 }
 
@@ -1324,29 +1324,107 @@ void WLED::setup() {
       eth_netif = esp_netif_new(&cfg);
       assert(eth_netif);
 
-      // Initialize Ethernet driver
-      eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-      esp32_emac_config.smi_gpio.mdc_num = 31;
-      esp32_emac_config.smi_gpio.mdio_num = 52;
-      eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-      eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-      phy_config.phy_addr = 1; // Set PHY address
-      phy_config.reset_gpio_num = 51; // Set PHY reset GPIO number
+      #ifdef CONFIG_ETH_USE_ESP32_EMAC
+        // Initialize Ethernet driver
+        eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+        esp32_emac_config.smi_gpio.mdc_num = 31;
+        esp32_emac_config.smi_gpio.mdio_num = 52;
+        eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+        eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+        phy_config.phy_addr = 1; // Set PHY address
+        phy_config.reset_gpio_num = 51; // Set PHY reset GPIO number
 
-      esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
-      esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
+        esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
+        esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
 
-      esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
-      
-      ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
-      ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+        esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+        
+        ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+        ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
 
-      // Start Ethernet driver
-      ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+        // Start Ethernet driver
+        ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
-      // Register event handler for Ethernet events
-      ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
-      ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+        // Register event handler for Ethernet events
+        ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+      #elif defined(CONFIG_ETH_USE_SPI_ETHERNET) && defined(CONFIG_ETH_SPI_ETHERNET_W5500)
+        USER_PRINTLN("Setup W5500 for ESP32-C5 (IDF v5)...");
+
+        // --- PIN DEFINITIONS (Native IO MUX for SPI2 on C5) ---
+        gpio_num_t w5500_miso = GPIO_NUM_2;
+        gpio_num_t w5500_mosi = GPIO_NUM_7;
+        gpio_num_t w5500_sclk = GPIO_NUM_6;
+        gpio_num_t w5500_csss = GPIO_NUM_10;
+        gpio_num_t w5500_rset = GPIO_NUM_24;
+        // Note: We are using Polling Mode, so Interrupt Pin is not used here.
+
+        // Define Host
+        #define W5500_HOST_ID SPI2_HOST
+
+        // 1. SPI Bus Config
+        // Note: Strict order is required for C++ compilers
+        spi_bus_config_t buscfg = {
+            .mosi_io_num = w5500_mosi,
+            .miso_io_num = w5500_miso,
+            .sclk_io_num = w5500_sclk,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .data4_io_num = -1,
+            .data5_io_num = -1,
+            .data6_io_num = -1,
+            .data7_io_num = -1,
+            .max_transfer_sz = 4092,
+        };
+
+        ESP_ERROR_CHECK(spi_bus_initialize(W5500_HOST_ID, &buscfg, SPI_DMA_CH_AUTO));
+
+        // 2. SPI Device Config
+        spi_device_interface_config_t spi_devcfg = {
+            .mode = 0,
+            .clock_speed_hz = 12 * 1000 * 1000, // Reduced to 12MHz for stability
+            .spics_io_num = w5500_csss,
+            .queue_size = 1
+        };
+
+        // 3. W5500 Config (Polling Mode)
+        eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(W5500_HOST_ID, &spi_devcfg);
+        w5500_config.int_gpio_num = -1;  // Disable Interrupts (Polling Mode)
+        w5500_config.poll_period_ms = 10; // Poll every 10ms
+
+        eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+        mac_config.sw_reset_timeout_ms = 1000;
+
+        eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+        phy_config.reset_gpio_num = w5500_rset;
+        phy_config.phy_addr = -1;
+
+        // 4. Create Driver Instances
+        esp_eth_mac_t* mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
+        esp_eth_phy_t* phy = esp_eth_phy_new_w5500(&phy_config);
+
+        esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+
+        // 5. Install Driver
+        ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+
+        // 6. Attach to Netif (This AUTOMATICALLY registers the default handlers in v5)
+        ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+
+        // 7. Start Driver
+        ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+
+        // 8. VERIFY MAC ADDRESS (Debugging Step)
+        // If this prints 00:00:00..., your SPI MISO line is likely broken.
+        uint8_t mac_addr[6] = { 0 };
+        esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+        USER_PRINTF("W5500 MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+          mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
+        // 9. Register Application Events
+        ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+      #endif
     #endif
   #endif
 
