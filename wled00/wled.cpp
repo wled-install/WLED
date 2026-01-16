@@ -41,6 +41,8 @@ static const char *TAG = "WLED";
   #include "driver/sdmmc_host.h"
   #include "driver/gpio.h"
 
+  // SOC_SDMMC_HOST_SUPPORTED needs to be checked for SDMMC cards support.
+  
   #define MOUNT_POINT "/sdcard"
   #define SD_POWER_PIN GPIO_NUM_45
 
@@ -2207,7 +2209,11 @@ void WLED::handleConnection() {
       return;
     }
     #if !defined(WLED_USE_ETHERNET_ONLY)
-    if (!apActive && now - lastReconnectAttempt > 12000 && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
+    uint16_t connect_timeout = 12000;
+    #ifdef CONFIG_IDF_TARGET_ESP32C5
+    connect_timeout *= 3; // 5ghz can take longer to spin up.
+    #endif
+    if (!apActive && now - lastReconnectAttempt > connect_timeout && (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)) {
       USER_PRINTLN(F("Not connected, starting AP."));
       initAP();
     }
