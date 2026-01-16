@@ -1731,12 +1731,16 @@ void WLED::setup() {
     USER_PRINTLN(F("\n"));
     #endif
 
+    #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     scanI2C(Wire);
+    #endif
 
+    #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     err_t sdcarderr = mount_sdcard();
     if (sdcarderr == ESP_OK) {
       ImageCacheManager::getInstance().startPreload("/sdcard");
     }
+    #endif 
 
     strip.createLedmapBinaryCache();
 
