@@ -47,6 +47,7 @@ void WS2812FX::setUpMatrix() {
 
     // Check if mapping table is necessary
     bool needLedMap = (loadedLedmap > 0);
+    needLedMap |= bakeMap; // we want to save the map to a file even if we'll discard it later as it's 1:1
     needLedMap |= WLED_FS.exists(F("/2d-gaps.json"));
     needLedMap |= panel.size() > 1;
     if (panel.size() == 1) {
@@ -145,6 +146,10 @@ void WS2812FX::setUpMatrix() {
           gapTable = nullptr;
         }
 
+        if (bakeMap && customMappingTable != nullptr && customMappingTableSize > 0) {
+          saveBakedLedMap("Panel_Map", Segment::maxWidth, Segment::maxHeight, customMappingTable, customMappingTableSize);
+        }
+
         #ifdef WLED_DEBUG_MAPS
         DEBUG_PRINTF("Matrix ledmap:\n");
         for (uint32_t i = 0; i < customMappingSize; i++) {
@@ -185,11 +190,6 @@ void WS2812FX::setUpMatrix() {
     }
   }
   
-  
-  if (bakeMap && customMappingTable != nullptr && customMappingTableSize > 0) {
-    saveBakedLedMap("Panel_Map", Segment::maxWidth, Segment::maxHeight, customMappingTable, customMappingTableSize);
-  }
-
   #ifdef WLEDMM_REMAP_AT_OUTPUT
   if (customMappingTable != nullptr && customMappingSize > 0) {
     invertMappingTable();
