@@ -5,6 +5,7 @@
 #include "lwip/netdb.h"
 #include "mdns.h"
 #include "esp_netif_net_stack.h"
+#include "esp_mac.h"
 
 IPAddress NetworkClass::localIP() {
   esp_netif_ip_info_t ip_info;
