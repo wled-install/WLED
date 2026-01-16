@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
+#include "freertos/event_groups.h"
 #include <ctime>
 
 #ifndef IMAGECACHE_BG_PRIORITY
@@ -69,6 +70,7 @@ using mjpeg_cache_map = std::map<psram_string, CachedMJPEG, std::less<psram_stri
 class ImageCacheManager {
 public:
   static ImageCacheManager& getInstance();
+  bool waitUntilIdle(TickType_t timeout_ticks = portMAX_DELAY);
 
   // Main API
   size_t getFolderSizeFromDisk(const std::string& folder_path);
@@ -124,6 +126,10 @@ private:
   // Limits
   size_t psram_limit;
   size_t psram_used;
+
+  EventGroupHandle_t status_events;
+  static constexpr int EVT_IDLE = BIT0;
+  
 };
 
 #endif // IMAGE_CACHE_MANAGER_H

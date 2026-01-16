@@ -19,6 +19,8 @@ ImageCacheManager::ImageCacheManager() :
   psram_limit(0),
   psram_used(0) {
   cache_mutex = xSemaphoreCreateMutex();
+  status_events = xEventGroupCreate();
+  xEventGroupSetBits(status_events, EVT_IDLE); // Start idle
   size_t total_psram = esp_psram_get_size();
   psram_limit = static_cast<size_t>(total_psram * 0.8);
   ESP_LOGI(TAG, "Total PSRAM: %u bytes, Cache Limit (80%%): %u bytes", total_psram, psram_limit);
@@ -26,6 +28,9 @@ ImageCacheManager::ImageCacheManager() :
 
 ImageCacheManager::~ImageCacheManager() {
   clearCache();
+  if (status_events) {
+    vEventGroupDelete(status_events);
+  }
   vSemaphoreDelete(cache_mutex);
 }
 
@@ -418,6 +423,8 @@ void ImageCacheManager::_backgroundSyncTask(void* params) {
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 
+  xEventGroupSetBits(manager->status_events, EVT_IDLE);
+  
   manager->current_status = CacheStatus::IDLE;
   xSemaphoreTake(manager->cache_mutex, portMAX_DELAY);
   manager->current_loading_file = "";
@@ -512,6 +519,7 @@ ImageData* ImageCacheManager::_getImageByIndex(const psram_string& folder_path, 
 }
 
 void ImageCacheManager::startPreload(const std::string& root_path) {
+  xEventGroupClearBits(status_events, EVT_IDLE);
   DIR* dir = opendir(root_path.c_str());
   if (!dir) {
     ESP_LOGE(TAG, "Failed to open root directory: %s", root_path.c_str());
@@ -612,4 +620,15 @@ void ImageCacheManager::clearCache() {
   pending_sync_folders.clear();
   psram_used = 0;
   xSemaphoreGive(cache_mutex);
+}
+
+bool ImageCacheManager::waitUntilIdle(TickType_t timeout_ticks) {
+  EventBits_t bits = xEventGroupWaitBits(
+    status_events,
+    EVT_IDLE,
+    pdFALSE,  // Don't clear on exit
+    pdTRUE,   // Wait for all bits
+    timeout_ticks
+  );
+  return (bits & EVT_IDLE) != 0;
 }
