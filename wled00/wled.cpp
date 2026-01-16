@@ -939,7 +939,7 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
         // Shut down AP since we now have a connection
         esp_wifi_set_mode(WIFI_MODE_STA);
         apActive = false;
-        USER_PRINTLN("Disabled AP (connection established)");
+        if (apActive) USER_PRINTLN("Disabled AP (connection established)");
         break;
 
       case AP_BEHAVIOR_ALWAYS:
