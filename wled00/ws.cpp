@@ -244,6 +244,7 @@ static void populatePixelData(uint8_t* buffer, size_t bufferSize, size_t headerS
   }
 }
 
+#if defined(SOC_PPA_SUPPORTED)
 static bool sendLiveLedsWs(uint32_t wsClient) {
   if (!busses.canAllShow()) return false;
   AsyncWebSocketClient* wsc = ws.client(wsClient);
@@ -368,6 +369,64 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
   wsc->binary(std::move(wsBuf));
   return true;
 }
+#else
+static bool sendLiveLedsWs(uint32_t wsClient) {
+  AsyncWebSocketClient* wsc = ws.client(wsClient);
+  if (!wsc || wsc->queueLength() > 0) return false; // Client invalid or busy
+
+  // Check for memory backoff period
+  static unsigned long memory_backoff_ts = 0;
+  if (memory_backoff_ts > 0 && millis() - memory_backoff_ts < LiveLedsWS::MEMORY_BACKOFF_MS) {
+    return false;
+  }
+  memory_backoff_ts = 0;
+
+  const size_t totalLeds = strip.getLengthTotal();
+  if (totalLeds == 0) return false;
+
+  const size_t samplingFactor = calculateSamplingFactor();
+  const size_t ledsToSend = totalLeds / samplingFactor;
+
+  // Determine header size and version based on strip type
+  const bool isMatrix =
+    #ifndef WLED_DISABLE_2D
+    strip.isMatrix;
+  #else
+    false;
+  #endif
+  const size_t headerSize = isMatrix ? LiveLedsWS::HEADER_SIZE_2D : LiveLedsWS::HEADER_SIZE_1D;
+
+  // Allocate buffer
+  const size_t bufSize = headerSize + ledsToSend * 3;
+  AsyncWebSocketBuffer wsBuf(bufSize);
+  if (!wsBuf) {
+    USER_PRINTF("WS buffer allocation failed (%u bytes).\n", bufSize);
+    errorFlag = ERR_LOW_WS_MEM;
+    #ifdef ARDUINO_ARCH_ESP32
+    memory_backoff_ts = millis(); // Suspend live preview
+    #endif
+    return false;
+  }
+
+  uint8_t* buffer = reinterpret_cast<uint8_t*>(wsBuf.data());
+
+  // Populate header
+  buffer[0] = LiveLedsWS::MESSAGE_ID;
+  if (isMatrix) {
+    buffer[1] = LiveLedsWS::VERSION_2D;
+    buffer[2] = MIN(Segment::maxWidth / samplingFactor, 255);
+    buffer[3] = MIN(Segment::maxHeight / samplingFactor, 255);
+  } else {
+    buffer[1] = LiveLedsWS::VERSION_1D;
+  }
+
+  // Populate pixel data
+  populatePixelData(buffer, bufSize, headerSize, samplingFactor);
+
+  wsc->binary(std::move(wsBuf));
+  return true;
+}
+#endif
 
 void handleWs()
 {
