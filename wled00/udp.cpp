@@ -1189,7 +1189,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
 
           processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
 
-          if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+          if (!artnetUdp.write(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
             USER_PRINTLN(F("Art-Net writeTo error"));
             return 1;
           }
