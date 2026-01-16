@@ -1682,6 +1682,16 @@ void WLED::setup() {
   DEBUG_PRINTLN(F("Reading config"));
   deserializeConfigFromFS();
 
+  #if defined(SOC_SDMMC_HOST_SUPPORTED)
+  err_t sdcarderr = mount_sdcard();
+  if (sdcarderr == ESP_OK) {
+    USER_PRINT("Starting SD card preload... ");
+    ImageCacheManager::getInstance().startPreload("/sdcard");
+    ImageCacheManager::getInstance().waitUntilIdle();
+    USER_PRINTLN("Done!");
+  }
+  #endif 
+
 #if defined(STATUSLED) && STATUSLED>=0
   if (!pinManager.isPinAllocated(STATUSLED)) {
     // NOTE: Special case: The status LED should *NOT* be allocated.
@@ -1814,13 +1824,6 @@ void WLED::setup() {
     #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     scanI2C(Wire);
     #endif
-
-    #if !defined(CONFIG_IDF_TARGET_ESP32C5)
-    err_t sdcarderr = mount_sdcard();
-    if (sdcarderr == ESP_OK) {
-      ImageCacheManager::getInstance().startPreload("/sdcard");
-    }
-    #endif 
 
     strip.createLedmapBinaryCache();
 
