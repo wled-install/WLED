@@ -834,7 +834,7 @@ class FastAsyncUDP : public AsyncUDP {
 
 public:
   // Call once at startup
-  bool begin(const IPAddress addr, uint16_t port) {
+  bool connect(const IPAddress addr, uint16_t port) {
     _pcb = udp_new();
     if (!_pcb) return false;
 
@@ -850,7 +850,7 @@ public:
     return true;
   }
 
-  size_t writeTo(const uint8_t* data, size_t len) {
+  size_t write(const uint8_t* data, size_t len) {
     pbuf* pbt = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
     if (!pbt) return 0;
 
@@ -936,11 +936,15 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
   // Efficiency: 94.9% | Header: 10 bytes | Max payload: 1440 bytes
   // ═══════════════════════════════════════════════════════════════════
   case 0: {
+    #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     static FastAsyncUDP ddpUdp;
+    #else
+    static AsyncUDP ddpUdp;
+    #endif
     static IPAddress lastClient((uint32_t)0);
 
     if ((uint32_t)client != (uint32_t)lastClient) {
-      ddpUdp.begin(client, DDP_DEFAULT_PORT);
+      ddpUdp.connect(client, DDP_DEFAULT_PORT);
       lastClient = client;
     }
     
@@ -974,7 +978,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
 
       processPixelData(packet_buffer + DDP_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
 
-      if (!ddpUdp.writeTo(packet_buffer, packetSize + DDP_HEADER_LEN)) {
+      if (!ddpUdp.write(packet_buffer, packetSize + DDP_HEADER_LEN)) {
         DEBUG_PRINTLN(F("DDP writeTo error"));
         return 1;
       }
@@ -1134,11 +1138,16 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
   }
 
   case 2: {
+    #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     static FastAsyncUDP artnetUdp;
+    #else
+    static AsyncUDP artnetUdp;
+    #endif
+    
     static IPAddress lastClient((uint32_t)0);
 
     if ((uint32_t)client != (uint32_t)lastClient) {
-      artnetUdp.begin(client, ARTNET_DEFAULT_PORT);
+      artnetUdp.connect(client, ARTNET_DEFAULT_PORT);
       lastClient = client;
     }
 
@@ -1222,7 +1231,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
           processPixelData(packet_buffer + ARTNET_HEADER_LEN, buffer_in, packetSize, bufferOffset, bri, isRGBW, color_order, length);
           #endif
 
-          if (!artnetUdp.writeTo(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
+          if (!artnetUdp.write(packet_buffer, packetSize + ARTNET_HEADER_LEN)) {
             USER_PRINTLN(F("Art-Net writeTo error"));
             return 1;
           }
