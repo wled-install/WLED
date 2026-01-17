@@ -41,7 +41,7 @@ static constexpr uint32_t PEER_TIMEOUT_MS = 5000;
 static constexpr uint32_t KEEPALIVE_INTERVAL_MS = 1500;
 static constexpr uint32_t PEER_CHECK_INTERVAL_MS = 2000;
 static constexpr uint32_t BEAT_FLASH_DURATION_MS = 300;
-static constexpr uint32_t STARTUP_DELAY_US = 0; // 10 * 1000000;  // 10 seconds in microseconds
+static constexpr uint32_t STARTUP_DELAY_US = 10 * 1000000;  // 10 seconds in microseconds
 
 static constexpr uint32_t WAVEFORM_COLLECT_MS = 1500;
 static constexpr uint32_t ARTWORK_COLLECT_MS = 5000;
@@ -1093,7 +1093,7 @@ private:
 
   void handleFetchStateMachine() {
     if (fetchState == RETRY_WAIT) {
-      if (millis() - stateTimer > FETCH_RETRY_DELAY_MS) startMetadataFetch();
+      if (millis() - stateTimer > FETCH_RETRY_DELAY_MS+hw_random(1000,2000)) startMetadataFetch();
       return;
     }
 
