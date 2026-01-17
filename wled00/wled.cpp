@@ -982,6 +982,9 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
     MDNS.addServiceTxt("wled", "tcp", "mac", escapedMac.c_str());
   } else if (event_id == ETHERNET_EVENT_START) {
     eth_is_connected = false;
+    char hostname[25];
+    prepareHostname(hostname);
+    Network.setHostname(hostname);
     // USER_PRINTLN("Event: Ethernet Started");
   } else {
     USER_PRINTF("Event: Ethernet Undeclared Event %d\n", event_id);
@@ -1148,6 +1151,10 @@ void WLED::setup() {
   } else {
     USER_PRINTLN(F("Mount FS succeeded.")); // WLEDMM
   }
+  DEBUG_PRINTLN(F("Reading config"));
+  deserializeConfigFromFS();
+  onload_loadedLedmap = loadedLedmap;
+
   esp_log_level_set("i2c", ESP_LOG_NONE);
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
@@ -1343,7 +1350,9 @@ void WLED::setup() {
         
         ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
         ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
-
+        char hostname[25];
+        prepareHostname(hostname);
+        Network.setHostname(hostname);
         // Start Ethernet driver
         ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
@@ -1693,10 +1702,6 @@ void WLED::setup() {
     USER_PRINTLN("Done!");
   }
   #endif 
-
-  DEBUG_PRINTLN(F("Reading config"));
-  deserializeConfigFromFS();
-  onload_loadedLedmap = loadedLedmap;
 
 #if defined(STATUSLED) && STATUSLED>=0
   if (!pinManager.isPinAllocated(STATUSLED)) {

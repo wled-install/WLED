@@ -420,6 +420,7 @@ bool oappendi(int i);          // append new number to temp buffer efficiently
 void sappend(char stype, const char* key, int val);
 void sappends(char stype, const char* key, char* val);
 void prepareHostname(char* hostname);
+bool startsWithWled(const char* s);
 bool isAsterisksOnly(const char* str, byte maxLen)  __attribute__((pure));
 bool requestJSONBufferLock(uint8_t module=255);
 void releaseJSONBufferLock();

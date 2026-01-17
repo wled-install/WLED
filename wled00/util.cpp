@@ -390,28 +390,41 @@ bool oappend(const char* txt)
 }
 
 
-void prepareHostname(char* hostname)
-{
-  sprintf_P(hostname, "wled-%*s", 6, escapedMac.c_str() + 6);
-  const char *pC = serverDescription;
-  uint8_t pos = 5;          // keep "wled-"
-  while (*pC && pos < 24) { // while !null and not over length
-    if (isalnum(*pC)) {     // if the current char is alpha-numeric append it to the hostname
-      hostname[pos] = *pC;
-      pos++;
-    } else if (*pC == ' ' || *pC == '_' || *pC == '-' || *pC == '+' || *pC == '!' || *pC == '?' || *pC == '*') {
-      hostname[pos] = '-';
-      pos++;
+bool startsWithWled(const char* s) {
+  return strncasecmp(s, "wled", 4) == 0;
+}
+
+void prepareHostname(char* hostname) {
+  const char* pC = serverDescription;
+
+  uint8_t pos = 0;
+
+  // Only add "wled-" if the provided name does NOT already start with "wled"
+  if (!startsWithWled(pC)) {
+    sprintf_P(hostname, "wled-%*s", 6, escapedMac.c_str() + 6);
+    pos = 5;  // continue after "wled-"
+  } else {
+    hostname[0] = '\0';  // start clean
+  }
+
+  // Append sanitized characters
+  while (*pC && pos < 24) {
+    if (isalnum(*pC)) {
+      hostname[pos++] = *pC;
+    } else if (*pC == ' ' || *pC == '_' || *pC == '-' || *pC == '+' ||
+      *pC == '!' || *pC == '?' || *pC == '*') {
+      hostname[pos++] = '-';
     }
-    // else do nothing - no leading hyphens and do not include hyphens for all other characters.
     pC++;
   }
-  //last character must not be hyphen
-  if (pos > 5) {
-    while (pos > 4 && hostname[pos -1] == '-') pos--;
-    hostname[pos] = '\0'; // terminate string (leave at least "wled")
+
+  // Trim trailing hyphens
+  if (pos > 0) {
+    while (pos > 0 && hostname[pos - 1] == '-') pos--;
+    hostname[pos] = '\0';
   }
 }
+
 
 
 bool isAsterisksOnly(const char* str, byte maxLen)
