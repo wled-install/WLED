@@ -1690,6 +1690,9 @@ void WLED::setup() {
 
   WLED_SET_AP_SSID(); // otherwise it is empty on first boot until config is saved
 
+  DEBUG_PRINTLN(F("Reading config"));
+  deserializeConfigFromFS();
+  
   #if defined(SOC_SDMMC_HOST_SUPPORTED)
   err_t sdcarderr = mount_sdcard();
   if (sdcarderr == ESP_OK) {
@@ -1811,26 +1814,6 @@ void WLED::setup() {
         USER_FLUSH();  // avoid lost lines (Serial buffer overflow)
       }
     }
-
-    #if 0 // for testing
-    USER_PRINTLN(F("\n"));
-    USER_PRINTF("ADC1-0 = %d, ADC1-3 = %d, ADC1-7 = %d, ADC2-0 = %d, ADC2-1 = %d, ADC2-8 = %d, ADC2-10 = %d\n",
-      pinManager.getADCPin(PM_ADC1, 0), pinManager.getADCPin(PM_ADC1, 3), pinManager.getADCPin(PM_ADC1, 7),
-      pinManager.getADCPin(PM_ADC2, 0), pinManager.getADCPin(PM_ADC2, 1), pinManager.getADCPin(PM_ADC2, 8),
-      pinManager.getADCPin(PM_ADC2, 10)
-    );
-    USER_PRINTLN();
-    for (int p = 0; p < 11; p++) {
-      if (pinManager.getADCPin(PinManagerClass::ADC1, p) < 255)
-        USER_PRINTF("ADC1-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC1, p));
-    }
-    USER_PRINTLN();
-    for (int p = 0; p < 11; p++) {
-      if (pinManager.getADCPin(PinManagerClass::ADC2, p) < 255)
-        USER_PRINTF("ADC2-%d = %d, ", p, pinManager.getADCPin(PinManagerClass::ADC2, p));
-    }
-    USER_PRINTLN(F("\n"));
-    #endif
 
     #if !defined(CONFIG_IDF_TARGET_ESP32C5)
     scanI2C(Wire);
