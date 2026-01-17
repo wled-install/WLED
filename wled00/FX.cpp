@@ -8346,7 +8346,6 @@ uint16_t mode_freqmatrix(void) { // Freqmatrix. By Andreas Pleschung. TroyHacks 
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
     SEGMENT.fill(BLACK);
-    USER_PRINTF("SEGLEN = %d\n", SEGLEN);
   }
 
   uint8_t secondHand = (SEGMENT.speed < 255) ? (micros() / (256 - SEGMENT.speed) / 500 % 16) : 0;
