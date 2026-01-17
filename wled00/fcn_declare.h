@@ -24,6 +24,7 @@ void deserializeConfigFromFS();
 bool deserializeConfigSec();
 void serializeConfig();
 void serializeConfigSec();
+bool getHostnameFromConfig(char* dest, size_t maxLen);
 
 template<typename DestType>
 bool getJsonValue(const JsonVariant& element, DestType& destination) {

@@ -1151,10 +1151,10 @@ void WLED::setup() {
   } else {
     USER_PRINTLN(F("Mount FS succeeded.")); // WLEDMM
   }
-  DEBUG_PRINTLN(F("Reading config"));
-  deserializeConfigFromFS();
-  onload_loadedLedmap = loadedLedmap;
-
+  DEBUG_PRINTLN(F("Reading host name"));
+  char hostname[33] = "wled-xxxx";
+  getHostnameFromConfig(hostname, sizeof(hostname));
+  DEBUG_PRINTF("hostname == %s\n", hostname);
   esp_log_level_set("i2c", ESP_LOG_NONE);
 
   #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
@@ -1350,8 +1350,6 @@ void WLED::setup() {
         
         ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
         ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
-        char hostname[25];
-        prepareHostname(hostname);
         Network.setHostname(hostname);
         // Start Ethernet driver
         ESP_ERROR_CHECK(esp_eth_start(eth_handle));
@@ -1692,7 +1690,8 @@ void WLED::setup() {
 
   DEBUG_PRINTLN(F("Reading config"));
   deserializeConfigFromFS();
-  
+  onload_loadedLedmap = loadedLedmap;
+
   #if defined(SOC_SDMMC_HOST_SUPPORTED)
   err_t sdcarderr = mount_sdcard();
   if (sdcarderr == ESP_OK) {

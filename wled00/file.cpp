@@ -563,3 +563,24 @@ bool handleFileRead(AsyncWebServerRequest* request, String path){
   if (path.equals("/cpal.htm"))    haveCpalFile = false;
   return false;
 }
+
+bool getHostnameFromConfig(char* dest, size_t maxLen) {
+  File f = WLED_FS.open("/cfg.json", "r");
+  if (!f) return false;
+
+  StaticJsonDocument<64> filter;
+  filter["id"]["name"] = true;
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, f, DeserializationOption::Filter(filter));
+  f.close();
+
+  if (err) return false;
+
+  const char* name = doc["id"]["name"];
+  if (name && name[0]) {
+    strlcpy(dest, name, maxLen);
+    return true;
+  }
+  return false;
+}
