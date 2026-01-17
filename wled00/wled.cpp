@@ -1681,6 +1681,8 @@ void WLED::setup() {
 
   DEBUG_PRINTLN(F("Reading config"));
   deserializeConfigFromFS();
+  onload_loadedLedmap = loadedLedmap;
+  USER_PRINTF("config file onload_loadedLedmap == %d\n", onload_loadedLedmap);
 
   #if defined(SOC_SDMMC_HOST_SUPPORTED)
   err_t sdcarderr = mount_sdcard();

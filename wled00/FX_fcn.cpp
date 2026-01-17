@@ -1973,6 +1973,8 @@ void WS2812FX::createLedmapBinaryCache() {
     }
   }
 
+  deserializeMap(onload_loadedLedmap);
+  onload_map_loaded = true;
   USER_PRINTLN(F("Ledmap binary cache complete"));
   #endif
 }
@@ -2749,10 +2751,17 @@ bool WS2812FX::deserializeMap(uint8_t n) {
         resetSegments(true);
       }
       interfaceUpdateCallMode = CALL_MODE_WS_SEND;
+      if (loadedLedmap == 0) return true;
     }
     return false;
   }
 
+  // USER_PRINTF("isFIle=%d  n=%d  loadedLedmap=%d  customMappingTableSize=%d  onload_loadedLedmap=%d onload_map_loaded=%d\n", isFile, n, loadedLedmap, customMappingSize, onload_loadedLedmap, onload_map_loaded);
+
+  if (isFile && n == loadedLedmap && customMappingTableSize != 0 && customMappingTable && onload_map_loaded) return true;
+
+  // USER_PRINTLN("Continuing with load...");
+  
   uint16_t width = 0, height = 0;
   uint32_t mapSize = 0;
   char mapName[33] = { 0 };  // 32 chars + null terminator

@@ -554,13 +554,19 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
   usermods.readFromJsonState(root);
 
   //WLEDMM
-  loadedLedmap = root[F("ledmap")] | loadedLedmap;
-  loadLedmap = loadedLedmap>=0; //WLEDMM included 0 to switch back to default
+  bool savemapstuff = false;
   if (root.containsKey("lm_lock")) {
+    if (loadedLedmap_lock != root[F("lm_lock")].as<bool>()) savemapstuff = true;
     loadedLedmap_lock = root[F("lm_lock")].as<bool>();
     USER_PRINT(F("JSON lm_lock received. New state: "));
     USER_PRINTLN(loadedLedmap_lock ? "LOCKED" : "UNLOCKED");
   }
+  if (!loadedLedmap_lock) {
+    USER_PRINTF("JSON Loading map %d\n", root[F("ledmap")]);
+    strip.deserializeMap(root[F("ledmap")]);
+  }
+  loadedLedmap = root[F("ledmap")];
+  if (savemapstuff) doSerializeConfig = true;
 
   byte ps = root[F("psave")];
   if (ps > 0 && ps < 251) savePreset(ps, nullptr, root);

@@ -308,6 +308,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     t = request->arg(F("BF")).toInt();
     if (t > 0) briMultiplier = t;
 
+    onload_map_loaded = false;
     doInitBusses = busesChanged;
   }
 
@@ -775,7 +776,8 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
       bakeMap = true;
       strip.setUpMatrix(); // will check limits
       strip.resetSegments(true);  //WLEDMM not makeAutoSegments(true) as we only want to change bounds
-      strip.deserializeMap();
+      onload_map_loaded = false;
+      strip.deserializeMap(loadedLedmap);
     } else {
       Segment::maxWidth  = strip.getLengthTotal();
       Segment::maxHeight = 1;
