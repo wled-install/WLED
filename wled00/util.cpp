@@ -1,6 +1,8 @@
 #include "wled.h"
 #include "fcn_declare.h"
 #include "const.h"
+#include <dirent.h>
+#include <sys/stat.h>
 
 void scanI2C(TwoWire& wire) {
   struct I2CDevice { uint8_t addr; const char* name; };
@@ -75,6 +77,110 @@ void scanI2C(TwoWire& wire) {
 int getNumVal(const String* req, uint32_t pos)
 {
   return req->substring(pos+3).toInt();
+}
+
+bool backupLittleFStoSD() {
+  // Delete oldest backup if it exists
+  struct stat st;
+  if (stat("/sdcard/littlefs_backup_9", &st) == 0) {
+    removeDirectory("/sdcard/littlefs_backup_9");
+  }
+
+  // Rotate existing backups 8->9, 7->8, ... 0->1
+  for (int i = 8; i >= 0; i--) {
+    char oldPath[32];
+    char newPath[32];
+    snprintf(oldPath, sizeof(oldPath), "/sdcard/littlefs_backup_%d", i);
+    snprintf(newPath, sizeof(newPath), "/sdcard/littlefs_backup_%d", i + 1);
+
+    if (stat(oldPath, &st) == 0) {
+      rename(oldPath, newPath);
+    }
+  }
+
+  // Create new backup at 0
+  mkdir("/sdcard/littlefs_backup_0", 0755);
+  return copyDirectory("/littlefs", "/sdcard/littlefs_backup_0");
+}
+
+bool removeDirectory(const char* path) {
+  DIR* dir = opendir(path);
+  if (!dir) return false;
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+      continue;
+    }
+
+    char fullPath[128];
+    snprintf(fullPath, sizeof(fullPath), "%s/%s", path, entry->d_name);
+
+    struct stat st;
+    if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
+      removeDirectory(fullPath);
+    } else {
+      remove(fullPath);
+    }
+  }
+
+  closedir(dir);
+  return rmdir(path) == 0;
+}
+
+bool copyFile(const char* srcPath, const char* destPath) {
+  FILE* src = fopen(srcPath, "rb");
+  if (!src) return false;
+
+  FILE* dest = fopen(destPath, "wb");
+  if (!dest) {
+    fclose(src);
+    return false;
+  }
+
+  uint8_t buf[512];
+  size_t bytesRead;
+  while ((bytesRead = fread(buf, 1, sizeof(buf), src)) > 0) {
+    fwrite(buf, 1, bytesRead, dest);
+  }
+
+  fclose(src);
+  fclose(dest);
+  return true;
+}
+
+bool copyDirectory(const char* srcDir, const char* destDir) {
+  DIR* dir = opendir(srcDir);
+  if (!dir) return false;
+
+  mkdir(destDir, 0755);
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    // Skip . and .. and mount points
+    if (strcmp(entry->d_name, ".") == 0 ||
+      strcmp(entry->d_name, "..") == 0 ||
+      strcmp(entry->d_name, "sdcard") == 0 ||
+      strncmp(entry->d_name, "usb", 3) == 0) {
+      continue;
+    }
+
+    char srcPath[128];
+    char destPath[128];
+    snprintf(srcPath, sizeof(srcPath), "%s%s%s",
+      srcDir, (strcmp(srcDir, "/") == 0) ? "" : "/", entry->d_name);
+    snprintf(destPath, sizeof(destPath), "%s/%s", destDir, entry->d_name);
+
+    struct stat st;
+    if (stat(srcPath, &st) == 0 && S_ISDIR(st.st_mode)) {
+      copyDirectory(srcPath, destPath);
+    } else {
+      copyFile(srcPath, destPath);
+    }
+  }
+
+  closedir(dir);
+  return true;
 }
 
 bool saveBakedLedMap(const char* name, uint16_t width, uint16_t height, uint32_t* mappingTable, uint32_t tableSize, const char* filename) {

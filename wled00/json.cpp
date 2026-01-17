@@ -558,8 +558,8 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
   if (root.containsKey("lm_lock")) {
     if (loadedLedmap_lock != root[F("lm_lock")].as<bool>()) savemapstuff = true;
     loadedLedmap_lock = root[F("lm_lock")].as<bool>();
-    USER_PRINT(F("JSON lm_lock received. New state: "));
-    USER_PRINTLN(loadedLedmap_lock ? "LOCKED" : "UNLOCKED");
+    DEBUG_PRINT(F("JSON lm_lock received. New state: "));
+    DEBUG_PRINTLN(loadedLedmap_lock ? "LOCKED" : "UNLOCKED");
   }
   if (!loadedLedmap_lock) {
     USER_PRINTF("JSON Loading map %d\n", root[F("ledmap")]);

@@ -94,6 +94,7 @@ bool writeObjectToFileUsingId(const char* file, uint16_t id, JsonDocument* conte
 bool writeObjectToFile(const char* file, const char* key, JsonDocument* content);
 bool readObjectFromFileUsingId(const char* file, uint16_t id, JsonDocument* dest);
 bool readObjectFromFile(const char* file, const char* key, JsonDocument* dest);
+bool readObjectFromFileSD(const char* file, const char* key, JsonDocument* dest);
 void updateFSInfo();
 void closeFile();
 void invalidateFileNameCache();   // WLEDMM call when new files were uploaded
@@ -394,10 +395,16 @@ void userSetup();
 void userConnected();
 void userLoop();
 
-bool is_sdcard_mounted(void);
-
 //util.cpp
 bool saveBakedLedMap(const char* name, uint16_t width, uint16_t height, uint32_t* mappingTable, uint32_t tableSize, const char* filename = "/panel_map.json");
+bool backupLittleFStoSD();
+bool copyDirectory(const char* srcDir, const char* destDir);
+bool copyFile(const char* srcPath, const char* destPath);
+bool removeDirectory(const char* path);
+
+// in wled.cpp for now
+bool is_sdcard_mounted(void);
+
 void scanI2C(TwoWire& wire = Wire);
 void dumpAllTaskHWMs(void);
 #define inoise8 perlin8   // fastled legacy alias

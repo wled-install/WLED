@@ -40,7 +40,7 @@ static const char *TAG = "WLED";
   #include "sdmmc_cmd.h"
   #include "driver/sdmmc_host.h"
   #include "driver/gpio.h"
-
+  #include <sys/stat.h>
   // SOC_SDMMC_HOST_SUPPORTED needs to be checked for SDMMC cards support.
   
   #define MOUNT_POINT "/sdcard"
@@ -729,6 +729,8 @@ void WLED::loop() { // loopTask
         strip.service();
         xSemaphoreGive(busMutex);
       }
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
     
     #ifdef WLED_DEBUG
@@ -1679,19 +1681,22 @@ void WLED::setup() {
 
   WLED_SET_AP_SSID(); // otherwise it is empty on first boot until config is saved
 
-  DEBUG_PRINTLN(F("Reading config"));
-  deserializeConfigFromFS();
-  onload_loadedLedmap = loadedLedmap;
-
   #if defined(SOC_SDMMC_HOST_SUPPORTED)
   err_t sdcarderr = mount_sdcard();
   if (sdcarderr == ESP_OK) {
+    USER_PRINT("Backup of LittleFS to SD Card... ");
+    backupLittleFStoSD();
+    USER_PRINTLN("Done!");
     USER_PRINT("Starting SD card preload... ");
     ImageCacheManager::getInstance().startPreload("/sdcard");
     ImageCacheManager::getInstance().waitUntilIdle();
     USER_PRINTLN("Done!");
   }
   #endif 
+
+  DEBUG_PRINTLN(F("Reading config"));
+  deserializeConfigFromFS();
+  onload_loadedLedmap = loadedLedmap;
 
 #if defined(STATUSLED) && STATUSLED>=0
   if (!pinManager.isPinAllocated(STATUSLED)) {

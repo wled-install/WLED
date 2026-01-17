@@ -628,7 +628,15 @@ void deserializeConfigFromFS() {
 
   DEBUG_PRINTLN(F("Reading settings from /cfg.json..."));
 
-  success = readObjectFromFile("/cfg.json", nullptr, &doc);
+  FILE* override = fopen("/sdcard/override_cfg.json", "rb");
+  if (override) {
+    fclose(override);
+    USER_PRINTLN(F("Using /sdcard/override_cfg.json"));
+    success = readObjectFromFileSD("/sdcard/override_cfg.json", nullptr, &doc);
+  } else {
+    success = readObjectFromFile("/cfg.json", nullptr, &doc);
+  }
+
   if (!success) { // if file does not exist, optionally try reading from EEPROM and then save defaults to FS
     releaseJSONBufferLock();
     #ifdef WLED_ADD_EEPROM_SUPPORT
@@ -1050,8 +1058,18 @@ bool deserializeConfigSec() {
   DEBUG_PRINTLN(F("Reading settings from /wsec.json..."));
 
   if (!requestJSONBufferLock(3)) return false;
+  
+  bool success = false;
 
-  bool success = readObjectFromFile("/wsec.json", nullptr, &doc);
+  FILE* override = fopen("/sdcard/override_wsec.json", "rb");
+  if (override) {
+    fclose(override);
+    USER_PRINTLN(F("Using /sdcard/override_wsec.json"));
+    success = readObjectFromFileSD("/sdcard/override_wsec.json", nullptr, &doc);
+  } else {
+    success = readObjectFromFile("/wsec.json", nullptr, &doc);
+  }
+
   if (!success) {
     releaseJSONBufferLock();
     return false;

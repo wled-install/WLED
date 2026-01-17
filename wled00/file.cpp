@@ -401,6 +401,29 @@ void updateFSInfo() {
   #endif
 }
 
+bool readObjectFromFileSD(const char* file, const char* key, JsonDocument* dest) {
+  FILE* f = fopen(file, "rb");
+  if (!f) return false;
+
+  fseek(f, 0, SEEK_END);
+  size_t fileSize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  char* buf = (char*)malloc(fileSize + 1);
+  if (!buf) {
+    fclose(f);
+    return false;
+  }
+
+  fread(buf, 1, fileSize, f);
+  buf[fileSize] = '\0';
+  fclose(f);
+
+  DeserializationError err = deserializeJson(*dest, buf);
+  free(buf);
+
+  return err.code() == DeserializationError::Ok;
+}
 
 //Un-comment any file types you need
 static String getContentType(AsyncWebServerRequest* request, String filename){
