@@ -226,18 +226,33 @@ bool NetworkClass::isWiFi() {
 }
 
 bool NetworkClass::setHostname(const char* hostname) {
+
+  esp_err_t err = ESP_OK;
+
+  #if !defined(WLED_USE_ETHERNET_ONLY)
   esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (netif == NULL) {
-    ESP_LOGE("NetworkClass", "Failed to get STA network interface handle.");
-    return false;
+    ESP_LOGE("NetworkClass", "Failed to get WiFi network interface handle.");
+    err = ESP_ERR_INVALID_ARG;
   }
-  esp_err_t err = esp_netif_set_hostname(netif, hostname);
+  err = esp_netif_set_hostname(netif, hostname);
   if (err != ESP_OK) {
-    ESP_LOGE("NetworkClass", "Failed to set hostname, error: %s", esp_err_to_name(err));
-    return false;
+    ESP_LOGE("NetworkClass", "Failed to set WiFi hostname, error: %s", esp_err_to_name(err));
   }
-  ESP_LOGI("NetworkClass", "Hostname set to '%s'", hostname);
-  return true;
+  ESP_LOGI("NetworkClass", "WiFi hostname set to '%s'", hostname);
+  #elif defined(WLED_USE_ETHERNET)
+  esp_netif_t* netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+  if (netif == NULL) {
+    ESP_LOGE("NetworkClass", "Failed to get ETH network interface handle.");
+    err = ESP_ERR_INVALID_ARG;
+  }
+  err = esp_netif_set_hostname(netif, hostname);
+  if (err != ESP_OK) {
+    ESP_LOGE("NetworkClass", "Failed to set Ethernet hostname, error: %s", esp_err_to_name(err));
+  }
+  ESP_LOGI("NetworkClass", "Ethernet hostname set to '%s'", hostname);
+  #endif
+  return err == ESP_OK ? true : false;
 }
 
 #ifdef ARDUINO_ARCH_ESP32
