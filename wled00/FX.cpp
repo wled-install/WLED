@@ -9646,7 +9646,7 @@ uint16_t mode_GEQPPA() {
   }
 
   // Handle Overlay Buffer Allocation (Only if needed)
-  bool use_overlay = (SEGMENT.check1 && SEGMENT.intensity != 255);
+  bool use_overlay = false;
 
   if (use_overlay) {
     if (ctx.width != pre_width || ctx.height != pre_height) {
@@ -9668,6 +9668,8 @@ uint16_t mode_GEQPPA() {
   // Get audio data
   um_data_t* um_data = getAudioData();
   uint8_t* fftResult = (uint8_t*)um_data->u_data[2];
+  
+  if (!SEGMENT.check1) fftResult[0] = 255;
 
   // Pre-computed interpolated grid - static so it persists
   static uint16_t interpolated_distances[16][16];
@@ -9805,40 +9807,13 @@ uint16_t mode_GEQPPA() {
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_scale_rotate_mirror(ppa_srm_handle, &scale_config));
 
-  // --- STEP 3: FINAL MERGE (If Overlay) ---
-  if (use_overlay) {
-    ppa_blend_oper_config_t blend_config = {};
-    blend_config.in_bg.buffer = ctx.effectBuffer;
-    blend_config.in_bg.pic_w = ctx.render_pic_w;
-    blend_config.in_bg.pic_h = ctx.render_pic_h;
-    blend_config.in_bg.block_w = ctx.width;
-    blend_config.in_bg.block_h = ctx.height;
-    blend_config.in_bg.blend_cm = PPA_BLEND_COLOR_MODE_RGB888; // Background is usually RGB
-
-    blend_config.in_fg.buffer = renderbuffer; // The scaled-up version we just made
-    blend_config.in_fg.pic_w = ctx.width;
-    blend_config.in_fg.pic_h = ctx.height;
-    blend_config.in_fg.block_w = ctx.width;
-    blend_config.in_fg.block_h = ctx.height;
-    blend_config.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
-
-    blend_config.out.buffer = ctx.effectBuffer;
-    blend_config.out.buffer_size = ctx.effectBufferSize;
-    blend_config.out.pic_w = ctx.render_pic_w;
-    blend_config.out.pic_h = ctx.render_pic_h;
-    blend_config.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB888;
-    blend_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ppa_do_blend(ppa_blend_handle, &blend_config));
-  }
-
   // Apply all segment transforms and copy to output
   ppaEffectEnd(ctx);
 
   #endif
   return FRAMETIME;
 }
-static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@SEGMENT.speed,Overlay Transparency,Near Clip (x20mm),Far Clip (x20mm),SEGMENT.custom3_0-31,Overlay,Mirror Mode,Middle Range;!,,Peaks;!;2f;sx=0,ix=0,c1=3,c2=50,c3=0,pal=11,o1=0,o2=1,o3=0";
+static const char _data_FX_MODE_GEQPPA[] PROGMEM = "GEQ PPA ☾🐺@Nothing,Nothing,Near Clip (x20mm),Far Clip (x20mm),Nothing,Bass Mode,Mirror Mode,Middle Range;!,,Peaks;!;2f;sx=0,ix=0,c1=3,c2=50,c3=0,pal=11,o1=0,o2=1,o3=0";
 #endif
 
 #include <algorithm>
