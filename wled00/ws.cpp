@@ -319,7 +319,7 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     srm_config.in.pic_h = srcH;
     srm_config.in.block_w = srcW;
     srm_config.in.block_h = srcH;
-    srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    srm_config.in.srm_cm = bus->hasWhite() ? PPA_SRM_COLOR_MODE_ARGB8888 : PPA_SRM_COLOR_MODE_RGB888;
     srm_config.out.buffer = ppaBuffer;
     srm_config.out.buffer_size = PPA_BUF_SIZE;
     srm_config.out.pic_w = dstW;
