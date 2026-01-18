@@ -152,8 +152,8 @@ static String find_latest_firmware_littlefs() {
       String fileName = file.name();
       // USER_PRINTF("Found file: %s\n", fileName.c_str());
 
-      if (fileName.endsWith(".bin")) {
-        USER_PRINTF("Found .bin file: %s, size: %lu\n", fileName.c_str(), file.size());
+      if (fileName.startsWith("network_adapter") && fileName.endsWith(".bin")) {
+        USER_PRINTF("Found update file: %s, size: %lu\n", fileName.c_str(), file.size());
         latest_file = fileName;
         break; // Use the first .bin file found
       }

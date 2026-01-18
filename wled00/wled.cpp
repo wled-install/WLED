@@ -1175,7 +1175,7 @@ void WLED::setup() {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_restore());
         esp_hosted_coprocessor_fwver_t c6_fw_version;
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_hosted_get_coprocessor_fwversion(&c6_fw_version));
-        if (c6_fw_version.major1 >= 2) {
+        if (c6_fw_version.major1 >= 2 && c6_fw_version.major1 <= 1000) {
           USER_PRINTF("ESP-Hosted C6 Firmware is version %d.%d.%d\n", c6_fw_version.major1, c6_fw_version.minor1, c6_fw_version.patch1);
         } else {
           USER_PRINTF("ESP-Hosted C6 Firmware is older than verion 2.15.12\n");
@@ -1692,7 +1692,7 @@ void WLED::setup() {
   deserializeConfigFromFS();
   onload_loadedLedmap = loadedLedmap;
 
-  #if defined(SOC_SDMMC_HOST_SUPPORTED)
+  #if defined(SOC_SDMMC_HOST_SUPPORTED) && defined(WLED_USE_ETHERNET_ONLY)
   err_t sdcarderr = mount_sdcard();
   if (sdcarderr == ESP_OK) {
     USER_PRINT("Backup of LittleFS to SD Card... ");
