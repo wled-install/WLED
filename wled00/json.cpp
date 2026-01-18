@@ -1026,13 +1026,28 @@ void serializeInfo(JsonObject root)
     outputs.add(busses.getBus(b)->getLength());
   }
 
-  JsonObject network_info = root.createNestedObject("network");
-  uint8_t mac[6];
-  esp_netif_ip_info_t ip_info;
-
   // --- Get Interface Handles ---
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+
+  // This code just fixes the WLED app from not seeing or being able to add WLED-MM-P4 becasue we use a more robust JSON structure.
+  JsonObject comforting_wifi_info = root.createNestedObject("wifi");
+  wifi_ap_record_t ap_info;
+  if (wifi_netif && esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) { // maybe add Network.isWiFi()?
+    comforting_wifi_info["bssid"] = Network.format_mac_address(ap_info.bssid);
+    comforting_wifi_info["rssi"] = ap_info.rssi;
+    comforting_wifi_info["channel"] = ap_info.primary;
+    comforting_wifi_info[F("ap")] = apActive; // this seems added in newer WLED AC
+  } else {
+    comforting_wifi_info["bssid"] = "FA:KE:W1:F1:DE:AD";
+    comforting_wifi_info["rssi"] = -69;
+    comforting_wifi_info["channel"] = 1;
+    comforting_wifi_info[F("ap")] = apActive; // this seems added in newer WLED AC
+  } 
+
+  JsonObject network_info = root.createNestedObject("network");
+  uint8_t mac[6];
+  esp_netif_ip_info_t ip_info;
 
   // --- Wi-Fi Section ---
   if (wifi_netif) {
