@@ -888,14 +888,7 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
   const uint8_t bpp = isRGBW ? 4 : 3;
   const size_t totalChannels = length * bpp;
   const char* protocolName = (type == 0) ? "DDP" : (type == 1) ? "E1.31" : "Art-Net";
-
-  // // Validate output configuration
-  // if (length != outputs * leds_per_output) {
-  //   delay(100);
-  //   USER_PRINTF("%s config mismatch: length=%lu but outputs=%lu * leds_per_output=%lu = %lu\n",
-  //     protocolName, length, outputs, leds_per_output, outputs * leds_per_output);
-  //   return 1;
-  // }
+  static auto last_netif = sender_netif;
 
   // Packet buffer sized for DDP (largest: 10 + 1440 = 1450 bytes)
   #ifdef ESP32
@@ -943,9 +936,10 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
     #endif
     static IPAddress lastClient((uint32_t)0);
 
-    if ((uint32_t)client != (uint32_t)lastClient) {
+    if ((uint32_t)client != (uint32_t)lastClient || last_netif != sender_netif) {
       ddpUdp.connect(client, DDP_DEFAULT_PORT);
       lastClient = client;
+      last_netif = sender_netif;
     }
     
     const uint16_t maxChannels = (DDP_MAX_DATALEN / bpp) * bpp;
@@ -1146,9 +1140,10 @@ uint8_t __attribute__((hot)) realtimeBroadcast(
     
     static IPAddress lastClient((uint32_t)0);
 
-    if ((uint32_t)client != (uint32_t)lastClient) {
+    if ((uint32_t)client != (uint32_t)lastClient || last_netif != sender_netif) {
       artnetUdp.connect(client, ARTNET_DEFAULT_PORT);
       lastClient = client;
+      last_netif = sender_netif;
     }
 
     if (packet_buffer[0] != 'A') {

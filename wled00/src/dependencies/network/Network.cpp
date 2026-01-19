@@ -22,6 +22,7 @@ IPAddress NetworkClass::localIP() {
 
   // Try primary interface first
   if (primary && esp_netif_get_ip_info(primary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(primary));
     mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP6);
     mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP4);
     mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP6);
@@ -30,6 +31,7 @@ IPAddress NetworkClass::localIP() {
 
   // Fall back to secondary interface
   if (secondary && esp_netif_get_ip_info(secondary, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+    sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(secondary));
     mdns_netif_action(secondary, MDNS_EVENT_DISABLE_IP6);
     mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP4);
     mdns_netif_action(primary, MDNS_EVENT_DISABLE_IP6);
@@ -189,7 +191,7 @@ bool NetworkClass::isEthernet() {
     return false; // No default interface is active
   }
   // This sets the default netif for FastAsyncUDP
-  sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(default_netif));
+  // sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(default_netif));
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
   if (default_netif == wifi_netif) {
@@ -215,6 +217,7 @@ bool NetworkClass::isWiFi() {
   if (default_netif == NULL) {
     return false; // No default interface is active
   }
+  // sender_netif = static_cast<struct netif*>(esp_netif_get_netif_impl(default_netif));
   esp_netif_t* wifi_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
   if (default_netif == wifi_netif) {
