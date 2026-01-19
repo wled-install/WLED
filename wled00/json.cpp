@@ -1039,7 +1039,7 @@ void serializeInfo(JsonObject root)
     comforting_wifi_info["channel"] = ap_info.primary;
     comforting_wifi_info[F("ap")] = apActive; // this seems added in newer WLED AC
   } else {
-    comforting_wifi_info["bssid"] = "FA:KE:W1:F1:DE:AD";
+    comforting_wifi_info["bssid"] = "DE:AD:BE:EF:CA:FE";
     comforting_wifi_info["rssi"] = -69;
     comforting_wifi_info["channel"] = 1;
     comforting_wifi_info[F("ap")] = apActive; // this seems added in newer WLED AC
