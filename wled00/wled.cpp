@@ -76,6 +76,14 @@ static const char *TAG = "WLED";
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
 
+    #if CONFIG_ESP_HOSTED_SDIO_SLOT == 0
+    host.slot = SDMMC_HOST_SLOT_1;
+    #elif CONFIG_ESP_HOSTED_SDIO_SLOT == 1
+    host.slot = SDMMC_HOST_SLOT_0;
+    #else
+    host.slot = SDMMC_HOST_SLOT_0;
+    #endif
+
     sdmmc_slot_config_t slot_config = {
         .clk = GPIO_NUM_43,
         .cmd = GPIO_NUM_44,
@@ -713,9 +721,7 @@ void WLED::loop() { // loopTask
   #endif
 
   if (!interfacesInited || strip.getBrightness() == 0) {
-    delay(10);
-    // taskYIELD();  // Just yield, don't sleep
-    // return;  // Skip the rest of the loop
+    taskYIELD();  // Just yield, don't sleep
   }
   
   if (!realtimeMode || realtimeOverride || (realtimeMode && useMainSegmentOnly)) {
@@ -1322,7 +1328,7 @@ void WLED::setup() {
       //   .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
       // };
       esp_netif_inherent_config_t base_cfg = ESP_NETIF_INHERENT_DEFAULT_ETH();
-      base_cfg.route_prio = 200;
+      // base_cfg.route_prio = 200;
 
       esp_netif_config_t cfg = {
           .base = &base_cfg,
@@ -1692,7 +1698,7 @@ void WLED::setup() {
   deserializeConfigFromFS();
   onload_loadedLedmap = loadedLedmap;
 
-  #if defined(SOC_SDMMC_HOST_SUPPORTED) && defined(WLED_USE_ETHERNET_ONLY)
+  #if defined(SOC_SDMMC_HOST_SUPPORTED)
   err_t sdcarderr = mount_sdcard();
   if (sdcarderr == ESP_OK) {
     USER_PRINT("Backup of LittleFS to SD Card... ");
