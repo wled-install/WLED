@@ -594,6 +594,25 @@ void background_loop_nonblocking(void* pvParameters) {
     static unsigned long maxStripMillis = 0;
     static uint16_t avgStripMillis = 0;
     #endif
+
+    static const UBaseType_t MY_BASE_PRIORITY = uxTaskPriorityGet(wled_main_task);
+    static const UBaseType_t MY_MAX_PRIORITY = 3;
+
+    if (uxTaskPriorityGet(wled_main_task) > MY_MAX_PRIORITY && eTaskGetState(wled_main_task) == eBlocked && (strip.getFps() > 0 && strip.getFps() < 8)) {
+      static unsigned long stuckSince = 0;
+      if (stuckSince == 0) stuckSince = millis();
+
+      if (millis() - stuckSince > 5000) {  // Stuck for 5+ seconds
+        USER_PRINTF("wled_main_task priority = %d and strip.getFps() = %d\n", uxTaskPriorityGet(wled_main_task), strip.getFps());
+        USER_PRINTLN("Detected stuck state, resetting WebSocket...");
+        ws.closeAll();
+        ws.cleanupClients();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ws.onEvent(wsEvent);
+        stuckSince = 0;
+      }
+    }
+
     handleTime();
     WLED::instance().handleConnection();
     #ifndef WLED_DISABLE_ESPNOW
@@ -706,6 +725,8 @@ void background_loop_nonblocking(void* pvParameters) {
     }
     #endif // SOC_USB_OTG_SUPPORTED
 
+    toki.resetTick();
+
     vTaskDelay(1);
 
   }
@@ -731,7 +752,7 @@ void WLED::loop() { // loopTask
     #endif
 
     if (!offMode || strip.isOffRefreshRequired()) {
-      if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+      if (xSemaphoreTake(busMutex, 1)) {
         strip.service();
         xSemaphoreGive(busMutex);
       }
@@ -820,9 +841,10 @@ void WLED::loop() { // loopTask
   }
   #endif        // WLED_DEBUG_HEAP
 
-  handleWs();
-  
-  toki.resetTick();
+  if (xSemaphoreTake(busMutex, 0)) {
+    handleWs();
+    xSemaphoreGive(busMutex);
+  }
 
   #if WLED_WATCHDOG_TIMEOUT > 0
   esp_task_wdt_reset();
