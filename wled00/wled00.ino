@@ -79,7 +79,7 @@ void setup() {
       12000,      
       NULL,
       1,          // Priority 1 (Standard Arduino)
-      NULL,
+      &wled_main_task,
       0           // <--- HARD PIN TO CORE 0
     );
 

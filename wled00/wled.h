@@ -563,6 +563,7 @@ WLED_GLOBAL uint16_t e131ProxyUniverse _INIT(0);                  // output this
   WLED_GLOBAL DMXInput dmxInput;
 #endif
 
+WLED_GLOBAL TaskHandle_t wled_main_task _INIT(NULL);
 WLED_GLOBAL uint16_t e131Universe _INIT(1);                       // settings for E1.31 (sACN) protocol (only DMX_MODE_MULTIPLE_* can span over consecutive universes)
 WLED_GLOBAL uint16_t e131Port _INIT(5568);                        // DMX in port. E1.31 default is 5568, Art-Net is 6454
 WLED_GLOBAL byte e131Priority _INIT(0);                           // E1.31 port priority (if != 0 priority handling is active)
