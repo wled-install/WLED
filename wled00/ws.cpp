@@ -329,7 +329,7 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     srm_config.scale_y = scale;
     srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-    if (ppa_do_scale_rotate_mirror(ppa_srm_handle, &srm_config) != ESP_OK) return false;
+    if (ppa_do_scale_rotate_mirror(preview_ppa_srm_handle, &srm_config) != ESP_OK) return false;
 
     AsyncWebSocketBuffer wsBuf(bufSize);
     if (!wsBuf) return false;
