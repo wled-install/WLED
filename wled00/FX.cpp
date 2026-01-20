@@ -8902,7 +8902,6 @@ uint16_t mode_2DAkemi(void) {
   const uint16_t rows = SEGMENT.virtualHeight();
 
   if (SEGENV.call == 0) { 
-    Serial.printf("Segment::maxWidth=%u Segment::maxHeight=%u\n", Segment::maxWidth, Segment::maxHeight);
     SEGMENT.fill(BLACK);
   }
 
