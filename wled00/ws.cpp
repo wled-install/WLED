@@ -17,12 +17,15 @@ static volatile unsigned long wsLastLiveTime = 0;   // WLEDMM
 #define WS_LIVE_INTERVAL_MIN 40
 #endif
 
+static volatile uint32_t wsPendingClient = 0;
+
 void wsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len)
 {
   if(type == WS_EVT_CONNECT){
     //client connected
     DEBUG_PRINTLN(F("WS client connected."));
-    sendDataWs(client);
+    // sendDataWs(client);
+    wsPendingClient = client->id();
   } else if(type == WS_EVT_DISCONNECT){
     //client disconnected
     if (client->id() == wsLiveClientId) wsLiveClientId = 0;
@@ -432,6 +435,15 @@ void handleWs()
 {
   // if (!busses.canAllShow()) return;
   if (strip.isUpdating()) return;
+
+    if (wsPendingClient) {
+    AsyncWebSocketClient* wsc = ws.client(wsPendingClient);
+    if (wsc && wsc->queueLength() == 0) {
+      sendDataWs(wsc);
+      wsPendingClient = 0;
+    }
+  }
+  
   if ((millis() - wsLastLiveTime) > (unsigned long)(max((uint32_t)WS_LIVE_INTERVAL_MIN, min((strip.getLengthTotal() / 80), (uint32_t)WS_LIVE_INTERVAL_MAX)))) //WLEDMM dynamic nr of peek frames per second
   {
     ws.cleanupClients();

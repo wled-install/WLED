@@ -597,22 +597,36 @@ void background_loop_nonblocking(void* pvParameters) {
 
     static const UBaseType_t MY_BASE_PRIORITY = uxTaskPriorityGet(wled_main_task);
     static const UBaseType_t MY_MAX_PRIORITY = 3;
-
+    static unsigned long stuckSince = 0;
+    static uint8_t ws_reset_times = 0;
+    
     if (uxTaskPriorityGet(wled_main_task) > MY_MAX_PRIORITY && eTaskGetState(wled_main_task) == eBlocked && (strip.getFps() > 0 && strip.getFps() < 8)) {
-      static unsigned long stuckSince = 0;
+      
       if (stuckSince == 0) stuckSince = millis();
 
       if (millis() - stuckSince > 5000) {  // Stuck for 5+ seconds
+
         USER_PRINTF("wled_main_task priority = %d and strip.getFps() = %d\n", uxTaskPriorityGet(wled_main_task), strip.getFps());
-        USER_PRINTF("Detected stuck state, resetting WebSocket... %d clients\n", ws.count());
-        ws.closeAll();
-        ws.cleanupClients();
-        vTaskDelay(pdMS_TO_TICKS(100));
-        ws.onEvent(wsEvent);
-        stuckSince = 0;
+
+        vTaskPrioritySet(wled_main_task, MY_BASE_PRIORITY);
+
+        if (ws.count() > 0 && ws_reset_times < 3) {
+          USER_PRINTF("Detected stuck state, resetting WebSockets... %d ws clients\n", ws.count());
+          ws.closeAll();
+          ws.cleanupClients();
+          vTaskDelay(pdMS_TO_TICKS(100));
+          ws.onEvent(wsEvent);
+          stuckSince = 0;
+          ws_reset_times++;
+        } else {
+          USER_PRINTF("Detected stuck state, re-initing interfaces. %d ws clients\n", ws.count());
+          WLED::instance().initInterfaces();
+          stuckSince = 0;
+          ws_reset_times = 0;
+        }
       }
     }
-
+    
     handleTime();
     WLED::instance().handleConnection();
     #ifndef WLED_DISABLE_ESPNOW
@@ -752,7 +766,7 @@ void WLED::loop() { // loopTask
     #endif
 
     if (!offMode || strip.isOffRefreshRequired()) {
-      if (xSemaphoreTake(busMutex, 1)) {
+      if (xSemaphoreTake(busMutex, 0)) {
         strip.service();
         xSemaphoreGive(busMutex);
       }
@@ -772,7 +786,7 @@ void WLED::loop() { // loopTask
 
     if (realtimeMode == REALTIME_MODE_ARTNET && newArtNetData) {
       if (!offMode || strip.isOffRefreshRequired()) {
-        if (xSemaphoreTake(busMutex, portMAX_DELAY)) {
+        if (xSemaphoreTake(busMutex, 0)) {
           strip.show();
           xSemaphoreGive(busMutex);
         }
@@ -2177,6 +2191,7 @@ void WLED::initInterfaces()
   server.begin();
 
   if (udpPort > 0 && udpPort != ntpLocalPort) {
+    udpConnected = false;
     udpConnected = notifierUdp.begin(udpPort);
     if (udpConnected && udpPort2 != udpPort && udpPort2 != udpRgbPort) udp2Connected = notifier2Udp.begin(udpPort2);
   }
@@ -2185,12 +2200,14 @@ void WLED::initInterfaces()
   }
   if (e131Port == ARTNET_DEFAULT_PORT) {
     artnet.stop();
-    artnet.begin(e131Universe, ARTNET_PRIORITY);
+    artnet_listening = artnet.begin(e131Universe, ARTNET_PRIORITY);
   } else {
     artnet.stop();
-    e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
-    ddp.begin(false, DDP_DEFAULT_PORT);
-    if (udpConnected && udpRgbPort != udpPort) udpRgbConnected = rgbUdp.begin(udpRgbPort);
+    e131_listening = e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
+    ddp_listening = ddp.begin(false, DDP_DEFAULT_PORT);
+    if (udpConnected && udpRgbPort != udpPort) {
+      udpRgbConnected = rgbUdp.begin(udpRgbPort);
+    }
   }
   vTaskDelay(pdMS_TO_TICKS(500));
   interfacesInited = true;

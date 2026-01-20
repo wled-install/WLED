@@ -845,6 +845,9 @@ WLED_GLOBAL ESPAsyncE131 e131 _INIT_N(((handleE131Packet)));
 WLED_GLOBAL ESPAsyncE131 ddp  _INIT_N(((handleE131Packet)));
 WLED_GLOBAL bool e131NewData _INIT(false);
 WLED_GLOBAL bool newArtNetData _INIT(false);
+WLED_GLOBAL bool artnet_listening _INIT(false);
+WLED_GLOBAL bool ddp_listening _INIT(false);
+WLED_GLOBAL bool e131_listening _INIT(false);
 
 // led fx library object
 WLED_GLOBAL BusManager busses _INIT(BusManager());
