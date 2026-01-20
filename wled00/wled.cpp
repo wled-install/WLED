@@ -604,7 +604,7 @@ void background_loop_nonblocking(void* pvParameters) {
 
       if (millis() - stuckSince > 5000) {  // Stuck for 5+ seconds
         USER_PRINTF("wled_main_task priority = %d and strip.getFps() = %d\n", uxTaskPriorityGet(wled_main_task), strip.getFps());
-        USER_PRINTLN("Detected stuck state, resetting WebSocket...");
+        USER_PRINTF("Detected stuck state, resetting WebSocket... %d clients\n", ws.count());
         ws.closeAll();
         ws.cleanupClients();
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -996,6 +996,8 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
     USER_PRINTLN("Event: Ethernet Link Up");
     eth_is_connected = false;
   } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
+    esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+    esp_netif_set_route_prio(eth_netif, 0);
     USER_PRINTLN("Event: Ethernet Link Down");
     eth_is_connected = false;
     USER_PRINT("IP Address is now http://");
@@ -1020,6 +1022,8 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
 }
 
 static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+  esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+  esp_netif_set_route_prio(eth_netif, 200);
   eth_is_connected = true;
   interfacesInited = false;
 }
