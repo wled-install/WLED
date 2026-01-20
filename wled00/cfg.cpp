@@ -648,10 +648,6 @@ void deserializeConfigFromFS() {
     JsonObject empty = JsonObject();
     usermods.readFromConfig(empty);
     serializeConfig();
-    // init Ethernet (in case default type is set at compile time)
-    #ifdef WLED_USE_ETHERNET
-    // WLED::instance().initEthernet();
-    #endif
     return;
   }
 
