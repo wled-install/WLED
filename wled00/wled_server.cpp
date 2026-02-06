@@ -11,6 +11,12 @@
 #endif
 #include "html_cpal.h"
 
+#if defined(SOC_SDMMC_HOST_SUPPORTED) && defined(WLED_ENABLE_FS_EDITOR)
+#include "vfs_api.h"
+static std::shared_ptr<VFSImpl> sdVfsImpl = std::make_shared<VFSImpl>();
+static fs::FS sdcardFS(sdVfsImpl);
+#endif
+
 /*
  * Integrated HTTP web server page declarations
  */
@@ -74,10 +80,18 @@ void handleUpload(AsyncWebServerRequest *request, const String& filename, size_t
 
 void createEditHandler(bool enable) {
   if (editHandler != nullptr) server.removeHandler(editHandler);
+  #if defined(SOC_SDMMC_HOST_SUPPORTED)
+  if (sdEditHandler != nullptr) server.removeHandler(sdEditHandler);
+  #endif
   if (enable) {
     #ifdef WLED_ENABLE_FS_EDITOR
       #ifdef ARDUINO_ARCH_ESP32
       editHandler = &server.addHandler(new SPIFFSEditor(WLED_FS));//http_username,http_password));
+      #if defined(SOC_SDMMC_HOST_SUPPORTED)
+      if (is_sdcard_mounted()) {
+        sdEditHandler = &server.addHandler(new SPIFFSEditor(sdcardFS, "", "", "/edit_sd"));
+      }
+      #endif
       #else
       editHandler = &server.addHandler(new SPIFFSEditor("","",WLED_FS));//http_username,http_password));
       #endif
@@ -90,6 +104,11 @@ void createEditHandler(bool enable) {
     editHandler = &server.on("/edit", HTTP_ANY, [](AsyncWebServerRequest *request){
       serveMessage(request, 500, "Access Denied", FPSTR(s_unlock_cfg), 254);
     });
+    #if defined(SOC_SDMMC_HOST_SUPPORTED)
+    sdEditHandler = &server.on("/edit_sd", HTTP_ANY, [](AsyncWebServerRequest *request){
+      serveMessage(request, 500, "Access Denied", FPSTR(s_unlock_cfg), 254);
+    });
+    #endif
   }
 }
 
@@ -405,6 +424,9 @@ void initServer()
     request->send(response);
   });
 
+  #if defined(SOC_SDMMC_HOST_SUPPORTED) && defined(WLED_ENABLE_FS_EDITOR)
+  sdVfsImpl->mountpoint("/sdcard");
+  #endif
   createEditHandler(correctPIN);
 
 #ifndef WLED_DISABLE_OTA

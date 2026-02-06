@@ -837,6 +837,9 @@ WLED_GLOBAL AsyncWebSocket ws _INIT_N((("/ws")));
 #endif
 WLED_GLOBAL AsyncClient     *hueClient _INIT(NULL);
 WLED_GLOBAL AsyncWebHandler *editHandler _INIT(nullptr);
+#if defined(SOC_SDMMC_HOST_SUPPORTED)
+WLED_GLOBAL AsyncWebHandler *sdEditHandler _INIT(nullptr);
+#endif
 
 // udp interface objects
 WLED_GLOBAL WiFiUDP notifierUdp, rgbUdp, notifier2Udp;
