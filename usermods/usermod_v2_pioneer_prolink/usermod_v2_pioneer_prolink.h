@@ -1701,9 +1701,9 @@ uint16_t getPioneerColorRGB565(uint8_t colorIndex) {
 
 // --- Static Definitions ---
 const char ProLinkUsermod::_name[] PROGMEM = "Pro_DJ_Link";
-const char ProLinkUsermod::_enabled[] PROGMEM = "Enabled";
-const char ProLinkUsermod::_debug[] PROGMEM = "Enable_Debug";
-const char ProLinkUsermod::_beatFlash[] PROGMEM = "Beat_Flash";
+const char ProLinkUsermod::_enabled[] PROGMEM = "enabled";
+const char ProLinkUsermod::_debug[] PROGMEM = "enable_debug";
+const char ProLinkUsermod::_beatFlash[] PROGMEM = "beat_flash";
 const char ProLinkUsermod::_randomPreset[] PROGMEM = "Cycle_Presets_on_Phrase";
 const char ProLinkUsermod::_highResArt[] PROGMEM = "High-Res_Artwork_240x240";
 const char ProLinkUsermod::_ipOverride[] PROGMEM = "Player_IP_Override";
