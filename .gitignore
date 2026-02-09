@@ -8,6 +8,7 @@
 .pioenvs
 .piolibdeps
 .vscode
+.claude
 
 esp01-update.sh
 platformio_override.ini
