@@ -53,6 +53,8 @@
       84: { name: "DDP RGBW", cat: 4, color: "RGBW" },
       82: { name: "E1.31 RGB", cat: 4, color: "RGB" },
       85: { name: "E1.31 RGBW", cat: 4, color: "RGBW" },
+      86: { name: "ColorLight 5A-75B RGB", cat: 4, color: "RGB" },
+      87: { name: "ColorLight 5A-75B RGBW", cat: 4, color: "RGBW" },
 
       // Special/Matrix
       // 100: { name: "Hub75 Matrix", cat: 5, isMatrix: true }
@@ -325,6 +327,7 @@
               let p0Label = "GPIO:";
               if (typeDef.isPar) p0Label = "Parallel IO Pins:";
               else if (typeDef.isMatrix) p0Label = "Chain Length:";
+              else if (t === 86 || t === 87) p0Label = "(Not used)";
               else if (typeDef.cat === 4) p0Label = "IP Address:";
               else if (typeDef.cat === 2) p0Label = "Data GPIO:";
               else if (typeDef.cat === 3) p0Label = "GPIOs:";
@@ -499,8 +502,16 @@
             if (typeDef.name.includes("Art-Net")) netProtocol = "Art-Net";
             else if (typeDef.name.includes("E1.31")) netProtocol = "E1.31";
             else if (typeDef.name.includes("DDP")) netProtocol = "DDP";
+            else if (typeDef.name.includes("ColorLight")) netProtocol = "ColorLight";
 
-            if (netProtocol) {
+            if (netProtocol === "ColorLight") {
+              gId("dig" + n + "W").innerHTML += `<br /><b>ColorLight 5A-75B:</b>`;
+              gId("dig" + n + "W").innerHTML += `<br />• Hardcoded receiver MAC: 11:22:33:44:55:66`;
+              gId("dig" + n + "W").innerHTML += `<br />• Set "Outputs" to 1`;
+              gId("dig" + n + "W").innerHTML += `<br />• Set "Length" and "LEDs Per Output" to your LED count`;
+              gId("dig" + n + "W").innerHTML += `<br />• Requires ESP32-P4 with Ethernet enabled`;
+              gId("dig" + n + "W").innerHTML += `<br />• Uses raw Ethernet frames (not UDP)`;
+            } else if (netProtocol) {
               let chanPerPix = isRGBW ? 4 : 3;
               let uniSize = Math.floor(512 / chanPerPix);
               let universes_per_output = Math.ceil(leds_per_output / uniSize);

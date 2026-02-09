@@ -6,6 +6,7 @@
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 //extern volatile bool previousBufferFree; // experimental
 #endif
+
 /*
  * Class for addressing various light types
  */
@@ -223,6 +224,10 @@ class Bus {
     uint32_t autoWhiteCalc(uint32_t c) const;
 };
 
+// Include ColorLight bus after Bus class definition
+#ifdef WLED_ENABLE_COLORLIGHT
+#include "bus_colorlight.h"
+#endif
 
 class BusDigital : public Bus {
   public:
@@ -599,7 +604,10 @@ class BusManager {
 
     inline uint8_t getNumVirtualBusses() const {
       int j = 0;
-      for (int i = 0; i < numBusses; i++) if (busses[i]->getType() >= TYPE_NET_ARTNET_RGB && busses[i]->getType() <= TYPE_NET_E131_RGBW) j++;
+      for (int i = 0; i < numBusses; i++) {
+        uint8_t type = busses[i]->getType();
+        if (type >= TYPE_NET_ARTNET_RGB && type <= TYPE_NET_COLORLIGHT_RGBW) j++;
+      }
       return j;
     }
 };

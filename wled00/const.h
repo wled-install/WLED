@@ -258,6 +258,8 @@
 #define TYPE_NET_ARTNET_RGBW     83            // network ArtNet RGBW bus (master broadcast bus)
 #define TYPE_NET_DDP_RGBW        84            // network DDP RGBW bus (master broadcast bus)
 #define TYPE_NET_E131_RGBW       85            // network E1.31/sCAN RGBW bus (master broadcast bus)
+#define TYPE_NET_COLORLIGHT_RGB  86            // ColorLight 5A-75B RGB bus (raw Ethernet)
+#define TYPE_NET_COLORLIGHT_RGBW 87            // ColorLight 5A-75B RGBW bus (raw Ethernet, future)
 
 // WLEDMM additional types
 #define TYPE_HUB75MATRIX         100 // 100 - 110

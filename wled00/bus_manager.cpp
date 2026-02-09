@@ -1502,6 +1502,15 @@ int BusManager::add(BusConfig &bc) {
   DEBUG_PRINTF("BusManager::add(bc.type=%u)\n", bc.type);
   if (bc.type == TYPE_NET_ARTNET_RGB || bc.type == TYPE_NET_ARTNET_RGBW || bc.type == TYPE_NET_DDP_RGB || bc.type == TYPE_NET_DDP_RGBW || bc.type == TYPE_NET_E131_RGB || bc.type == TYPE_NET_E131_RGBW) {
     busses[numBusses] = new BusNetwork(bc, colorOrderMap);
+  } else if (bc.type == TYPE_NET_COLORLIGHT_RGB || bc.type == TYPE_NET_COLORLIGHT_RGBW) {
+  #ifdef WLED_ENABLE_COLORLIGHT
+    DEBUG_PRINTLN("BusManager::add - Adding BusColorLight5A75B");
+    busses[numBusses] = new BusColorLight5A75B(bc, colorOrderMap);
+    USER_PRINTLN("[BusColorLight5A75B] ");
+  #else
+    USER_PRINTLN("[unsupported! BusColorLight5A75B - add flag -D WLED_ENABLE_COLORLIGHT] ");
+    return -1;
+  #endif
   } else if (bc.type == TYPE_HUB75MATRIX) {
   #ifdef WLED_ENABLE_HUB75MATRIX
     DEBUG_PRINTLN("BusManager::add - Adding BusHub75Matrix");

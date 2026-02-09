@@ -454,6 +454,7 @@ WLED_GLOBAL int s_retry_num _INIT(0);
 #endif
 WLED_GLOBAL esp_eth_handle_t eth_handle;
 WLED_GLOBAL bool eth_is_connected _INIT(false);
+WLED_GLOBAL bool eth_link_up _INIT(false);  // Physical link status (Layer 2)
 WLED_GLOBAL bool wifi_is_connected _INIT(false);
 WLED_GLOBAL tcpip_adapter_if_t send_interface;
 WLED_GLOBAL netif* sender_netif _INIT(NULL);

@@ -1008,11 +1008,13 @@ static void wifi_event_handler(void* event_handler_arg, esp_event_base_t event_b
 static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
   if (event_id == ETHERNET_EVENT_CONNECTED) {
     USER_PRINTLN("Event: Ethernet Link Up");
+    eth_link_up = true;  // Physical link is up (Layer 2)
     eth_is_connected = false;
   } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
     esp_netif_t* eth_netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
     esp_netif_set_route_prio(eth_netif, 0);
     USER_PRINTLN("Event: Ethernet Link Down");
+    eth_link_up = false;  // Physical link is down
     eth_is_connected = false;
     USER_PRINT("IP Address is now http://");
     USER_PRINTLN(Network.localIP());
@@ -1025,6 +1027,7 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
     MDNS.addService("wled", "tcp", 80);
     MDNS.addServiceTxt("wled", "tcp", "mac", escapedMac.c_str());
   } else if (event_id == ETHERNET_EVENT_START) {
+    eth_link_up = false;  // Link not up yet
     eth_is_connected = false;
     char hostname[25];
     prepareHostname(hostname);
@@ -1395,14 +1398,25 @@ void WLED::setup() {
         esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
         
         ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+
+#ifdef WLED_ENABLE_COLORLIGHT
+        // ColorLight mode: Skip IP stack attachment for raw Layer 2 operation
+        USER_PRINTLN(F("[Ethernet] ColorLight mode: Skipping IP stack (raw Ethernet only)"));
+#else
         ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
         Network.setHostname(hostname);
+#endif
+
         // Start Ethernet driver
         ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
         // Register event handler for Ethernet events
         ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+
+#ifndef WLED_ENABLE_COLORLIGHT
+        // Only register IP events if not using ColorLight
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+#endif
       #elif defined(CONFIG_ETH_USE_SPI_ETHERNET) && defined(CONFIG_ETH_SPI_ETHERNET_W5500)
         USER_PRINTLN("Setup W5500 for ESP32-C5 (IDF v5)...");
 
@@ -1463,8 +1477,13 @@ void WLED::setup() {
         // 5. Install Driver
         ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
 
+#ifdef WLED_ENABLE_COLORLIGHT
+        // ColorLight mode: Skip IP stack attachment for raw Layer 2 operation
+        USER_PRINTLN(F("[Ethernet] ColorLight mode: Skipping IP stack (raw Ethernet only)"));
+#else
         // 6. Attach to Netif (This AUTOMATICALLY registers the default handlers in v5)
         ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+#endif
 
         // 7. Start Driver
         ESP_ERROR_CHECK(esp_eth_start(eth_handle));
@@ -1478,7 +1497,10 @@ void WLED::setup() {
 
         // 9. Register Application Events
         ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+#ifndef WLED_ENABLE_COLORLIGHT
+        // Only register IP events if not using ColorLight
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+#endif
       #endif
     #endif
   #endif
@@ -2028,10 +2050,12 @@ void WLED::initAP(bool resetAP) {
     strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
     wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_sta_config.sta.failure_retry_cnt = 5;
-    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+    #ifdef WLED_REQUIRE_WIFI_WPA3
     wifi_sta_config.sta.pmf_cfg.capable = true;
     wifi_sta_config.sta.pmf_cfg.required = true;
     wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    #endif
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
   } else {
     // AP-only mode - no valid STA credentials
@@ -2132,10 +2156,12 @@ void WLED::initConnection() {
     strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
     wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_sta_config.sta.failure_retry_cnt = 5;
-    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+    #ifdef WLED_REQUIRE_WIFI_WPA3
     wifi_sta_config.sta.pmf_cfg.capable = true;
     wifi_sta_config.sta.pmf_cfg.required = true;
     wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    #endif
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
@@ -2235,10 +2261,12 @@ void WLED::handleConnection() {
     strncpy(reinterpret_cast<char*>(wifi_sta_config.sta.password), clientPass, sizeof(wifi_sta_config.sta.password));
     wifi_sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_sta_config.sta.failure_retry_cnt = 5;
-    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_sta_config.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
+    #ifdef WLED_REQUIRE_WIFI_WPA3
     wifi_sta_config.sta.pmf_cfg.capable = true;
     wifi_sta_config.sta.pmf_cfg.required = true;
     wifi_sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    #endif
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
 
