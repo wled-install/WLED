@@ -147,6 +147,7 @@ String PinManagerClass::getPinSpecialText(int gpio) {  // special purpose PIN in
       if (gpio == 26 || gpio == 27) return (F("Extra USB (usable)"));
       if (gpio == 6) return (F("ESP32-C6 wakeup (usable)"));
       if (gpio == 53) return (F("Audio Amp Enable (usable)"));
+      if (gpio == 45) return (F("Might be N/C on some boards."));
     #else
       // "classic" ESP32, or ESP32 PICO-D4
       //if (gpio == 0 || gpio == 2 || gpio == 5) return (F("(strapping pin)"));
@@ -827,7 +828,7 @@ bool PinManagerClass::isPinOk(byte gpio, bool output) const
     if (gpio > 27 && gpio <  32) return false;     // Ethernet pins
     if (gpio > 33 && gpio <  36) return false;     // Ethernet pins - boot button is on 35 and works... but messes with Ethernet if enabled in WLED
     // if (gpio > 36 && gpio <  38) return false;     // Serial console.
-    if (gpio > 38 && gpio <  46) return false;     // SD1 Pins - 45 is NC unless you modify the board.
+    if (gpio > 38 && gpio <  45) return false;     // SD1 Pins - 45 is NC unless you modify the board.
     if (gpio > 48 && gpio <  53) return false;     // Ethernet pins & others
     if (             gpio == 54) return false;     // C6 WiFi EN pin
     // 
