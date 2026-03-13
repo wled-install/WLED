@@ -75,7 +75,7 @@ void WS2812FX::setUpMatrix() {
         USER_PRINTF("setUpMatrix: customMappingTable alloc %u from %u\n", size, customMappingTableSize);
 
         if (customMappingTable != nullptr) {
-          customMappingTable = (uint32_t*)reallocf(customMappingTable, sizeof(uint32_t) * size);
+          customMappingTable = (uint32_t*)heap_caps_realloc(customMappingTable, sizeof(uint32_t) * size, MALLOC_CAP_SPIRAM);
         }
         if (customMappingTable == nullptr) {
           DEBUG_PRINTLN("setUpMatrix: trying to get fresh memory block.");
