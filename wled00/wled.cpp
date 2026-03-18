@@ -1144,7 +1144,11 @@ void WLED::setup() {
   #ifdef WLED_BOOTUPDELAY
   delay(WLED_BOOTUPDELAY); // delay to let voltage stabilize, helps with boot issues on some setups
   #endif
+  #if defined(CONFIG_IDF_TARGET_ESP32P4) || defined(ARDUINO_USB_CDC_ON_BOOT)
+  Serial.begin(115200);
+  #else
   Serial.begin(115200, SERIAL_8N1, SOC_RX0, SOC_TX0, false, 20000UL, 120U);
+  #endif
 
 #if !defined(WLEDMM_NO_SERIAL_WAIT) || defined(WLED_DEBUG)
   if (!Serial) delay(1000); // WLEDMM make sure that Serial has initalized
