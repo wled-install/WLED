@@ -706,7 +706,7 @@ BusParallelIO::BusParallelIO(BusConfig& bc, const ColorOrderMap& com) : Bus(bc.t
   memcpy(_pins, bc.pins, sizeof(_pins));
   _outputs = bc.outputs;
   _leds_per_output = bc.leds_per_output;
-  _gammacorrect = true;
+  _gammacorrect = false; // WLED already gamma-corrects colours upstream (gamma32); re-applying here double-corrects and crushes the low end to black. Driver does brightness only, like the other digital buses.
   for (uint8_t i = 0; i < _outputs; i++) {
     if (!pinManager.allocatePin(_pins[i], true, PinOwner::Parallel_IO)){
       USER_PRINTF("Error owning GPIO %d\n", _pins[i]);
