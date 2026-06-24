@@ -104,6 +104,15 @@ Segment::Segment(const Segment &orig) {
 //WLEDMM: recreate ledsrgb if more space needed (will not free ledsrgb!)
 void Segment::allocLeds() {
   uint32_t size = sizeof(CRGB)*max((uint32_t) length(), ledmapMaxSize); // TroyHacks
+  // If ledsrgb currently points into the shared global LED buffer, that buffer
+  // may have been freed+reallocated by WS2812FX::finalizeInit() when the bus /
+  // matrix layout changed (e.g. Art-Net LED-count change from /settings/leds).
+  // Drop the stale pointer so we never free() it ourselves — setUpLeds() will
+  // repoint it at the new _globalLeds on the next paint.
+  if (ledsrgb && Segment::_globalLeds) {
+    ledsrgb = nullptr;
+    ledsrgbSize = 0;
+  }
   if ((size < sizeof(CRGB))) { //softhack too small (<3) or too large (>160Kb) // TroyHacks Removed  "|| (size > 164000)" for P4 because we can be big
     DEBUG_PRINTF("allocLeds warning: size == %u !!\n", size);
     if (ledsrgb && (ledsrgbSize == 0)) {
@@ -113,7 +122,7 @@ void Segment::allocLeds() {
   }
   if ((size > 0) && (!ledsrgb || size > ledsrgbSize)) {    //softhack dont allocate zero bytes
     USER_PRINTF("allocLeds (%d,%d to %d,%d), %u from %u\n", start, startY, stop, stopY, size, ledsrgb?ledsrgbSize:0);
-    if (ledsrgb) free(ledsrgb);   // we need a bigger buffer, so free the old one first
+    if (ledsrgb && !Segment::_globalLeds) free(ledsrgb);   // we need a bigger buffer, so free the old one first — but never free a pointer into the shared _globalLeds buffer
     ledsrgb = (CRGB*) heap_caps_calloc_prefer(size, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL);
     ledsrgbSize = ledsrgb?size:0;
     if (ledsrgb == nullptr) {
