@@ -358,7 +358,7 @@ bool readObjectFromFile(const char* file, const char* key, JsonDocument* dest)
 
   if (key != nullptr && !bufferedFind(key)) //key does not exist in file
   {
-    f.close();
+    if (f) f.close();   // guard against stale handle if open() partially succeeded
     dest->clear();
     DEBUGFS_PRINTLN(F("Obj not found."));
     return false;
@@ -380,7 +380,9 @@ bool readObjectFromFile(const char* file, const char* key, JsonDocument* dest)
       break;
   }
 
-  f.close();
+  if (f) f.close();   // guard: a previous close (e.g. by closeFile() racing with the
+                       // doCloseFile flag) could have left f in a closed-but-not-zeroed state.
+                       // Without this, multi_heap_free sees a freed FileImpl and aborts.
   DEBUGFS_PRINTF("Read, took %d ms\n", millis() - s);
   return true;
 }

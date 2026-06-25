@@ -406,7 +406,7 @@ bool removeDirectory(const char* path);
 // in wled.cpp for now
 bool is_sdcard_mounted(void);
 
-void scanI2C(TwoWire& wire = Wire);
+void scanI2C();
 void dumpAllTaskHWMs(void);
 #define inoise8 perlin8   // fastled legacy alias
 #define inoise16 perlin16 // fastled legacy alias

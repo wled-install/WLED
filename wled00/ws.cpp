@@ -306,13 +306,13 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     static uint8_t* ppaBuffer = nullptr;
 
     if (!ppaBuffer) {
-      ppaBuffer = (uint8_t*)heap_caps_aligned_alloc(CACHE_LINE, PPA_BUF_SIZE, MALLOC_CAP_INTERNAL);
+      ppaBuffer = (uint8_t*)heap_caps_aligned_alloc(CACHE_LINE, PPA_BUF_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
       if (!ppaBuffer) return false;
     }
 
     // Verify buffer size is sufficient
     if (pixelDataSize > PPA_BUF_SIZE) {
-      DEBUG_PRINTF("PPA buffer too small: need %d, have %d\n", pixelDataSize, PPA_BUF_SIZE);
+      USER_PRINTF("PPA buffer too small: need %d, have %d\n", pixelDataSize, PPA_BUF_SIZE);
       return false;
     }
 

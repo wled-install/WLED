@@ -1861,6 +1861,20 @@ void WS2812FX::finalizeInit(void)
   if (Segment::_globalLeds) {
     free(Segment::_globalLeds);
     Segment::_globalLeds = nullptr;
+    // WLEDMM: synchronously drop any segment ledsrgb pointers that used to point
+    // into the just-freed _globalLeds buffer. purgeSegments(true) only marks
+    // segments for lazy reset on next read — it doesn't free the pointers
+    // immediately — so resetSegments(true) called later (e.g. by setUpMatrix
+    // -> deserializeMap -> allocLeds) would free the dangling pointer and
+    // crash with a tlsf double-free. Drop the pointers here so allocLeds sees
+    // a clean (nullptr, size=0) state and just allocates fresh per-segment
+    // buffers via setUpLeds() on the next paint.
+    for (segment &seg : _segments) {
+      if (seg.ledsrgb && !Segment::_globalLeds) {
+        seg.ledsrgb = nullptr;
+        seg.ledsrgbSize = 0;
+      }
+    }
     purgeSegments(true);   // WLEDMM moved here, because it seems to improve stability.
   }
   if (useLedsArray && getLengthTotal()>0) { // WLEDMM avoid malloc(0)

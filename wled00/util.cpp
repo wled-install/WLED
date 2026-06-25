@@ -3,8 +3,9 @@
 #include "const.h"
 #include <dirent.h>
 #include <sys/stat.h>
+#include <driver/i2c_master.h>
 
-void scanI2C(TwoWire& wire) {
+void scanI2C() {
   struct I2CDevice { uint8_t addr; const char* name; };
   static const I2CDevice knownDevices[] = {
     // Audio codecs from WLED AudioReactive
@@ -60,15 +61,47 @@ void scanI2C(TwoWire& wire) {
 
   Serial.println(F("\n--- I2C Scan ---"));
   int found = 0;
+
+  // Install a transient i2c_master_bus on port 1 — leaves port 0 free
+  // for the audioreactive usermod (AR_I2C) or any legacy Wire bus. Port
+  // 1 is available on chips like the ESP32-P4 which have SOC_HP_I2C_NUM=2.
+  // On single-port chips (SOC_HP_I2C_NUM=1) this may fail — in that case
+  // we log a friendly message and return.
+  int8_t sda = i2c_sda, scl = i2c_scl;
+  #ifdef HW_PIN_SDA
+  if (sda < 0) sda = HW_PIN_SDA;
+  if (scl < 0) scl = HW_PIN_SCL;
+  #endif
+  if (sda < 0 || scl < 0) {
+    Serial.println(F("  (no I2C pins configured)"));
+    return;
+  }
+
+  i2c_master_bus_config_t bus_cfg = {};
+  bus_cfg.i2c_port          = (i2c_port_t)1;
+  bus_cfg.sda_io_num        = (gpio_num_t)sda;
+  bus_cfg.scl_io_num        = (gpio_num_t)scl;
+  bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
+  bus_cfg.glitch_ignore_cnt = 7;
+  bus_cfg.flags.enable_internal_pullup = true;
+
+  i2c_master_bus_handle_t bus = NULL;
+  esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+  if (err != ESP_OK || bus == NULL) {
+    Serial.printf("  (i2c_new_master_bus port=1 failed: %d)\n", err);
+    return;
+  }
+
   for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-    wire.beginTransmission(addr);
-    if (wire.endTransmission() == 0) {
+    if (i2c_master_probe(bus, addr, 50) == ESP_OK) {
       found++;
       Serial.printf("  0x%02X: ", addr);
       const char* name = getName(addr);
       Serial.println(name ? name : "Unknown");
     }
   }
+  i2c_del_master_bus(bus);
+
   Serial.printf("--- %d device(s) found ---\n\n", found);
   if (ES7210_present) USER_PRINTLN("ES7210_present == true");
 }
