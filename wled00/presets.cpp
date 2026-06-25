@@ -330,8 +330,13 @@ void buildPresetCache() {
   // --- End allocation ---
 
   USER_PRINTLN(F("Building preset cache..."));
-  // Clear the old cache
-  memset(presetCache, 0, sizeof(presetCache));
+  // Clear the old cache.
+  // BUG FIX: sizeof(presetCache) is the size of the pointer (4 bytes), not the array.
+  // Use 251 * sizeof(PresetMetadata) so a rebuild actually zeros every entry.
+  // (On first build heap_caps_calloc_prefer has already zeroed memory, so this
+  // only matters for subsequent rebuilds, but it was previously leaving 250 slots
+  // with stale data.)
+  memset(presetCache, 0, 251 * sizeof(PresetMetadata));
 
   if (!requestJSONBufferLock(20)) {
     USER_PRINTLN(F("Preset cache build failed (lock)."));
