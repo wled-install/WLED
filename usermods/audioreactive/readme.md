@@ -22,7 +22,7 @@ This has mostly been rewritten to suppot WLED-MM-P4 by @TroyHacks - so some thin
 
 This audioreactive usermod works best on "classic ESP32" (dual core), and on ESP32-S3 which also has dual core and hardware floating point support and accellerated FFT, and of course the ESP32-P4 which the latest speed deamon and also has accellerated FFT (so do some other chipsets this could run on, but aren't entirely listed yet.)
 
-It will compile successfully for ESP32-S2 and ESP32-C3, however might not work well, as other WLED functions will become slow. Audio processing requires a lot of computing power, which can be problematic on smaller MCUs like -S2 and -C3. 
+It might compile successfully for ESP32-S2 and ESP32-C3, however might not work well, as other WLED functions will become slow. Audio processing requires a lot of computing power, which can be problematic on smaller MCUs like -S2 and -C3. **Not tested below the ESP32-P4.**
 
 Analog audio is only possible on "classic" ESP32, but not on other MCUs like ESP32-S3.
 
