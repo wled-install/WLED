@@ -453,14 +453,14 @@
 
           if (isPar) {
             d.getElementsByName("AO" + n)[0].max = d.max_parlio;
-            d.getElementsByName("AL" + n)[0].value = Math.min(Number(d.getElementsByName("AL" + n)[0].value), 1024);
+            d.getElementsByName("AL" + n)[0].value = Math.min(Number(d.getElementsByName("AL" + n)[0].value), 2048);
             d.getElementsByName("SL" + n)[0].style.display = "none";
             d.getElementsByName("CV" + n)[0].style.display = "none";
             d.getElementsByName("RF" + n)[0].style.display = "none"; // coimment out if Parallel IO needs off-refresh
           }
           d.getElementsByName("AO" + n)[0].min = (isNet || isPar) ? 1 : -1;
           d.getElementsByName("AL" + n)[0].min = (isNet || isPar) ? 1 : -1;
-          if (isPar) d.getElementsByName("AL" + n)[0].max = Number(1024);
+          if (isPar) d.getElementsByName("AL" + n)[0].max = Number(2048);
           if (isNet) d.getElementsByName("AL" + n)[0].max = Number(maxL);
           d.getElementsByName("AF" + n)[0].min = (isNet) ? 1 : -1;
 

@@ -145,11 +145,17 @@ void create_transposed_led_output_optimized(
 
   if (bri != last_bri || gammacorrect != last_gammacorrect) {
     for (int i = 0; i < 256; ++i) {
-      brightness_cache[i] = gammacorrect ? (gamma8(i) * bri) >> 8 : (i * bri) >> 8;
+      brightness_cache[i] = gammacorrect ? (gamma8(i) * bri) / 255 : (i * bri) / 255; // /255 (not >>8) so full brightness is an exact passthrough
     }
     for (int i = 0; i < 256; ++i) {
-      const uint16_t p1 = bitpatterns[i >> 4];
-      const uint16_t p2 = bitpatterns[i & 0x0F];
+      // The transpose + PARLIO packing emits each byte's bit-codes in a nibble-pair
+      // swapped order (bit0<->2, 1<->3, 4<->6, 5<->7) -- verified on a scope by walking
+      // single-bit values (only 0x00 and 0xFF survived unchanged, the fingerprint of a
+      // bit shuffle). Pre-swapping the lookup index (the swap is its own inverse) cancels
+      // it, so the value on the wire matches what WLED requested.
+      const uint8_t s = ((i & 0x33) << 2) | ((i & 0xCC) >> 2);
+      const uint16_t p1 = bitpatterns[s >> 4];
+      const uint16_t p2 = bitpatterns[s & 0x0F];
       waveform_cache[i] = (uint32_t(p2) << 16) | p1;
     }
     last_bri = bri;
@@ -308,12 +314,12 @@ uint8_t IRAM_ATTR __attribute__((hot)) show_parlio(uint8_t* parallelPins, uint32
 
   static byte* parallel_buffer_remapped = NULL;
 #ifdef WLEDMM_REMAP_AT_OUTPUT
-  static byte* parallel_buffer_remapped1 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
-  static byte* parallel_buffer_remapped2 = (byte*)heap_caps_calloc_prefer((1024 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  static byte* parallel_buffer_remapped1 = (byte*)heap_caps_calloc_prefer((2048 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
+  static byte* parallel_buffer_remapped2 = (byte*)heap_caps_calloc_prefer((2048 * 16 * 4) + 15, sizeof(byte), 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, MALLOC_CAP_DMA);
 #endif 
   static uint16_t* parallel_buffer_repacked = NULL;
-  static uint16_t* parallel_buffer_repacked1 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
-  static uint16_t* parallel_buffer_repacked2 = (uint16_t*)heap_caps_calloc_prefer((1024 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
+  static uint16_t* parallel_buffer_repacked1 = (uint16_t*)heap_caps_calloc_prefer((2048 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
+  static uint16_t* parallel_buffer_repacked2 = (uint16_t*)heap_caps_calloc_prefer((2048 * 16 * 16), 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED, MALLOC_CAP_DMA);
 
   if (parallel_buffer_repacked == NULL) parallel_buffer_repacked = parallel_buffer_repacked1;
 #ifdef WLEDMM_REMAP_AT_OUTPUT
