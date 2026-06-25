@@ -17,20 +17,22 @@ This usermod is an evolution of [SR-WLED](https://github.com/atuline/WLED), and 
 
 
 ## Supported MCUs
-This audioreactive usermod works best on "classic ESP32" (dual core), and on ESP32-S3 which also has dual core and hardware floating point support. 
+
+This has mostly been rewritten to suppot WLED-MM-P4 by @TroyHacks - so some things may be dropped or different. This code assumes you know what you're doing. 
+
+This audioreactive usermod works best on "classic ESP32" (dual core), and on ESP32-S3 which also has dual core and hardware floating point support and accellerated FFT, and of course the ESP32-P4 which the latest speed deamon and also has accellerated FFT (so do some other chipsets this could run on, but aren't entirely listed yet.
 
 It will compile successfully for ESP32-S2 and ESP32-C3, however might not work well, as other WLED functions will become slow. Audio processing requires a lot of computing power, which can be problematic on smaller MCUs like -S2 and -C3. 
 
 Analog audio is only possible on "classic" ESP32, but not on other MCUs like ESP32-S3.
 
-Currently ESP8266 is not supported, due to low speed and small RAM of this chip. 
-There are however plans to create a lightweight audioreactive for the 8266, with reduced features.
+ESP8266 is not supported, don't bother trying to compile this version for that. 
+
 ## Installation 
 
-### using latest _arduinoFFT_ library
+### using Espressif's Accelerated ESP-DSP library
 
 * `build_flags` = `-D USERMOD_AUDIOREACTIVE`
-* `lib_deps`= `https://github.com/kosme/arduinoFFT#develop @ 1.9.2`
 
 ## Configuration
 
