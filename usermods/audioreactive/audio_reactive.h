@@ -1340,6 +1340,22 @@ class AudioReactive : public Usermod {
     #else
     int8_t mclkPin = MCLK_PIN;
     #endif
+    // Runtime-configurable I2S parameters (replace legacy compile-time macros).
+    #ifndef SR_I2S_BITS_PER_SAMPLE
+    uint8_t i2sBitsPerSample = 32;       // 16, 24, or 32 — matches legacy 32-bit default
+    #else
+    uint8_t i2sBitsPerSample = SR_I2S_BITS_PER_SAMPLE;
+    #endif
+    #ifndef SR_I2S_USE_RIGHT_SLOT
+    bool i2sUseRightSlot = false;        // false = LEFT slot, true = RIGHT slot
+    #else
+    bool i2sUseRightSlot = (SR_I2S_USE_RIGHT_SLOT != 0);
+    #endif
+    #ifndef SR_I2S_MASTER
+    bool i2sMaster = true;               // false = I2S SLAVE role
+    #else
+    bool i2sMaster = (SR_I2S_MASTER != 0);
+    #endif
 #endif
     // new "V2" audiosync struct - 44 Bytes
     struct __attribute__ ((packed)) audioSyncPacket {  // WLEDMM "packed" ensures that there are no additional gaps
@@ -2268,22 +2284,23 @@ class AudioReactive : public Usermod {
       switch (dmType) {
       #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
         // stub cases for not-yet-supported I2S modes on other ESP32 chips
-        case 0:  //ADC analog
         #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3)
         case 5:  //PDM Microphone
         case 51: //legacy PDM Microphone
         #endif
       #endif
         case 1:
-          DEBUGSR_PRINT(F("AR: Generic I2S Microphone - ")); DEBUGSR_PRINTLN(F(I2S_MIC_CHANNEL_TEXT));
-          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE);
+          DEBUGSR_PRINT(F("AR: Generic I2S Microphone - "));
+          DEBUGSR_PRINTLN(F(i2sUseRightSlot ? "right channel" : "left channel"));
+          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           delay(100);
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, I2S_GPIO_UNUSED,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 2:
-          DEBUGSR_PRINTLN(F("AR: ES7243 Microphone (right channel only)."));
+          DEBUGSR_PRINTLN(F("AR: ES7243 Microphone."));
           //useInputFilter = 0; // in case you need to disable low-cut software filtering
-          audioSource = new ES7243(SAMPLE_RATE, BLOCK_SIZE);
+          audioSource = new ES7243(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           delay(100);
           // WLEDMM align global pins
           if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin; // copy usermod prefs into globals (if globals not defined)
@@ -2291,35 +2308,43 @@ class AudioReactive : public Usermod {
           if (i2c_sda >= 0) sdaPin = -1;                        // -1 = use global
           if (i2c_scl >= 0) sclPin = -1;
 
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 3:
-          DEBUGSR_PRINT(F("AR: SPH0645 Microphone - ")); DEBUGSR_PRINTLN(F(I2S_MIC_CHANNEL_TEXT));
-          audioSource = new SPH0654(SAMPLE_RATE, BLOCK_SIZE);
+          DEBUGSR_PRINT(F("AR: SPH0645 Microphone - "));
+          DEBUGSR_PRINTLN(F(i2sUseRightSlot ? "right channel" : "left channel"));
+          audioSource = new SPH0654(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           delay(100);
-          audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin);
+          audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, I2S_GPIO_UNUSED,
+                                  i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 4:
-          DEBUGSR_PRINT(F("AR: Generic I2S Microphone with Master Clock - ")); DEBUGSR_PRINTLN(F(I2S_MIC_CHANNEL_TEXT));
-          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/24.0f);
-          //audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/24.0f, false);   // I2S SLAVE mode - does not work, unfortunately
+          DEBUGSR_PRINT(F("AR: Generic I2S Microphone with Master Clock - "));
+          DEBUGSR_PRINTLN(F(i2sUseRightSlot ? "right channel" : "left channel"));
+          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/24.0f, i2sMaster);
           delay(100);
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         #if  !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3)
         case 5:
-          DEBUGSR_PRINT(F("AR: I2S PDM Microphone - ")); DEBUGSR_PRINTLN(F(I2S_PDM_MIC_CHANNEL_TEXT));
-          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/4.0f);
+          DEBUGSR_PRINT(F("AR: I2S PDM Microphone - "));
+          DEBUGSR_PRINTLN(F(i2sUseRightSlot ? "right channel" : "left channel"));
+          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/4.0f, i2sMaster);
           useInputFilter = 1;  // PDM bandpass filter - this reduces the noise floor on SPM1423 from 5% Vpp (~380) down to 0.05% Vpp (~5)
           delay(100);
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, I2S_GPIO_UNUSED, I2S_GPIO_UNUSED,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 51:
-          DEBUGSR_PRINT(F("AR: Legacy PDM Microphone - ")); DEBUGSR_PRINTLN(F(I2S_PDM_MIC_CHANNEL_TEXT));
-          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          DEBUGSR_PRINT(F("AR: Legacy PDM Microphone - "));
+          DEBUGSR_PRINTLN(F(i2sUseRightSlot ? "right channel" : "left channel"));
+          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           useInputFilter = 1;  // PDM bandpass filter
           delay(100);
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, I2S_GPIO_UNUSED, I2S_GPIO_UNUSED,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         #endif
         case 6:
@@ -2328,7 +2353,7 @@ class AudioReactive : public Usermod {
         #else
           DEBUGSR_PRINTLN(F("AR: ES8388 Source (Line-In)"));
         #endif
-          audioSource = new ES8388Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          audioSource = new ES8388Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           //useInputFilter = 0; // to disable low-cut software filtering and restore previous behaviour
           delay(100);
           // WLEDMM align global pins
@@ -2337,7 +2362,8 @@ class AudioReactive : public Usermod {
           if (i2c_sda >= 0) sdaPin = -1;                        // -1 = use global
           if (i2c_scl >= 0) sclPin = -1;
 
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 7:
         #ifdef use_wm8978_mic
@@ -2345,7 +2371,7 @@ class AudioReactive : public Usermod {
         #else
           DEBUGSR_PRINTLN(F("AR: WM8978 Source (Line-In)"));
         #endif
-          audioSource = new WM8978Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          audioSource = new WM8978Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           //useInputFilter = 0; // to disable low-cut software filtering and restore previous behaviour
           delay(100);
           // WLEDMM align global pins
@@ -2354,11 +2380,12 @@ class AudioReactive : public Usermod {
           if (i2c_sda >= 0) sdaPin = -1;                        // -1 = use global
           if (i2c_scl >= 0) sclPin = -1;
 
-          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
           break;
         case 8:
           DEBUGSR_PRINTLN(F("AR: AC101 Source (Line-In)"));
-          audioSource = new AC101Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          audioSource = new AC101Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           //useInputFilter = 0; // to disable low-cut software filtering and restore previous behaviour
           delay(100);
           // WLEDMM align global pins
@@ -2366,18 +2393,132 @@ class AudioReactive : public Usermod {
           if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
           if (i2c_sda >= 0) sdaPin = -1;                        // -1 = use global
           if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
+          break;
         case 9:
           DEBUGSR_PRINTLN(F("AR: ES8311 Source (Mic)"));
-          audioSource = new ES8311Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          audioSource = new ES8311Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f, i2sMaster);
           //useInputFilter = 0; // to disable low-cut software filtering and restore previous behaviour
           delay(100);
           // WLEDMM align global pins
           if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin; // copy usermod prefs into globals (if globals not defined)
           if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
           if (i2c_sda >= 0) sdaPin = -1;                        // -1 = use global
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin,
+                                                    i2sBitsPerSample, i2sUseRightSlot, i2sMaster);
+          break;
+        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+        #ifdef CONFIG_CODEC_ES8311_SUPPORT
+        case 10:
+          DEBUGSR_PRINTLN(F("AR: ES8311 IDF (esp_codec_dev)"));
+          audioSource = new ES8311IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
           if (i2c_scl >= 0) sclPin = -1;
           if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
           break;
+        #endif
+        #ifdef CONFIG_CODEC_ES8388_SUPPORT
+        case 11:
+          DEBUGSR_PRINTLN(F("AR: ES8388 IDF (esp_codec_dev)"));
+          audioSource = new ES8388IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif
+        #ifdef CONFIG_CODEC_ES8374_SUPPORT
+        case 12:
+          DEBUGSR_PRINTLN(F("AR: ES8374 IDF (esp_codec_dev)"));
+          audioSource = new ES8374IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif  // CONFIG_CODEC_ES8374_SUPPORT
+        #ifdef CONFIG_CODEC_ZL38063_SUPPORT
+        case 13:
+          DEBUGSR_PRINTLN(F("AR: ZL38063 IDF (esp_codec_dev)"));
+          audioSource = new ZL38063IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif  // CONFIG_CODEC_ZL38063_SUPPORT
+        #ifdef CONFIG_CODEC_ES8389_SUPPORT
+        case 14:
+          DEBUGSR_PRINTLN(F("AR: ES8389 IDF (esp_codec_dev)"));
+          audioSource = new ES8389IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif
+        #ifdef CONFIG_CODEC_ES7210_SUPPORT
+        case 15:
+          DEBUGSR_PRINTLN(F("AR: ES7210 IDF (esp_codec_dev, record only)"));
+          audioSource = new ES7210IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif
+        #ifdef CONFIG_CODEC_ES7243_SUPPORT
+        case 16:
+          DEBUGSR_PRINTLN(F("AR: ES7243 IDF (esp_codec_dev, record only)"));
+          audioSource = new ES7243IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif
+        #ifdef CONFIG_CODEC_ES7243E_SUPPORT
+        case 17:
+          DEBUGSR_PRINTLN(F("AR: ES7243E IDF (esp_codec_dev, record only)"));
+          audioSource = new ES7243EIDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif
+        #ifdef CONFIG_CODEC_CJC8910_SUPPORT
+        case 18:
+          DEBUGSR_PRINTLN(F("AR: CJC8910 IDF (esp_codec_dev)"));
+          audioSource = new CJC8910IDFSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f);
+          delay(100);
+          if ((sdaPin >= 0) && (i2c_sda < 0)) i2c_sda = sdaPin;
+          if ((sclPin >= 0) && (i2c_scl < 0)) i2c_scl = sclPin;
+          if (i2c_sda >= 0) sdaPin = -1;
+          if (i2c_scl >= 0) sclPin = -1;
+          if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+          break;
+        #endif  // CONFIG_CODEC_CJC8910_SUPPORT
+        #endif  // ESP_IDF >= 4.4
 
           case 255: // falls through
           case 254: // dummy "network receive only" driver
@@ -2864,6 +3005,40 @@ class AudioReactive : public Usermod {
           }
         }
 
+        // Active codec name (matches the "Audio Source" dropdown in the
+        // usermod settings page). This is the verbatim label string used
+        // for the currently-selected dmType, so the info pane stays in sync
+        // with whatever the user picked.
+        {
+          infoArr = user.createNestedArray(F("Active codec"));
+          const char* codecName = "";
+          switch (dmType) {
+            case 0:   codecName = PSTR("Generic Analog"); break;
+            case 1:   codecName = PSTR("Generic I2S"); break;
+            case 2:   codecName = PSTR("ES7243"); break;
+            case 3:   codecName = PSTR("SPH0654"); break;
+            case 4:   codecName = PSTR("Generic I2S with MCLK"); break;
+            case 5:   codecName = PSTR("Generic I2S PDM"); break;
+            case 51:  codecName = PSTR("Legacy I2S PDM"); break;
+            case 6:   codecName = PSTR("ES8388"); break;
+            case 7:   codecName = PSTR("WM8978"); break;
+            case 8:   codecName = PSTR("AC101"); break;
+            case 9:   codecName = PSTR("ES8311"); break;
+            case 10:  codecName = PSTR("ES8311 (esp_codec_dev)"); break;
+            case 11:  codecName = PSTR("ES8388 (esp_codec_dev)"); break;
+            case 12:  codecName = PSTR("ES8374 (esp_codec_dev)"); break;
+            case 13:  codecName = PSTR("ZL38063 (esp_codec_dev)"); break;
+            case 14:  codecName = PSTR("ES8389 (esp_codec_dev)"); break;
+            case 15:  codecName = PSTR("ES7210 (esp_codec_dev)"); break;
+            case 16:  codecName = PSTR("ES7243 (esp_codec_dev)"); break;
+            case 17:  codecName = PSTR("ES7243E (esp_codec_dev)"); break;
+            case 18:  codecName = PSTR("CJC8910 (esp_codec_dev)"); break;
+            case 254: codecName = PSTR("None - network receive only"); break;
+            default:  codecName = PSTR("Unknown"); break;
+          }
+          infoArr.add(codecName);
+        }
+
         // Sound processing (FFT and input filters)
         infoArr = user.createNestedArray(F("Sound Processing"));
         if (audioSource && (disableSoundProcessing == false)) {
@@ -2881,7 +3056,11 @@ class AudioReactive : public Usermod {
         }
         if ((soundAgc > 0) && (disableSoundProcessing == false) && !(audioSyncEnabled == AUDIOSYNC_REC)) {
           infoArr = user.createNestedArray(F("AGC Gain"));
-          infoArr.add(roundf(multAgc*100.0f) / 100.0f);
+          // Format with 1 decimal place to avoid floating-point rounding
+          // artefacts (e.g. 0.029999999 displaying as "0.03" inconsistently).
+          char agcBuf[12];
+          snprintf(agcBuf, sizeof(agcBuf), "%.2f", multAgc);
+          infoArr.add(agcBuf);
           infoArr.add("x");
         }
 #endif
@@ -2908,7 +3087,7 @@ class AudioReactive : public Usermod {
             }
         }
 
-        #if defined(WLED_DEBUG) || defined(SR_DEBUG) || defined(SR_STATS)
+        #if 0 && (defined(WLED_DEBUG) || defined(SR_DEBUG) || defined(SR_STATS))
         #ifdef ARDUINO_ARCH_ESP32
         infoArr = user.createNestedArray(F("I2S cycle time"));
         infoArr.add(roundf(fftTaskCycle)/100.0f);
@@ -2924,7 +3103,7 @@ class AudioReactive : public Usermod {
           infoArr = user.createNestedArray(F("FFT time"));
         #endif
         infoArr.add(roundf(fftTime)/100.0f);
-        if ((fftTime/100) >= FFT_MIN_CYCLE) // FFT time over budget -> I2S buffer will overflow 
+        if ((fftTime/100) >= FFT_MIN_CYCLE) // FFT time over budget -> I2S buffer will overflow
           infoArr.add("<b style=\"color:red;\">! ms</b>");
         else if ((fftTime/80 + sampleTime/80) >= FFT_MIN_CYCLE) // FFT time >75% of budget -> risk of instability
           infoArr.add("<b style=\"color:orange;\"> ms!</b>");
@@ -3043,7 +3222,7 @@ class AudioReactive : public Usermod {
       JsonObject dmic = top.createNestedObject(FPSTR(_digitalmic));
       dmic[F("type")] = dmType;
       // WLEDMM: align with globals I2C pins
-      if ((dmType == 2) || (dmType == 6)) {         // only for ES7243 and ES8388
+      if ((dmType == 2) || (dmType == 6) || (dmType >= 10 && dmType <= 18)) {         // ES7243, ES8388, and IDF codecs
         if (i2c_sda >= 0) sdaPin = -1;              // -1 = use global
         if (i2c_scl >= 0) sclPin = -1;              // -1 = use global
       }
@@ -3054,6 +3233,10 @@ class AudioReactive : public Usermod {
       pinArray.add(mclkPin);
       pinArray.add(sdaPin);
       pinArray.add(sclPin);
+
+      dmic[F("bits")]    = i2sBitsPerSample;
+      dmic[F("rightSlot")] = i2sUseRightSlot;
+      dmic[F("master")]  = i2sMaster;
 
       JsonObject cfg = top.createNestedObject("config");
       cfg[F("squelch")] = soundSquelch;
@@ -3114,6 +3297,9 @@ class AudioReactive : public Usermod {
       auto oldI2SwsPin = i2swsPin;
       auto oldI2SckPin = i2sckPin;
       auto oldI2SmclkPin = mclkPin;
+      auto oldBits = i2sBitsPerSample;
+      auto oldRightSlot = i2sUseRightSlot;
+      auto oldMaster = i2sMaster;
 #endif
 
       configComplete &= getJsonValue(top[FPSTR(_enabled)], enabled);
@@ -3142,6 +3328,17 @@ class AudioReactive : public Usermod {
       configComplete &= getJsonValue(top[FPSTR(_digitalmic)]["pin"][3], mclkPin);
       configComplete &= getJsonValue(top[FPSTR(_digitalmic)]["pin"][4], sdaPin);
       configComplete &= getJsonValue(top[FPSTR(_digitalmic)]["pin"][5], sclPin);
+
+      uint8_t bitsRead = i2sBitsPerSample;
+      bool rightSlotRead = i2sUseRightSlot;
+      bool masterRead = i2sMaster;
+      configComplete &= getJsonValue(top[FPSTR(_digitalmic)][F("bits")],      bitsRead);
+      configComplete &= getJsonValue(top[FPSTR(_digitalmic)][F("rightSlot")], rightSlotRead);
+      configComplete &= getJsonValue(top[FPSTR(_digitalmic)][F("master")],    masterRead);
+      // Sanitize bit-width: only 16/24/32 are valid.
+      if (bitsRead == 16 || bitsRead == 24 || bitsRead == 32) i2sBitsPerSample = bitsRead;
+      i2sUseRightSlot = rightSlotRead;
+      i2sMaster = masterRead;
 
       configComplete &= getJsonValue(top["config"][F("squelch")], soundSquelch);
       configComplete &= getJsonValue(top["config"][F("gain")],    sampleGain);
@@ -3173,8 +3370,9 @@ class AudioReactive : public Usermod {
       if (initDone) {
         if ((audioSource != nullptr) && (oldDMType != dmType)) errorFlag = ERR_REBOOT_NEEDED;  // changing mic type requires reboot
         if (   (audioSource != nullptr) && (enabled==true)
-            && ((oldI2SsdPin != i2ssdPin) || (oldI2SsdPin != i2ssdPin) || (oldI2SckPin != i2sckPin)) ) errorFlag = ERR_REBOOT_NEEDED;  // changing mic pins requires reboot
+            && ((oldI2SsdPin != i2ssdPin) || (oldI2SwsPin != i2swsPin) || (oldI2SckPin != i2sckPin)) ) errorFlag = ERR_REBOOT_NEEDED;  // changing mic pins requires reboot
         if ((audioSource != nullptr) && (oldI2SmclkPin != mclkPin)) errorFlag = ERR_REBOOT_NEEDED;  // changing MCLK pin requires reboot
+        if ((audioSource != nullptr) && ((oldBits != i2sBitsPerSample) || (oldRightSlot != i2sUseRightSlot) || (oldMaster != i2sMaster))) errorFlag = ERR_REBOOT_NEEDED;  // changing I2S sample format requires reboot
         if ((oldDMType != dmType) && (oldDMType == 0)) errorFlag = ERR_POWEROFF_NEEDED;  // changing from analog mic requires power cycle
         if ((oldDMType != dmType) && (dmType == 0)) errorFlag = ERR_POWEROFF_NEEDED;  // changing to analog mic requires power cycle
       }
@@ -3262,6 +3460,83 @@ class AudioReactive : public Usermod {
       #else
         oappend(SET_F("addOption(dd,'ES8311 ☾',9);"));
       #endif
+      #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+        #ifdef CONFIG_CODEC_ES8311_SUPPORT
+          #if SR_DMTYPE==10
+            oappend(SET_F("addOption(dd,'ES8311 (esp_codec_dev) (⎌)',10);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES8311 (esp_codec_dev)',10);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES8388_SUPPORT
+          #if SR_DMTYPE==11
+            oappend(SET_F("addOption(dd,'ES8388 (esp_codec_dev) (⎌)',11);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES8388 (esp_codec_dev)',11);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES8374_SUPPORT
+          #if SR_DMTYPE==12
+            oappend(SET_F("addOption(dd,'ES8374 (esp_codec_dev) (⎌)',12);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES8374 (esp_codec_dev)',12);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ZL38063_SUPPORT
+          #if SR_DMTYPE==13
+            oappend(SET_F("addOption(dd,'ZL38063 (esp_codec_dev) (⎌)',13);"));
+          #else
+            oappend(SET_F("addOption(dd,'ZL38063 (esp_codec_dev)',13);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES8389_SUPPORT
+          #if SR_DMTYPE==14
+            oappend(SET_F("addOption(dd,'ES8389 (esp_codec_dev) (⎌)',14);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES8389 (esp_codec_dev)',14);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES7210_SUPPORT
+          #if SR_DMTYPE==15
+            oappend(SET_F("addOption(dd,'ES7210 (esp_codec_dev) (⎌)',15);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES7210 (esp_codec_dev)',15);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES7243_SUPPORT
+          #if SR_DMTYPE==16
+            oappend(SET_F("addOption(dd,'ES7243 (esp_codec_dev) (⎌)',16);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES7243 (esp_codec_dev)',16);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_ES7243E_SUPPORT
+          #if SR_DMTYPE==17
+            oappend(SET_F("addOption(dd,'ES7243E (esp_codec_dev) (⎌)',17);"));
+          #else
+            oappend(SET_F("addOption(dd,'ES7243E (esp_codec_dev)',17);"));
+          #endif
+        #endif
+        #ifdef CONFIG_CODEC_CJC8910_SUPPORT
+          #if SR_DMTYPE==18
+            oappend(SET_F("addOption(dd,'CJC8910 (esp_codec_dev) (⎌)',18);"));
+          #else
+            oappend(SET_F("addOption(dd,'CJC8910 (esp_codec_dev)',18);"));
+          #endif
+        #endif
+      #endif
+
+      // I2S sample format (runtime-configurable; replaces legacy I2S_USE_RIGHT_CHANNEL / I2S_USE_16BIT_SAMPLES macros)
+      oappend(SET_F("dd=addDropdown(ux,'digitalmic:bits');"));
+      oappend(SET_F("addOption(dd,'32 bits (⎌)',32);"));
+      oappend(SET_F("addOption(dd,'24 bits',24);"));
+      oappend(SET_F("addOption(dd,'16 bits',16);"));
+      oappend(SET_F("dd=addDropdown(ux,'digitalmic:rightSlot');"));
+      oappend(SET_F("addOption(dd,'Left slot (⎌)',0);"));
+      oappend(SET_F("addOption(dd,'Right slot',1);"));
+      oappend(SET_F("dd=addDropdown(ux,'digitalmic:master');"));
+      oappend(SET_F("addOption(dd,'Master (⎌)',1);"));
+      oappend(SET_F("addOption(dd,'Slave',0);"));
       #ifdef SR_SQUELCH
         oappend(SET_F("addInfo(ux+':config:squelch',1,'<i>&#9100; ")); oappendi(SR_SQUELCH); oappend("</i>');");  // 0 is field type, 1 is actual field
       #endif

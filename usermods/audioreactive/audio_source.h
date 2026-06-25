@@ -11,30 +11,40 @@
 */
 
 
-#ifdef ARDUINO_ARCH_ESP32
+// #ifdef ARDUINO_ARCH_ESP32
 #include <Wire.h>
 #include "wled.h"
-#include <driver/i2s.h>
-#include <driver/adc.h>
-#include <soc/i2s_reg.h>  // needed for SPH0465 timing workaround (classic ESP32)
+
+// IDF v5 new I2S driver — replaces the deprecated <driver/i2s.h>.
+#include <driver/i2s_std.h>
+#include <driver/i2s_pdm.h>
+#include <driver/i2s_types.h>
+
+// IDF v5 new I2C master driver — needed to install our own i2c_master_bus
+// for the esp_codec_dev library when Wire's bus handle is not exposed.
+#include <driver/i2c_master.h>
+
+// esp_codec_dev - official espressif codec driver for ES8311, ES8388, ES8374, etc.
+// esp_codec_dev.h provides core types; codec headers provide codec-specific structs.
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
-#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ARCH_RISCV) 
-#include <driver/adc_deprecated.h>
-#include <driver/adc_types_deprecated.h>
+#include <esp_codec_dev.h>
+#include <esp_codec_dev_defaults.h>
+#include <es8311_codec.h>
+#include <es8388_codec.h>
+#include <es8374_codec.h>
+#include <es7210_adc.h>
+#include <es7243_adc.h>
+#include <es7243e_adc.h>
+#include <es8389_codec.h>
+#include <zl38063_codec.h>
+#include <cjc8910_codec.h>
 #endif
-// type of i2s_config_t.SampleRate was changed from "int" to "unsigned" in IDF 4.4.x
+
+// Sample-rate type (the legacy i2s_config_t.sample_rate was "int" until IDF 4.4.x).
 #define SRate_t uint32_t
-#else
-#define SRate_t int
-#endif
 
-constexpr i2s_port_t AR_I2S_PORT = I2S_NUM_0;       // I2S port to use (do not change!  I2S_NUM_1 possible but this has 
-                                                    // strong limitations -> no MCLK routing, no ADC support, no PDM support
-
-//#include <driver/i2s_std.h>
-//#include <driver/i2s_pdm.h>
-//#include <driver/i2s_tdm.h>
-//#include <driver/gpio.h>
+constexpr i2s_port_t AR_I2S_PORT = I2S_NUM_0;       // I2S port to use (do not change!  I2S_NUM_1 possible but this has
+                                                    // strong limitations -> no MCLK routing, no PDM support on some targets
 
 // see https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/chip-series-comparison.html#related-documents
 // and https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/i2s.html#overview-of-all-modes
@@ -53,77 +63,58 @@ constexpr i2s_port_t AR_I2S_PORT = I2S_NUM_0;       // I2S port to use (do not c
    Until this configuration is moved to the webinterface
 */
 
-// if you have problems to get your microphone work on the left channel, uncomment the following line
+// Compile-time defaults. These may be overridden at runtime by the
+// AudioReactive usermod's persisted config (see i2sBitsPerSample /
+// i2sSlot / i2sMaster below).
+//
+//   I2S_USE_RIGHT_CHANNEL - select RIGHT slot on digital mics (compile-time)
+//   I2S_USE_16BIT_SAMPLES - request 16-bit samples (compile-time)
+//   I2S_GRAB_ADC1_COMPLETELY - obsolete (I2SAdcSource was removed when
+//                               migrating to the IDF v5 new I2S driver)
+//
 //#define I2S_USE_RIGHT_CHANNEL    // (experimental) define this to use right channel (digital mics only)
-
-// Uncomment the line below to utilize ADC1 _exclusively_ for I2S sound input.
-// benefit: analog mic inputs will be sampled contiously -> better response times and less "glitches"
-// WARNING: this option WILL lock-up your device in case that any other analogRead() operation is performed; 
-//          for example if you want to read "analog buttons"
-//#define I2S_GRAB_ADC1_COMPLETELY // (experimental) continuously sample analog ADC microphone. WARNING will cause analogRead() lock-up
-
-// data type requested from the I2S driver - currently we always use 32bit
-//#define I2S_USE_16BIT_SAMPLES   // (experimental) define this to request 16bit - more efficient but possibly less compatible
+//#define I2S_USE_16BIT_SAMPLES    // (experimental) define this to request 16bit - more efficient but possibly less compatible
 
 #if defined(WLED_ENABLE_HUB75MATRIX) && defined(CONFIG_IDF_TARGET_ESP32)
   // this is bitter, but necessary to survive
   #define I2S_USE_16BIT_SAMPLES
 #endif
 
+// I2S_SAMPLE_RESOLUTION / I2S_data_size are kept as aliases so any
+// out-of-tree code that still references them compiles, but they map to the
+// new IDF v5 I2S_DATA_BIT_WIDTH_* constants.
 #ifdef I2S_USE_16BIT_SAMPLES
-#define I2S_SAMPLE_RESOLUTION I2S_BITS_PER_SAMPLE_16BIT
+#define I2S_SAMPLE_RESOLUTION I2S_DATA_BIT_WIDTH_16BIT
 #define I2S_datatype int16_t
 #define I2S_unsigned_datatype uint16_t
-#define I2S_data_size I2S_BITS_PER_CHAN_16BIT
+#define I2S_data_size I2S_DATA_BIT_WIDTH_16BIT
 #undef  I2S_SAMPLE_DOWNSCALE_TO_16BIT
 #else
-#define I2S_SAMPLE_RESOLUTION I2S_BITS_PER_SAMPLE_32BIT
-//#define I2S_SAMPLE_RESOLUTION I2S_BITS_PER_SAMPLE_24BIT 
+#define I2S_SAMPLE_RESOLUTION I2S_DATA_BIT_WIDTH_32BIT
 #define I2S_datatype int32_t
 #define I2S_unsigned_datatype uint32_t
-#define I2S_data_size I2S_BITS_PER_CHAN_32BIT
+#define I2S_data_size I2S_DATA_BIT_WIDTH_32BIT
 #define I2S_SAMPLE_DOWNSCALE_TO_16BIT
 #endif
 
-/* There are several (confusing) options  in IDF 4.4.x:
- * I2S_CHANNEL_FMT_RIGHT_LEFT, I2S_CHANNEL_FMT_ALL_RIGHT and I2S_CHANNEL_FMT_ALL_LEFT stands for stereo mode, which means two channels will transport different data.
- * I2S_CHANNEL_FMT_ONLY_RIGHT and I2S_CHANNEL_FMT_ONLY_LEFT they are mono mode, both channels will only transport same data.
- * I2S_CHANNEL_FMT_MULTIPLE means TDM channels, up to 16 channel will available, and they are stereo as default.
- * if you want to receive two channels, one is the actual data from microphone and another channel is suppose to receive 0, it's different data in two channels, you need to choose I2S_CHANNEL_FMT_RIGHT_LEFT in this case.
-*/
-
-#if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)) && (ESP_IDF_VERSION <= ESP_IDF_VERSION_VAL(4, 4, 8)) // should be fixed in IDF 4.4.5, however arduino-esp32 2.0.14 - 2.0.17 did an "I2S rollback" to 4.4.4
-// espressif bug: only_left has no sound, left and right are swapped 
-// https://github.com/espressif/esp-idf/issues/9635  I2S mic not working since 4.4 (IDFGH-8138)
-// https://github.com/espressif/esp-idf/issues/8538  I2S channel selection issue? (IDFGH-6918)
-// https://github.com/espressif/esp-idf/issues/6625  I2S: left/right channels are swapped for read (IDFGH-4826)
+// Backwards-compatible channel-selection macros. These now map to the new
+// IDF v5 I2S_SLOT_* constants. The legacy "left/right swapped" bug from
+// IDF 4.4.x (issues #6625, #8538, #9635) is fixed in the new driver, so
+// I2S_USE_RIGHT_CHANNEL now genuinely selects the right channel.
 #ifdef I2S_USE_RIGHT_CHANNEL
-#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_MIC_CHANNEL_TEXT "right channel only (work-around swapped channel bug in IDF 4.4)."
-#define I2S_PDM_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_RIGHT
+#define I2S_MIC_CHANNEL_SLOT_MASK I2S_STD_SLOT_RIGHT
+#define I2S_MIC_CHANNEL_TEXT "right channel only"
+#define I2S_PDM_MIC_CHANNEL_SLOT_MASK I2S_PDM_SLOT_RIGHT
 #define I2S_PDM_MIC_CHANNEL_TEXT "right channel only"
 #else
-//#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ALL_LEFT
-//#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_RIGHT_LEFT
-#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_RIGHT
-#define I2S_MIC_CHANNEL_TEXT "left channel only (work-around swapped channel bug in IDF 4.4)."
-#define I2S_PDM_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_PDM_MIC_CHANNEL_TEXT "left channel only."
+#define I2S_MIC_CHANNEL_SLOT_MASK I2S_STD_SLOT_LEFT
+#define I2S_MIC_CHANNEL_TEXT "left channel only"
+#define I2S_PDM_MIC_CHANNEL_SLOT_MASK I2S_PDM_SLOT_LEFT
+#define I2S_PDM_MIC_CHANNEL_TEXT "left channel only"
 #endif
 
-#else
-// not swapped
-#ifdef I2S_USE_RIGHT_CHANNEL
-#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_RIGHT
-#define I2S_MIC_CHANNEL_TEXT "right channel only."
-#else
-#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_MIC_CHANNEL_TEXT "left channel only."
-#endif
-#define I2S_PDM_MIC_CHANNEL I2S_MIC_CHANNEL
-#define I2S_PDM_MIC_CHANNEL_TEXT I2S_MIC_CHANNEL_TEXT
-
-#endif
+// PDM RX always uses 16-bit slot width per IDF v5 driver constraints.
+#define I2S_PDM_SLOT_WIDTH I2S_DATA_BIT_WIDTH_16BIT
 
 
 // max number of samples for a single i2s_read --> size of global buffer.
@@ -145,8 +136,19 @@ class AudioSource {
     /* Initialize
        This function needs to take care of anything that needs to be done
        before samples can be obtained from the microphone.
+
+       bitsPerSample: 16, 24, or 32 (selects i2s_data_bit_width_t on the new driver)
+       useRightSlot:  false = LEFT slot, true = RIGHT slot (replaces the
+                      legacy I2S_USE_RIGHT_CHANNEL compile-time macro)
+       i2sMaster:     false = I2S_SLAVE role (rarely used)
     */
-    virtual void initialize(int8_t = I2S_PIN_NO_CHANGE, int8_t = I2S_PIN_NO_CHANGE, int8_t = I2S_PIN_NO_CHANGE, int8_t = I2S_PIN_NO_CHANGE) = 0;
+    virtual void initialize(int8_t i2swsPin   = I2S_GPIO_UNUSED,
+                            int8_t i2ssdPin   = I2S_GPIO_UNUSED,
+                            int8_t i2sckPin   = I2S_GPIO_UNUSED,
+                            int8_t mclkPin    = I2S_GPIO_UNUSED,
+                            uint8_t bitsPerSample = 32,
+                            bool    useRightSlot  = false,
+                            bool    i2sMaster     = true) = 0;
 
     /* Deinitialize
        Release all resources and deactivate any functionality that is used
@@ -188,63 +190,288 @@ class AudioSource {
     I2S_datatype newSampleBuffer[I2S_SAMPLES_MAX+4] = { 0 }; // global buffer for i2s_read
 };
 
+/* audioreactive_I2C — IDF v5 new I2C master bus wrapper
+   ----------------------------------------------------------
+   The audioreactive usermod used to rely on Arduino Wire (legacy I2C driver
+   under the hood). On IDF v5 (arduino-esp32 v3.x), Wire.begin() installs
+   its own i2c_master_bus_handle_t on a fixed port and does NOT expose the
+   handle — making it impossible for the esp_codec_dev library (which
+   needs the handle) to share the bus.
+
+   audioreactive_I2C instead installs its own dedicated i2c_master_bus on a
+   configurable port (default port 0 on chips with one I2C controller, port 1
+   on chips like ESP32-P4 with two — leaving Wire on port 0 for the rest of
+   WLED). Codec classes acquire their device handle via addDevice() and
+   perform register r/w via writeReg()/readReg() — no Wire dependency.
+*/
+#ifndef SR_I2C_PORT
+  #define SR_I2C_PORT 0        // default to port 0 — share with Wire; we'll tear Wire down first
+#endif
+#ifndef SR_I2C_FREQUENCY_HZ
+#define SR_I2C_FREQUENCY_HZ 50000    // 50 kHz — conservative default; some ESP codec libs
+                                     // (e.g. esp_codec_dev's es8311_codec_new on P4)
+                                     // need slower SCL to avoid NACKs
+#endif
+
+class audioreactive_I2CDevice {
+  public:
+    audioreactive_I2CDevice() : _dev_handle(nullptr), _addr(0), _freq_hz(SR_I2C_FREQUENCY_HZ) {}
+    i2c_master_dev_handle_t handle() const { return _dev_handle; }
+    uint8_t addr() const { return _addr; }
+
+  private:
+    friend class audioreactive_I2C;
+    i2c_master_dev_handle_t _dev_handle;
+    uint8_t _addr;
+    uint32_t _freq_hz;
+};
+
+class audioreactive_I2C {
+  public:
+    audioreactive_I2C() : _bus_handle(nullptr), _bus_port((i2c_port_t)SR_I2C_PORT), _sda_io(-1), _scl_io(-1) {}
+
+    /* Returns true if the bus is installed and ready. */
+    bool isReady() const { return _bus_handle != nullptr; }
+
+    /* The port this bus was installed on. Useful for logging and for passing
+       to esp_codec_dev's audio_codec_i2c_cfg_t. */
+    i2c_port_t port() const { return _bus_port; }
+    i2c_master_bus_handle_t busHandle() const { return _bus_handle; }
+
+    /* Install the i2c_master_bus on the configured port, on the given SDA/SCL
+       GPIO pins. Idempotent: if the bus is already installed on the same port+pins,
+       it's reused. Returns true on success.
+
+       On arduino-esp32 v3.x Wire.begin() installs an i2c_master_bus_handle_t on
+       the same port (default 0) and refuses to share. To take over, we first
+       call Wire.end() to release Wire's claim on the peripheral — the rest
+       of WLED's Wire-based code (the I2C scan in setup()) will silently no-op
+       thereafter, which is acceptable on builds that have moved to the new driver. */
+    bool begin(int8_t sda_io, int8_t scl_io) {
+      if (sda_io < 0 || scl_io < 0) return false;
+      if (_bus_handle && _sda_io == sda_io && _scl_io == scl_io) return true;  // already installed
+      if (_bus_handle) end();  // tear down old bus if ports/pins changed
+
+      // Release Wire's bus on the same port before we install ours.
+      Wire.end();
+
+      // Some chips (notably ESP32-P4) need a brief delay after Wire.end() before
+      // re-installing the bus, otherwise the GPIO mux holds stale Wire settings
+      // and subsequent I²C transactions NACK with a phantom slave.
+      delay(10);
+
+      i2c_master_bus_config_t bus_cfg = {};
+      bus_cfg.i2c_port          = _bus_port;
+      bus_cfg.sda_io_num        = (gpio_num_t)sda_io;
+      bus_cfg.scl_io_num        = (gpio_num_t)scl_io;
+      bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
+      bus_cfg.glitch_ignore_cnt = 7;
+      bus_cfg.flags.enable_internal_pullup = true;
+      bus_cfg.flags.allow_pd             = false;
+
+      esp_err_t err = i2c_new_master_bus(&bus_cfg, &_bus_handle);
+      if (err != ESP_OK || _bus_handle == nullptr) {
+        DEBUGSR_PRINTF("audioreactive_I2C: i2c_new_master_bus failed on port %d (sda=%d scl=%d): %d\n",
+                       (int)_bus_port, sda_io, scl_io, err);
+        _bus_handle = nullptr;
+        return false;
+      }
+      _sda_io = sda_io;
+      _scl_io = scl_io;
+      DEBUGSR_PRINTF("audioreactive_I2C: installed i2c_master_bus on port %d (sda=%d scl=%d)\n",
+                     (int)_bus_port, sda_io, scl_io);
+      return true;
+    }
+
+    /* Tear down the bus and all attached devices. */
+    void end() {
+      for (int i = 0; i < _device_count; i++) {
+        if (_devices[i]._dev_handle) {
+          i2c_master_bus_rm_device(_devices[i]._dev_handle);
+          _devices[i]._dev_handle = nullptr;
+        }
+      }
+      _device_count = 0;
+      if (_bus_handle) {
+        i2c_del_master_bus(_bus_handle);
+        _bus_handle = nullptr;
+      }
+      _sda_io = _scl_io = -1;
+    }
+
+    /* Add a device at `addr` with a per-device clock rate. Returns a pointer
+       to the device slot (valid until end() or the next addDevice call that
+       overflows MAX_DEVICES). Returns nullptr on failure. */
+    audioreactive_I2CDevice *addDevice(uint8_t addr, uint32_t freq_hz = SR_I2C_FREQUENCY_HZ) {
+      if (!_bus_handle) return nullptr;
+      if (_device_count >= MAX_DEVICES) return nullptr;
+      i2c_device_config_t dev_cfg = {};
+      dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+      dev_cfg.device_address  = addr;
+      dev_cfg.scl_speed_hz    = freq_hz;
+      dev_cfg.scl_wait_us     = 0;
+      dev_cfg.flags.disable_ack_check = false;
+
+      audioreactive_I2CDevice *dev = &_devices[_device_count++];
+      esp_err_t err = i2c_master_bus_add_device(_bus_handle, &dev_cfg, &dev->_dev_handle);
+      if (err != ESP_OK) {
+        DEBUGSR_PRINTF("audioreactive_I2C: i2c_master_bus_add_device failed for addr 0x%02X: %d\n", addr, err);
+        _device_count--;
+        return nullptr;
+      }
+      dev->_addr    = addr;
+      dev->_freq_hz = freq_hz;
+      DEBUGSR_PRINTF("audioreactive_I2C: added device 0x%02X @ %u Hz\n", addr, (unsigned)freq_hz);
+      return dev;
+    }
+
+    /* Probe an address: returns true if a device ACKed. */
+    bool probe(uint8_t addr) {
+      if (!_bus_handle) return false;
+      uint8_t dummy = 0;
+      return i2c_master_probe(_bus_handle, addr, 50) == ESP_OK;
+    }
+
+    /* Register write (single byte). Returns true on success. */
+    bool writeReg(audioreactive_I2CDevice *dev, uint8_t reg, uint8_t val) {
+      if (!dev || !dev->_dev_handle) return false;
+      const uint8_t buf[2] = { reg, val };
+      return i2c_master_transmit(dev->_dev_handle, buf, sizeof(buf), 50) == ESP_OK;
+    }
+
+    /* Register write with two bytes of data (e.g. WM8978/AC101 use 2-byte writes). */
+    bool writeReg16(audioreactive_I2CDevice *dev, uint8_t reg, uint16_t val16) {
+      if (!dev || !dev->_dev_handle) return false;
+      const uint8_t buf[3] = { reg, (uint8_t)(val16 >> 8), (uint8_t)(val16 & 0xFF) };
+      return i2c_master_transmit(dev->_dev_handle, buf, sizeof(buf), 50) == ESP_OK;
+    }
+
+    /* Register read (single byte). Returns true on success and stores the value in *out. */
+    bool readReg(audioreactive_I2CDevice *dev, uint8_t reg, uint8_t *out) {
+      if (!dev || !dev->_dev_handle || !out) return false;
+      return i2c_master_transmit_receive(dev->_dev_handle, &reg, 1, out, 1, 50) == ESP_OK;
+    }
+
+    /* Helper: build a minimal audio_codec_ctrl_if_t shim that wraps a single
+       i2c_master_dev_handle_t. Used by the esp_codec_dev path so the
+       library's es8311_codec_open / es8311_codec_read / es8311_codec_write
+       calls go through our (known-good) device handle instead of whatever
+       audio_codec_new_i2c_ctrl() would have set up. On P4 + IDF v5.3 the
+       latter produces a device that NACKs every transaction; ours does not. */
+    const audio_codec_ctrl_if_t *_ar_make_i2c_ctrl_if(i2c_master_dev_handle_t dev_handle) {
+      struct shim {
+        audio_codec_ctrl_if_t base;
+        i2c_master_dev_handle_t dev_handle;
+        mutable bool opened;
+      };
+      shim *s = (shim *)calloc(1, sizeof(shim));
+      if (!s) return nullptr;
+      s->dev_handle = dev_handle;
+      s->opened = false;
+      s->base.open = [](const audio_codec_ctrl_if_t *ctrl, void *cfg, int cfg_size) -> int {
+        (void)cfg; (void)cfg_size;
+        shim *self = (shim *)ctrl;
+        self->opened = true;
+        return 0;
+      };
+      s->base.is_open = [](const audio_codec_ctrl_if_t *ctrl) -> bool {
+        const shim *self = (const shim *)ctrl;
+        return self->opened;
+      };
+      s->base.read_reg = [](const audio_codec_ctrl_if_t *ctrl,
+                            int reg, int reg_len, void *data, int data_len) -> int {
+        const shim *self = (const shim *)ctrl;
+        if (reg_len < 1 || reg_len > 2) return -1;
+        uint8_t rbuf[2];
+        rbuf[0] = (uint8_t)(reg & 0xFF);
+        if (reg_len == 2) rbuf[1] = (uint8_t)((reg >> 8) & 0xFF);
+        esp_err_t err = i2c_master_transmit_receive(self->dev_handle, rbuf, reg_len,
+                                                    (uint8_t *)data, data_len, 200);
+        return (err == ESP_OK) ? 0 : -1;
+      };
+      s->base.write_reg = [](const audio_codec_ctrl_if_t *ctrl,
+                             int reg, int reg_len, void *data, int data_len) -> int {
+        const shim *self = (const shim *)ctrl;
+        if (reg_len < 1 || reg_len > 2) return -1;
+        uint8_t buf[4];
+        uint8_t *p = buf;
+        *p++ = (uint8_t)(reg & 0xFF);
+        if (reg_len == 2) *p++ = (uint8_t)((reg >> 8) & 0xFF);
+        const uint8_t *src = (const uint8_t *)data;
+        for (int i = 0; i < data_len && (p - buf) < (int)sizeof(buf); i++) {
+          *p++ = src[i];
+        }
+        esp_err_t err = i2c_master_transmit(self->dev_handle, buf, (p - buf), 200);
+        return (err == ESP_OK) ? 0 : -1;
+      };
+      s->base.close = [](const audio_codec_ctrl_if_t *ctrl) -> int {
+        shim *self = (shim *)ctrl;
+        self->opened = false;
+        return 0;
+      };
+      return &s->base;
+    }
+
+  private:
+    static constexpr int MAX_DEVICES = 8;
+    i2c_master_bus_handle_t _bus_handle;
+    i2c_port_t _bus_port;
+    int8_t _sda_io, _scl_io;
+    audioreactive_I2CDevice _devices[MAX_DEVICES];
+    int _device_count = 0;
+};
+
+// The single shared I2C bus used by the audioreactive usermod (IDF v5 driver).
+// Defined here (after the class definition) so all codec classes can reach it.
+audioreactive_I2C AR_I2C;
+
+/* The single shared I2C bus used by the audioreactive usermod.
+   Owned by AudioReactive::setup(); all codec classes acquire device handles
+   via ::i2c.addDevice(addr). */
+extern audioreactive_I2C AR_I2C;
+
 /* Basic I2S microphone source
    All functions are marked virtual, so derived classes can replace them
    WARNING: i2sMaster = false is experimental, and most likely will not work
+   Uses the IDF v5 new I2S driver (driver/i2s_std.h).
 */
 class I2SSource : public AudioSource {
   public:
     I2SSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       AudioSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config = {
-        .mode = i2sMaster ? i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX) : i2s_mode_t(I2S_MODE_SLAVE | I2S_MODE_RX),
-        .sample_rate = _sampleRate,
-        .bits_per_sample = I2S_SAMPLE_RESOLUTION,  // slave mode: may help to set this to 96000, as the other side (master) controls sample rates
-        .channel_format = I2S_MIC_CHANNEL,
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-        .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
-        //.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-#ifdef WLEDMM_FASTPATH
-  #ifdef WLED_ENABLE_HUB75MATRIX
-        .intr_alloc_flags = ESP_INTR_FLAG_IRAM|ESP_INTR_FLAG_LEVEL1,    // HUB75 seems to get into trouble if we allocate a higher priority interrupt
-        .dma_buf_count = 18,                                            // 100ms buffer (128 * dma_buf_count / sampleRate)
-  #else
-      #if CONFIG_IDF_TARGET_ESP32 && !defined(BOARD_HAS_PSRAM)          // still need to test on boards with PSRAM
-        .intr_alloc_flags = ESP_INTR_FLAG_IRAM|ESP_INTR_FLAG_LEVEL2|ESP_INTR_FLAG_LEVEL3,  // IRAM flag reduces missed samples
-      #else
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL2|ESP_INTR_FLAG_LEVEL3,  // seems to reduce noise
-      #endif
-        .dma_buf_count = 24,                                            // 140ms buffer (128 * dma_buf_count / sampleRate)
-  #endif
-#else
-  #ifdef WLED_ENABLE_HUB75MATRIX
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,                      // HUB75 seems to get into trouble if we allocate a higher priority interrupt
-  #else
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL2,
-  #endif
-        .dma_buf_count = 8,
-#endif
-        .dma_buf_len = _blockSize,
-        .use_apll = 0,
-        //.fixed_mclk = 0,
-        .bits_per_chan = I2S_data_size,
-#else
-        .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 8,
-        .dma_buf_len = _blockSize,
-        .use_apll = false
-#endif
-      };
+      // The new I2S driver is configured at initialize() time via i2s_std_config_t.
+      // Member defaults (channel slot, sample bit width, etc.) are stored here.
+      _isPDM = false;
+      _i2sMaster = i2sMaster;
     }
 
-    virtual void initialize(int8_t i2swsPin = I2S_PIN_NO_CHANGE, int8_t i2ssdPin = I2S_PIN_NO_CHANGE, int8_t i2sckPin = I2S_PIN_NO_CHANGE, int8_t mclkPin = I2S_PIN_NO_CHANGE) {
+    virtual void initialize(int8_t i2swsPin     = I2S_GPIO_UNUSED,
+                            int8_t i2ssdPin     = I2S_GPIO_UNUSED,
+                            int8_t i2sckPin     = I2S_GPIO_UNUSED,
+                            int8_t mclkPin      = I2S_GPIO_UNUSED,
+                            uint8_t bitsPerSample = 32,
+                            bool    useRightSlot  = false,
+                            bool    i2sMaster     = true) override {
       DEBUGSR_PRINTLN("I2SSource:: initialize().");
+      _i2sMaster = i2sMaster;
 
-      if (i2swsPin == I2S_PIN_NO_CHANGE || i2ssdPin == I2S_PIN_NO_CHANGE || i2sckPin == I2S_PIN_NO_CHANGE) {
+      // Map runtime bit-width to the new driver's I2S_DATA_BIT_WIDTH_* enum.
+      i2s_data_bit_width_t data_width = I2S_DATA_BIT_WIDTH_16BIT;
+      switch (bitsPerSample) {
+        case 24: data_width = I2S_DATA_BIT_WIDTH_24BIT; break;
+        case 32: data_width = I2S_DATA_BIT_WIDTH_32BIT; break;
+        case 16: default:   data_width = I2S_DATA_BIT_WIDTH_16BIT; break;
+      }
+      _slotMask = useRightSlot ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT;
+
+      if (i2swsPin == I2S_GPIO_UNUSED || i2ssdPin == I2S_GPIO_UNUSED || i2sckPin == I2S_GPIO_UNUSED) {
         USER_PRINTLN("I2SSource:: Pins not configured, skipping initialization.");
         return;
       }
+
+      _wsPin = i2swsPin;
+      _dinPin = i2ssdPin;
+      _bckPin = i2sckPin;
 
       if (!pinManager.allocatePin(i2swsPin, true, PinOwner::UM_Audioreactive) ||
         !pinManager.allocatePin(i2ssdPin, false, PinOwner::UM_Audioreactive)) {
@@ -253,208 +480,200 @@ class I2SSource : public AudioSource {
       }
 
       // i2ssckPin needs special treatment, since it might be unused on PDM mics
-      if (i2sckPin != I2S_PIN_NO_CHANGE) {
+      bool usePDM = false;
+      if (i2sckPin != I2S_GPIO_UNUSED) {
         if (!pinManager.allocatePin(i2sckPin, true, PinOwner::UM_Audioreactive)) {
-          ERRORSR_PRINTF("\nAR: Failed to allocate I2S pins: sck=%d\n",  i2sckPin); 
+          ERRORSR_PRINTF("\nAR: Failed to allocate I2S pins: sck=%d\n", i2sckPin);
           return;
         }
       } else {
-        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-          #if !defined(SOC_I2S_SUPPORTS_PDM_RX)
+        #if !defined(SOC_I2S_SUPPORTS_PDM_RX)
           #warning this MCU does not support PDM microphones
-          #endif
         #endif
         #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         // This is an I2S PDM microphone, these microphones only use a clock and
         // data line, to make it simpler to debug, use the WS pin as CLK and SD pin as DATA
-        // example from espressif: https://github.com/espressif/esp-idf/blob/release/v4.4/examples/peripherals/i2s/i2s_audio_recorder_sdcard/main/i2s_recorder_main.c
-
-        // note to self: PDM has known bugs on S3, and does not work on C3 
-        //  * S3: PDM sample rate only at 50% of expected rate: https://github.com/espressif/esp-idf/issues/9893
-        //  * S3: I2S PDM has very low amplitude: https://github.com/espressif/esp-idf/issues/8660
-        //  * C3: does not support PDM to PCM input. SoC would allow PDM RX, but there is no hardware to directly convert to PCM so it will not work. https://github.com/espressif/esp-idf/issues/8796
-
-        _config.mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM); // Change mode to pdm if clock pin not provided. PDM is not supported on ESP32-S2. PDM RX not supported on ESP32-C3
-        _config.channel_format =I2S_PDM_MIC_CHANNEL;                             // seems that PDM mono mode always uses left channel.
-        _config.use_apll = true;                                                 // experimental - use aPLL clock source to improve sampling quality
-        //_config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;                     // not needed
+        // PDM has known bugs on S3, and does not work on C3
+        usePDM = true;
+        #else
+        ERRORSR_PRINTLN(F("AR: PDM microphones not supported on this MCU; bck_pin is required."));
+        return;
         #endif
       }
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-      if ((_i2sMaster == false) && (_config.mode & I2S_MODE_SLAVE)) { // I2S slave mode (experimental).
-          // Seems we need to drive clocks in slave mode
-          _config.use_apll = true;
-          _config.fixed_mclk = 512 * int(_config.sample_rate);
-      }
-
-      if (mclkPin != I2S_PIN_NO_CHANGE) {
-        _config.use_apll = true; // experimental - use aPLL clock source to improve sampling quality, and to avoid glitches.
-        // //_config.fixed_mclk = 512 * _sampleRate;
-        // //_config.fixed_mclk = 256 * _sampleRate;
-      }
-      
-      #if !defined(SOC_I2S_SUPPORTS_APLL)
-        #warning this MCU does not have an APLL high accuracy clock for audio
-        // S3: not supported; S2: supported; C3: not supported
-        _config.use_apll = false; // APLL not supported on this MCU
-      #endif
-      #if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3)
-      if (ESP.getChipRevision() == 0) _config.use_apll = false; // APLL is broken on ESP32 revision 0
-      #endif
-      #if defined(WLED_ENABLE_HUB75MATRIX)
-        _config.use_apll = false; // APLL needed for HUB75 DMA driver ?
-      #endif
-#endif
-
-      if (_i2sMaster == false) {
-        DEBUG_PRINTLN(F("AR: Warning - i2S SLAVE mode is experimental!"));
-        if (_config.mode & I2S_MODE_PDM) {
-          // APLL does not work in DAC or PDM "Slave Mode": https://github.com/espressif/esp-idf/issues/1244, https://github.com/espressif/esp-idf/issues/2634
-          _config.use_apll = false;
-          _config.fixed_mclk =  0;
-        }
-        if ((_config.mode & I2S_MODE_MASTER) != 0) {
-          DEBUG_PRINTLN("AR: (oops) I2S SLAVE mode requested but not configured!");
-        }
-      }
-
-      // Reserve the master clock pin if provided
       _mclkPin = mclkPin;
-      if (mclkPin != I2S_PIN_NO_CHANGE) {
-        if(!pinManager.allocatePin(mclkPin, true, PinOwner::UM_Audioreactive)) { 
-          ERRORSR_PRINTF("\nAR: Failed to allocate I2S pin: MCLK=%d\n",  mclkPin); 
+      if (mclkPin != I2S_GPIO_UNUSED) {
+        if (!pinManager.allocatePin(mclkPin, true, PinOwner::UM_Audioreactive)) {
+          ERRORSR_PRINTF("\nAR: Failed to allocate I2S pin: MCLK=%d\n", mclkPin);
           return;
-        } else
+        }
         _routeMclk(mclkPin);
       }
 
-      _pinConfig = {
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
-        .mck_io_num = mclkPin,            // "classic" ESP32 supports setting MCK on GPIO0/GPIO1/GPIO3 only. i2s_set_pin() will fail if wrong mck_io_num is provided.
-#endif
-        .bck_io_num = i2sckPin,
-        .ws_io_num = i2swsPin,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = i2ssdPin
+      // Allocate the RX channel
+      i2s_chan_config_t chan_cfg = {
+        .id            = AR_I2S_PORT,
+        .role          = _i2sMaster ? I2S_ROLE_MASTER : I2S_ROLE_SLAVE,
+        .dma_desc_num  = 24,
+        .dma_frame_num = (uint32_t)_blockSize,
+        .auto_clear    = false,
       };
-
-      //DEBUGSR_PRINTF("[AR] I2S: SD=%d, WS=%d, SCK=%d, MCLK=%d\n", i2ssdPin, i2swsPin, i2sckPin, mclkPin);
-
-      esp_err_t err = i2s_driver_install(AR_I2S_PORT, &_config, 0, nullptr);
+      #if defined(WLED_ENABLE_HUB75MATRIX)
+      chan_cfg.dma_desc_num = 18;
+      #endif
+      esp_err_t err = i2s_new_channel(&chan_cfg, nullptr, &_rx_handle);
       if (err != ESP_OK) {
-        ERRORSR_PRINTF("AR: Failed to install i2s driver: %d\n", err);
+        ERRORSR_PRINTF("AR: Failed to create new I2S RX channel: %d\n", err);
         return;
       }
 
-      DEBUGSR_PRINTF("AR: I2S#0 driver %s aPLL; fixed_mclk=%d.\n", _config.use_apll? "uses":"without", _config.fixed_mclk);
-      DEBUGSR_PRINTF("AR: %d bits, Sample scaling factor = %6.4f\n",  _config.bits_per_sample, _sampleScale);
-      if(_config.mode & I2S_MODE_MASTER) {
-        if (_config.mode & I2S_MODE_PDM) {
-          DEBUGSR_PRINTLN(F("AR: I2S#0 driver installed in PDM MASTER mode."));
-        } else { 
-          DEBUGSR_PRINTLN(F("AR: I2S#0 driver installed in MASTER mode."));
+      if (usePDM) {
+        _isPDM = true;
+        i2s_pdm_rx_slot_config_t pdm_slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(
+            I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+        pdm_slot_cfg.slot_mask = useRightSlot ? I2S_PDM_SLOT_RIGHT : I2S_PDM_SLOT_LEFT;
+
+        i2s_pdm_rx_clk_config_t pdm_clk_cfg = {
+          .sample_rate_hz     = _sampleRate,
+          .clk_src            = I2S_CLK_SRC_DEFAULT,
+          .mclk_multiple      = I2S_MCLK_MULTIPLE_256,
+          .dn_sample_mode     = I2S_PDM_DSR_8S,
+        };
+        i2s_pdm_rx_gpio_config_t pdm_gpio_cfg = {
+          .clk = (gpio_num_t)i2swsPin,
+          .din = (gpio_num_t)i2ssdPin,
+          .invert_flags = { .clk_inv = false },
+        };
+        i2s_pdm_rx_config_t pdm_cfg = {
+          .clk_cfg  = pdm_clk_cfg,
+          .slot_cfg = pdm_slot_cfg,
+          .gpio_cfg = pdm_gpio_cfg,
+        };
+        err = i2s_channel_init_pdm_rx_mode(_rx_handle, &pdm_cfg);
+        if (err != ESP_OK) {
+          ERRORSR_PRINTF("AR: Failed to init PDM RX mode: %d\n", err);
+          i2s_del_channel(_rx_handle);
+          _rx_handle = nullptr;
+          return;
         }
+        DEBUGSR_PRINTLN(F("AR: I2S#0 driver installed in PDM MASTER mode."));
       } else {
-        DEBUGSR_PRINTLN(F("AR: I2S#0 driver installed in SLAVE mode."));
+        i2s_std_slot_config_t std_slot_cfg = {
+          .data_bit_width = data_width,
+          .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+          .slot_mode      = I2S_SLOT_MODE_MONO,
+          .slot_mask      = _slotMask,
+          .ws_width       = bitsPerSample,
+          .ws_pol         = false,
+          .bit_shift      = true,
+          .left_align     = true,
+          .big_endian     = false,
+          .bit_order_lsb  = false,
+        };
+
+        i2s_std_clk_config_t std_clk_cfg = {
+          .sample_rate_hz = _sampleRate,
+          .clk_src        = I2S_CLK_SRC_DEFAULT,
+          .mclk_multiple  = I2S_MCLK_MULTIPLE_256,
+        };
+
+        i2s_std_config_t std_cfg = {
+          .clk_cfg  = std_clk_cfg,
+          .slot_cfg = std_slot_cfg,
+          .gpio_cfg = {
+            .mclk        = (gpio_num_t)mclkPin,
+            .bclk        = (gpio_num_t)i2sckPin,
+            .ws          = (gpio_num_t)i2swsPin,
+            .dout        = I2S_GPIO_UNUSED,
+            .din         = (gpio_num_t)i2ssdPin,
+            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
+          },
+        };
+
+        err = i2s_channel_init_std_mode(_rx_handle, &std_cfg);
+        if (err != ESP_OK) {
+          ERRORSR_PRINTF("AR: Failed to init STD RX mode: %d\n", err);
+          i2s_del_channel(_rx_handle);
+          _rx_handle = nullptr;
+          return;
+        }
+        DEBUGSR_PRINTF("AR: I2S#0 driver installed in %s mode, %u-bit.\n",
+                       _i2sMaster ? "MASTER" : "SLAVE", bitsPerSample);
       }
 
-      err = i2s_set_pin(AR_I2S_PORT, &_pinConfig);
+      err = i2s_channel_enable(_rx_handle);
       if (err != ESP_OK) {
-        ERRORSR_PRINTF("AR: Failed to set i2s pin config: %d\n", err);
-        i2s_driver_uninstall(AR_I2S_PORT);  // uninstall already-installed driver
+        ERRORSR_PRINTF("AR: Failed to enable I2S channel: %d\n", err);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
         return;
       }
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-      err = i2s_set_clk(AR_I2S_PORT, _sampleRate, I2S_SAMPLE_RESOLUTION, I2S_CHANNEL_MONO);  // set bit clocks. Also takes care of MCLK routing if needed.
-      if (err != ESP_OK) {
-        ERRORSR_PRINTF("AR: Failed to configure i2s clocks: %d\n", err);
-        i2s_driver_uninstall(AR_I2S_PORT);  // uninstall already-installed driver
-        return;
-      }
-#endif
       _initialized = true;
     }
 
     virtual void deinitialize() {
       _initialized = false;
-      esp_err_t err = i2s_driver_uninstall(AR_I2S_PORT);
-      if (err != ESP_OK) {
-        DEBUGSR_PRINTF("Failed to uninstall i2s driver: %d\n", err);
-        return;
+      if (_rx_handle) {
+        i2s_channel_disable(_rx_handle);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
       }
-      if (_pinConfig.ws_io_num   != I2S_PIN_NO_CHANGE) pinManager.deallocatePin(_pinConfig.ws_io_num,   PinOwner::UM_Audioreactive);
-      if (_pinConfig.data_in_num != I2S_PIN_NO_CHANGE) pinManager.deallocatePin(_pinConfig.data_in_num, PinOwner::UM_Audioreactive);
-      if (_pinConfig.bck_io_num  != I2S_PIN_NO_CHANGE) pinManager.deallocatePin(_pinConfig.bck_io_num,  PinOwner::UM_Audioreactive);
+      if (_wsPin   != I2S_GPIO_UNUSED) pinManager.deallocatePin(_wsPin,   PinOwner::UM_Audioreactive);
+      if (_dinPin  != I2S_GPIO_UNUSED) pinManager.deallocatePin(_dinPin,  PinOwner::UM_Audioreactive);
+      if (_bckPin  != I2S_GPIO_UNUSED) pinManager.deallocatePin(_bckPin,  PinOwner::UM_Audioreactive);
       // Release the master clock pin
-      if (_mclkPin != I2S_PIN_NO_CHANGE) pinManager.deallocatePin(_mclkPin, PinOwner::UM_Audioreactive);
+      if (_mclkPin != I2S_GPIO_UNUSED) pinManager.deallocatePin(_mclkPin, PinOwner::UM_Audioreactive);
     }
 
     virtual void getSamples(float *buffer, uint16_t num_samples) {
-      if (_initialized) {
-        esp_err_t err;
-        size_t bytes_read = 0;        /* Counter variable to check if we actually got enough data */
+      if (_initialized && _rx_handle) {
+        size_t bytes_read = 0;
 
-        memset(buffer, 0, sizeof(float) * num_samples);  // clear output buffer
-        I2S_datatype *newSamples = newSampleBuffer; // use global input buffer
-        if (num_samples > I2S_SAMPLES_MAX) num_samples = I2S_SAMPLES_MAX; // protect the buffer from overflow
+        memset(buffer, 0, sizeof(float) * num_samples);
+        I2S_datatype *newSamples = newSampleBuffer;
+        if (num_samples > I2S_SAMPLES_MAX) num_samples = I2S_SAMPLES_MAX;
 
-        err = i2s_read(AR_I2S_PORT, (void *)newSamples, num_samples * sizeof(I2S_datatype), &bytes_read, portMAX_DELAY);
+        esp_err_t err = i2s_channel_read(_rx_handle, (void *)newSamples, num_samples * sizeof(I2S_datatype), &bytes_read, portMAX_DELAY);
         if (err != ESP_OK) {
           DEBUGSR_PRINTF("Failed to get samples: %d\n", err);
           return;
         }
 
-        // For correct operation, we need to read exactly sizeof(samples) bytes from i2s
         if (bytes_read != (num_samples * sizeof(I2S_datatype))) {
           DEBUGSR_PRINTF("Failed to get enough samples: wanted: %d read: %d\n", num_samples * sizeof(I2S_datatype), bytes_read);
           return;
         }
 
-        // Store samples in sample buffer and update DC offset
         for (int i = 0; i < num_samples; i++) {
-
-          newSamples[i] = postProcessSample(newSamples[i]);  // perform postprocessing (needed for ADC samples)
-          
+          newSamples[i] = postProcessSample(newSamples[i]);
           float currSample = 0.0f;
 #ifdef I2S_SAMPLE_DOWNSCALE_TO_16BIT
-              currSample = (float) newSamples[i] / 65536.0f;      // 32bit input -> 16bit; keeping lower 16bits as decimal places
+              currSample = (float) newSamples[i] / 65536.0f;
 #else
-              currSample = (float) newSamples[i];                 // 16bit input -> use as-is
+              currSample = (float) newSamples[i];
 #endif
           buffer[i] = currSample;
-          buffer[i] *= _sampleScale;                              // scale samples
+          buffer[i] *= _sampleScale;
         }
       }
     }
 
   protected:
     void _routeMclk(int8_t mclkPin) {
-#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
-  // MCLK routing by writing registers is not needed any more with IDF > 4.4.0
-  #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 4, 0)
-    // this way of MCLK routing only works on "classic" ESP32
-      /* Enable the mclk routing depending on the selected mclk pin (ESP32: only 0,1,3)
-          Only I2S_NUM_0 is supported
-      */
-      if (mclkPin == GPIO_NUM_0) {
-        PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0_CLK_OUT1);
-        WRITE_PERI_REG(PIN_CTRL,0xFFF0);
-      } else if (mclkPin == GPIO_NUM_1) {
-        PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_U0TXD_CLK_OUT3);
-        WRITE_PERI_REG(PIN_CTRL, 0xF0F0);
-      } else {
-        PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_U0RXD_CLK_OUT2);
-        WRITE_PERI_REG(PIN_CTRL, 0xFF00);
-      }
-  #endif
-#endif
+      // MCLK routing by writing registers is no longer needed with IDF >= 4.4.0.
+      // On classic ESP32 the I2S peripheral handles MCLK output automatically
+      // when configured via the new driver API.
+      (void)mclkPin;
     }
 
-    i2s_config_t _config;
-    i2s_pin_config_t _pinConfig;
-    int8_t _mclkPin;
+    i2s_chan_handle_t _rx_handle = nullptr;
+    bool _isPDM = false;
+    int8_t _wsPin  = I2S_GPIO_UNUSED;
+    int8_t _dinPin = I2S_GPIO_UNUSED;
+    int8_t _bckPin = I2S_GPIO_UNUSED;
+    int8_t _mclkPin = I2S_GPIO_UNUSED;
+    i2s_std_slot_mask_t _slotMask = I2S_STD_SLOT_LEFT;
 };
 
 /* ES7243 Microphone
@@ -463,26 +682,18 @@ class I2SSource : public AudioSource {
 */
 class ES7243 : public I2SSource {
   private:
-    // I2C initialization functions for ES7243
-    void _es7243I2cBegin() {
-      Wire.setClock(100000);
-    }
+    #ifndef ES7243_ADDR
+      #define ES7243_ADDR 0x13   // default address
+    #endif
 
     void _es7243I2cWrite(uint8_t reg, uint8_t val) {
-      #ifndef ES7243_ADDR
-        #define ES7243_ADDR 0x13   // default address
-      #endif
-      Wire.beginTransmission(ES7243_ADDR);
-      Wire.write((uint8_t)reg);
-      Wire.write((uint8_t)val);
-      uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
-      if (i2cErr != 0) {
-        DEBUGSR_PRINTF("AR: ES7243 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, ES7243_ADDR, reg, val);
+      if (!_codec) return;
+      if (!AR_I2C.writeReg(_codec, reg, val)) {
+        DEBUGSR_PRINTF("AR: ES7243 I2C write failed (addr=0x%X, reg 0x%X, val 0x%X).\n", ES7243_ADDR, reg, val);
       }
     }
 
     void _es7243InitAdc() {
-      _es7243I2cBegin();
       _es7243I2cWrite(0x00, 0x01);
       _es7243I2cWrite(0x06, 0x00);
       _es7243I2cWrite(0x05, 0x1B);
@@ -491,35 +702,41 @@ class ES7243 : public I2SSource {
       _es7243I2cWrite(0x05, 0x13);
     }
 
+    audioreactive_I2CDevice *_codec = nullptr;
+
 public:
     ES7243(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
+      // ES7243 historically used the RIGHT slot on legacy drivers; keep that as the
+      // compile-time default but allow runtime override via the usermod.
+      _slotMask = I2S_STD_SLOT_RIGHT;
     };
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin,
+                    uint8_t bitsPerSample = 32, bool useRightSlot = true, bool i2sMaster = true) {
       DEBUGSR_PRINTLN("ES7243:: initialize();");
 
-      // if ((i2sckPin < 0) || (mclkPin < 0)) { // WLEDMM not sure if this check is needed here, too
-      //   ERRORSR_PRINTF("\nAR: invalid I2S pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin);
-      //   return;
-      // }
-      if ((i2c_sda < 0) || (i2c_scl < 0)) {  // check that global I2C pins are not "undefined"
-        ERRORSR_PRINTF("\nAR: invalid ES7243 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if ((i2c_sda < 0) || (i2c_scl < 0)) {
+        ERRORSR_PRINTF("\nAR: invalid ES7243 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
         return;
       }
-      if (!pinManager.joinWire(i2c_sda, i2c_scl)) {    // WLEDMM specific: start I2C with globally defined pins
-        ERRORSR_PRINTF("\nAR: failed to join I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if (!AR_I2C.isReady() && !AR_I2C.begin(i2c_sda, i2c_scl)) {
+        ERRORSR_PRINTF("\nAR: failed to install audioreactive I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+        return;
+      }
+      _codec = AR_I2C.addDevice(ES7243_ADDR);
+      if (!_codec) {
+        ERRORSR_PRINTLN("AR: failed to add ES7243 to I2C bus");
         return;
       }
 
-      // First route mclk, then configure ADC over I2C, then configure I2S
       _es7243InitAdc();
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
     }
 
     void deinitialize() {
       I2SSource::deinitialize();
+      _codec = nullptr;  // AR_I2C owns the device handle; it's torn down by AudioReactive::setup on next init or deinit
     }
 };
 
@@ -530,32 +747,24 @@ public:
 class ES8388Source : public I2SSource {
   private:
     // I2C initialization functions for ES8388
-    void _es8388I2cBegin() {
-      Wire.setClock(100000);
-    }
-
     void _es8388I2cWrite(uint8_t reg, uint8_t val) {
       #ifndef ES8388_ADDR
         #define ES8388_ADDR 0x10   // default address
       #endif
-      Wire.beginTransmission(ES8388_ADDR);
-      Wire.write((uint8_t)reg);
-      Wire.write((uint8_t)val);
-      uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
-      if (i2cErr != 0) {
-        DEBUGSR_PRINTF("AR: ES8388 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, ES8388_ADDR, reg, val);
+      if (!_codec) return;
+      if (!AR_I2C.writeReg(_codec, reg, val)) {
+        DEBUGSR_PRINTF("AR: ES8388 I2C write failed (addr=0x%X, reg 0x%X, val 0x%X).\n", ES8388_ADDR, reg, val);
       }
     }
 
     void _es8388InitAdc() {
       // https://dl.radxa.com/rock2/docs/hw/ds/ES8388%20user%20Guide.pdf Section 10.1
-      // http://www.everest-semi.com/pdf/ES8388%20DS.pdf Better spec sheet, more clear. 
+      // http://www.everest-semi.com/pdf/ES8388%20DS.pdf Better spec sheet, more clear.
       // https://docs.google.com/spreadsheets/d/1CN3MvhkcPVESuxKyx1xRYqfUit5hOdsG45St9BCUm-g/edit#gid=0 generally
       // Sets ADC to around what AudioReactive expects, and loops line-in to line-out/headphone for monitoring.
       // Registries are decimal, settings are binary as that's how everything is listed in the docs
       // ...which makes it easier to reference the docs.
       //
-      _es8388I2cBegin(); 
       _es8388I2cWrite( 8,0b00000000); // I2S to slave
       _es8388I2cWrite( 2,0b11110011); // Power down DEM and STM
       _es8388I2cWrite(43,0b10000000); // Set same LRCK
@@ -622,36 +831,38 @@ class ES8388Source : public I2SSource {
   public:
     ES8388Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+      _slotMask = I2S_STD_SLOT_LEFT;
     };
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin,
+                    uint8_t bitsPerSample = 32, bool useRightSlot = false, bool i2sMaster = true) {
       DEBUGSR_PRINTLN("ES8388Source:: initialize();");
 
-      // if ((i2sckPin < 0) || (mclkPin < 0)) { // WLEDMM not sure if this check is needed here, too
-      //    ERRORSR_PRINTF("\nAR: invalid I2S ES8388 pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin); 
-      //    return;
-      // }
-      // BUG: "use global I2C pins" are valid as -1, and -1 is seen as invalid here.
-      // Workaround: Set I2C pins here, which will also set them globally.
-      // Bug also exists in ES7243.
-       if ((i2c_sda < 0) || (i2c_scl < 0)) {  // check that global I2C pins are not "undefined"
-        ERRORSR_PRINTF("\nAR: invalid ES8388 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if ((i2c_sda < 0) || (i2c_scl < 0)) {
+        ERRORSR_PRINTF("\nAR: invalid ES8388 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
         return;
       }
-      if (!pinManager.joinWire(i2c_sda, i2c_scl)) {    // WLEDMM specific: start I2C with globally defined pins
-        ERRORSR_PRINTF("\nAR: failed to join I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if (!AR_I2C.isReady() && !AR_I2C.begin(i2c_sda, i2c_scl)) {
+        ERRORSR_PRINTF("\nAR: failed to install audioreactive I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+        return;
+      }
+      _codec = AR_I2C.addDevice(ES8388_ADDR);
+      if (!_codec) {
+        ERRORSR_PRINTLN("AR: failed to add ES8388 to I2C bus");
         return;
       }
 
       // First route mclk, then configure ADC over I2C, then configure I2S
       _es8388InitAdc();
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
     }
 
     void deinitialize() {
       I2SSource::deinitialize();
+      _codec = nullptr;
     }
+
+    audioreactive_I2CDevice *_codec = nullptr;
 
 };
 
@@ -661,197 +872,179 @@ class ES8388Source : public I2SSource {
 */
 class ES8311Source : public I2SSource {
   private:
-    bool es7210_present() {
-      Wire.beginTransmission(0x40);
-      return (Wire.endTransmission() == 0);
-    }
-    // I2C initialization functions for es8311
-    void _es8311I2cBegin() {
-      Wire.setClock(100000);
+    // Returns the active ADC device — the ES8311 normally, or the ES7210 if one
+    // is present on the bus (the ES8311 is then held in reset).
+    audioreactive_I2CDevice *_activeAdc() {
+      if (_es7210 && AR_I2C.probe(_es7210->addr())) return _es7210;
+      return _es8311;
     }
 
-    void _es8311I2cWrite(uint8_t reg, uint8_t val) {
-      #ifndef ES8311_ADDR
-        #define ES8311_ADDR 0x18
-      #endif
-      if (ES7210_present) {
-        Wire.beginTransmission(0x40);
-      } else {
-        Wire.beginTransmission(ES8311_ADDR);
-      }
-      Wire.write((uint8_t)reg);
-      Wire.write((uint8_t)val);
-      uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
-      if (i2cErr != 0) {
-        DEBUGSR_PRINTF("AR: ES8311 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, ES8311_ADDR, reg, val);
+    void _i2cWrite(audioreactive_I2CDevice *dev, uint8_t reg, uint8_t val) {
+      if (!dev) return;
+      if (!AR_I2C.writeReg(dev, reg, val)) {
+        DEBUGSR_PRINTF("AR: ES8311 I2C write failed (addr=0x%X, reg 0x%X, val 0x%X).\n", dev->addr(), reg, val);
       }
     }
 
-    void es7210_init_22k_32bit() {
-      _es8311I2cBegin();
-
+    void _es7210_init_22k_32bit(audioreactive_I2CDevice *dev) {
       // --- 1. RESET ---
-      _es8311I2cWrite(0x00, 0xFF);
+      _i2cWrite(dev, 0x00, 0xFF);
       vTaskDelay(pdMS_TO_TICKS(10));
-      _es8311I2cWrite(0x00, 0x32);
+      _i2cWrite(dev, 0x00, 0x32);
 
       // --- 2. SLAVE MODE (clocks from ESP32) ---
-      _es8311I2cWrite(0x08, 0x00);  // Slave mode
-      // _es8311I2cWrite(0x06, 0x04);  // DLL off (not needed in slave mode)
+      _i2cWrite(dev, 0x08, 0x00);  // Slave mode
+      // _i2cWrite(dev, 0x06, 0x04);  // DLL off (not needed in slave mode)
 
       // --- 3. I2S FORMAT ---
-      _es8311I2cWrite(0x09, 0x30);  // Timing control
-      _es8311I2cWrite(0x0A, 0x30);  // Timing control
-      _es8311I2cWrite(0x11, 0x80);  // 32-bit I2S
-      _es8311I2cWrite(0x12, 0x00);  // MIC1/2 on SDOUT1
+      _i2cWrite(dev, 0x09, 0x30);  // Timing control
+      _i2cWrite(dev, 0x0A, 0x30);  // Timing control
+      _i2cWrite(dev, 0x11, 0x80);  // 32-bit I2S
+      _i2cWrite(dev, 0x12, 0x00);  // MIC1/2 on SDOUT1
 
       // --- 4. HIGH PASS FILTER ---
-      _es8311I2cWrite(0x22, 0x0A);
-      _es8311I2cWrite(0x23, 0x2A);
+      _i2cWrite(dev, 0x22, 0x0A);
+      _i2cWrite(dev, 0x23, 0x2A);
 
       // --- 5. ANALOG POWER ---
-      _es8311I2cWrite(0x40, 0xC3);
-      _es8311I2cWrite(0x41, 0x70);  // 0x70 standard bias (0x7F is max)
+      _i2cWrite(dev, 0x40, 0xC3);
+      _i2cWrite(dev, 0x41, 0x70);  // 0x70 standard bias (0x7F is max)
 
       // --- 6. GAIN (no ALC) ---
-      _es8311I2cWrite(0x43, 0x18);
-      _es8311I2cWrite(0x44, 0x18);
-      _es8311I2cWrite(0x16, 0x00);  // ALC off
+      _i2cWrite(dev, 0x43, 0x18);
+      _i2cWrite(dev, 0x44, 0x18);
+      _i2cWrite(dev, 0x16, 0x00);  // ALC off
 
       // --- 7. MIC POWER ---
-      _es8311I2cWrite(0x47, 0x08);  // MIC1 power
-      _es8311I2cWrite(0x48, 0x08);  // MIC2 power
-      _es8311I2cWrite(0x49, 0x00);  // MIC3 OFF
-      _es8311I2cWrite(0x4A, 0x00);  // MIC4 OFF
-      _es8311I2cWrite(0x4B, 0x0F);  // ADC1/2 power
-      _es8311I2cWrite(0x4C, 0x00);  // ADC3/4 OFF
+      _i2cWrite(dev, 0x47, 0x08);  // MIC1 power
+      _i2cWrite(dev, 0x48, 0x08);  // MIC2 power
+      _i2cWrite(dev, 0x49, 0x00);  // MIC3 OFF
+      _i2cWrite(dev, 0x4A, 0x00);  // MIC4 OFF
+      _i2cWrite(dev, 0x4B, 0x0F);  // ADC1/2 power
+      _i2cWrite(dev, 0x4C, 0x00);  // ADC3/4 OFF
 
       // --- 8. START ---
-      _es8311I2cWrite(0x00, 0x71);
-      _es8311I2cWrite(0x00, 0x41);
+      _i2cWrite(dev, 0x00, 0x71);
+      _i2cWrite(dev, 0x00, 0x41);
     }
 
-    void _es8311InitAdc() {
-      // 
-      // Currently only tested with the ESP32-P4 boards with the onboard mic.
-      // Datasheet with I2C commands: https://dl.xkwy2018.com/downloads/RK3588/01_Official%20Release/04_Product%20Line%20Branch_NVR/02_Key%20Device%20Specifications/ES8311%20DS.pdf
-      // If making changes, make sure to completely power off the board - sometimes settings are kept until the board is powered off!
+    void _es8311InitAdc(audioreactive_I2CDevice *dev) {
       //
-      _es8311I2cBegin(); 
-      _es8311I2cWrite(0x00, 0b00011111); // RESET, default value was 0b00011111 new from ESPHome example
-      _es8311I2cWrite(0x00, 0b00000000); // RESET, added this from ESPHome example
-      _es8311I2cWrite(0x45, 0b00000000); // GP, default value
-      _es8311I2cWrite(0x01, 0b00111010); // CLOCK MANAGER (MCLK enable?)
+      // Values synced to ESPhome's es8311.cpp (the well-tested upstream
+      // driver). The previous values were hand-tuned and may have had
+      // suboptimal or wrong bits set. See:
+      // https://github.com/esphome/esphome/blob/.../esphome/components/es8311/es8311.cpp
+      //
+      _i2cWrite(dev, 0x00, 0x1F);                  // Reset
+      _i2cWrite(dev, 0x00, 0x00);                  // Clear reset
 
-      _es8311I2cWrite(0x02, 0b00000000); // 22050hz calculated
-      _es8311I2cWrite(0x05, 0b00000000); // 22050hz calculated
-      _es8311I2cWrite(0x03, 0b00010000); // 22050hz calculated
-      _es8311I2cWrite(0x04, 0b00010000); // 22050hz calculated
-      _es8311I2cWrite(0x07, 0b00000000); // 22050hz calculated
-      _es8311I2cWrite(0x08, 0b11111111); // 22050hz calculated
-      _es8311I2cWrite(0x06, 0b11100011); // 22050hz calculated
+      // configure_clock_() equivalent — ESPhome uses a coefficient table
+      // driven by sample rate + MCLK multiple. We hard-code the values
+      // for 22050 Hz / MCLK=256 (matching the legacy path).
+      _i2cWrite(dev, 0x01, 0x3F);                  // Clock Manager: enable all clocks
+      _i2cWrite(dev, 0x02, 0x40);                  // pre_div=0, pre_mult=0
+      _i2cWrite(dev, 0x03, 0x10);                  // ADC OSR=128
+      _i2cWrite(dev, 0x04, 0x00);                  // DAC OSR=128
+      _i2cWrite(dev, 0x05, 0x00);                  // ADC/DAC div=1
+      _i2cWrite(dev, 0x06, 0x03);                  // BCLK divider, no invert
 
-      _es8311I2cWrite(0x16, 0b00100100); // ADC synchronize filter counter with "standard" LRCK and ADC RAM clear when lrck/adc_mclk active
-      _es8311I2cWrite(0x0B, 0b00000000); // SYSTEM at default
-      _es8311I2cWrite(0x0C, 0b00100000); // SYSTEM power up things
-      _es8311I2cWrite(0x10, 0b00010011); // SYSTEM internal things
-      _es8311I2cWrite(0x0D, 0b00000001); // ESPHome: Power up analog circuitry
-      _es8311I2cWrite(0x11, 0b01111100); // *** SYSTEM undocumented bits, seems to be important
-      _es8311I2cWrite(0x00, 0b11000000); // *** RESET (again - seems important?)
-      _es8311I2cWrite(0x01, 0b00111010); // *** CLOCK MANAGER
-      _es8311I2cWrite(0x14, 0b00010000); // *** SYSTEM PGA gain
-      _es8311I2cWrite(0x0A, 0b00001000); // *** SDP OUT = I2S 32-bit
-      _es8311I2cWrite(0x0E, 0b00000010); // *** SYSTEM undocumented bits, seems to be important
-      _es8311I2cWrite(0x0F, 0b01000100); // SYSTEM enable LPPGA and LPDACVRP in low power mode. No idea.
-      _es8311I2cWrite(0x15, 0b00010000); // ADC soft ramp
-      _es8311I2cWrite(0x1B, 0b00000101); // ADC soft-mute enabled
-      _es8311I2cWrite(0x1C, 0b11100101); // ADC dynamic HPF enabled
-      _es8311I2cWrite(0x17, 0b10111111); // ADC volume = 0db (max gain)
-      _es8311I2cWrite(0x18, 0b11001000); // ADC ALC enabled and AutoMute enabled
-      _es8311I2cWrite(0x19, 0b11110000); // ADC ALC max (-6dB) and min (-30dB)
-      _es8311I2cWrite(0x00, 0b10000000); // *** RESET (This is very required! Thanks to ESPHome for the hint!)
+      // configure_format_() equivalent — set SDP in/out resolution
+      _i2cWrite(dev, 0x09, 0x10);                  // SDP IN  = 32-bit (4<<2)
+      _i2cWrite(dev, 0x0A, 0x10);                  // SDP OUT = 32-bit (4<<2)
+      _i2cWrite(dev, 0x07, 0x00);                  // LRCK divider hi
+      _i2cWrite(dev, 0x08, 0xFF);                  // LRCK divider lo
+
+      // configure_mic_() equivalent — enable analog MIC + max PGA gain
+      _i2cWrite(dev, 0x14, 0x1A);                  // REG14 = 0x1A (analog MIC + max PGA)
+      _i2cWrite(dev, 0x16, 0x00);                  // REG16 = ADC mixer/scale (0 = no scale)
+      _i2cWrite(dev, 0x17, 0xC8);                  // REG17 = 0xC8 (max gain + ALC + automute)
+
+      // Power-up sequence (matches ESPhome)
+      _i2cWrite(dev, 0x0D, 0x01);                  // analog power-up
+      _i2cWrite(dev, 0x0E, 0x02);                  // enable analog PGA + ADC modulator
+      _i2cWrite(dev, 0x12, 0x00);                  // power up DAC
+      _i2cWrite(dev, 0x13, 0x10);                  // enable output to HP drive
+      _i2cWrite(dev, 0x1C, 0x6A);                  // ADC EQ bypass + DC offset cancel
+      _i2cWrite(dev, 0x37, 0x08);                  // DAC EQ bypass
+      _i2cWrite(dev, 0x00, 0x80);                  // start ADC + DAC
     }
 
-    void es8311_disable() {
-      Wire.setClock(100000);
-
-      Wire.beginTransmission(0x18);
-      Wire.write(0x00);
-      Wire.write(0x1F);  // Hold in reset
-      Wire.endTransmission();
-
-      Wire.beginTransmission(0x18);
-      Wire.write(0x0D);
-      Wire.write(0x00);  // Power down analog
-      Wire.endTransmission();
-
-      Wire.beginTransmission(0x18);
-      Wire.write(0x0C);
-      Wire.write(0x00);  // Power down digital
-      Wire.endTransmission();
+    void _es8311_holdReset(audioreactive_I2CDevice *dev) {
+      if (!dev) return;
+      // Hold in reset, power down analog + digital
+      _i2cWrite(dev, 0x00, 0x1F);  // Hold in reset
+      _i2cWrite(dev, 0x0D, 0x00);  // Power down analog
+      _i2cWrite(dev, 0x0C, 0x00);  // Power down digital
     }
+
+    audioreactive_I2CDevice *_es8311 = nullptr;
+    audioreactive_I2CDevice *_es7210 = nullptr;
 
 public:
   ES8311Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster = true) :
     I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
-    };
+    _slotMask = I2S_STD_SLOT_LEFT;
+  };
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
-      DEBUGSR_PRINTLN("es8311Source:: initialize();");
+  void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin,
+                  uint8_t bitsPerSample = 32, bool useRightSlot = false, bool i2sMaster = true) {
+    DEBUGSR_PRINTLN("es8311Source:: initialize();");
 
-      // if ((i2sckPin < 0) || (mclkPin < 0)) { // WLEDMM not sure if this check is needed here, too
-      //    ERRORSR_PRINTF("\nAR: invalid I2S es8311 pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin); 
-      //    return;
-      // }
-      // BUG: "use global I2C pins" are valid as -1, and -1 is seen as invalid here.
-      // Workaround: Set I2C pins here, which will also set them globally.
-      // Bug also exists in ES7243.
-       if ((i2c_sda < 0) || (i2c_scl < 0)) {  // check that global I2C pins are not "undefined"
-        ERRORSR_PRINTF("\nAR: invalid es8311 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
-        return;
-      }
-      if (!pinManager.joinWire(i2c_sda, i2c_scl)) {    // WLEDMM specific: start I2C with globally defined pins
-        ERRORSR_PRINTF("\nAR: failed to join I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
-        return;
-      }
-
-      if (es7210_present()) {
-        USER_PRINTLN("Overriding ES8311 becasue an ES7210 is present.");
-        es8311_disable();
-        ES7210_present = true;
-        es7210_init_22k_32bit();
-      } else {
-        _es8311InitAdc();
-      }
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+    if ((i2c_sda < 0) || (i2c_scl < 0)) {
+      ERRORSR_PRINTF("\nAR: invalid es8311 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+      return;
     }
-
-    void deinitialize() {
-      I2SSource::deinitialize();
+    if (!AR_I2C.isReady() && !AR_I2C.begin(i2c_sda, i2c_scl)) {
+      ERRORSR_PRINTF("\nAR: failed to install audioreactive I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+      return;
     }
+    _es8311 = AR_I2C.addDevice(0x18);   // ES8311
+    if (!_es8311) {
+      ERRORSR_PRINTLN("AR: failed to add ES8311 to I2C bus");
+      return;
+    }
+    // Detect optional ES7210 ADC on the same bus
+    _es7210 = AR_I2C.addDevice(0x40);
+    bool es7210_present = _es7210 && _es7210_present_probe();
+
+    if (es7210_present) {
+      USER_PRINTLN("Overriding ES8311 because an ES7210 is present on the I2C bus.");
+      _es8311_holdReset(_es8311);
+      _es7210_init_22k_32bit(_es7210);
+    } else {
+      _es8311InitAdc(_es8311);
+    }
+    I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
+  }
+
+  void deinitialize() {
+    I2SSource::deinitialize();
+    _es8311 = nullptr;
+    _es7210 = nullptr;
+  }
+
+private:
+  bool _es7210_present_probe() {
+    // AR_I2C.probe() returns true on ACK. The ES7210 device at 0x40 may or may
+    // not be on this board — probe first, then return whether we should use it.
+    return AR_I2C.probe(_es7210->addr());
+  }
 
 };
 
 class WM8978Source : public I2SSource {
   private:
-    // I2C initialization functions for WM8978
-    void _wm8978I2cBegin() {
-      Wire.setClock(400000);
-    }
-
     void _wm8978I2cWrite(uint8_t reg, uint16_t val) {
       #ifndef WM8978_ADDR
         #define WM8978_ADDR 0x1A
       #endif
-      char buf[2];
-      buf[0] = (reg << 1) | ((val >> 8) & 0X01);
-      buf[1] = val & 0XFF;
-      Wire.beginTransmission(WM8978_ADDR);
-      Wire.write((const uint8_t*)buf, 2);
-      uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
-      if (i2cErr != 0) {
-        DEBUGSR_PRINTF("AR: WM8978 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, WM8978_ADDR, reg, val);
+      if (!_codec) return;
+      // WM8978 uses a 2-byte write where the top bit of byte[0] holds bit 8 of val.
+      uint8_t buf[2];
+      buf[0] = (uint8_t)((reg << 1) | ((val >> 8) & 0x01));
+      buf[1] = (uint8_t)(val & 0xFF);
+      if (i2c_master_transmit(_codec->handle(), buf, sizeof(buf), 50) != ESP_OK) {
+        DEBUGSR_PRINTF("AR: WM8978 I2C write failed (addr=0x%X, reg 0x%X, val 0x%X).\n", _codec->addr(), reg, val);
       }
     }
 
@@ -861,8 +1054,6 @@ class WM8978Source : public I2SSource {
       // Registries are decimal, settings are 9-bit binary as that's how everything is listed in the docs
       // ...which makes it easier to reference the docs.
       //
-      _wm8978I2cBegin(); 
-
       _wm8978I2cWrite( 0,0b000000000); // Reset all settings
       _wm8978I2cWrite( 1,0b000111110); // Power Management 1 - power off most things, but enable mic bias and I/O tie-off to help mitigate mic leakage.
       _wm8978I2cWrite( 2,0b110111111); // Power Management 2 - enable output and amp stages (amps may lift signal but it works better on the ADCs)
@@ -873,7 +1064,7 @@ class WM8978Source : public I2SSource {
       #else
       _wm8978I2cWrite( 4,0b001001000); // Audio Interface - left-justified I2S, 24-bit
       #endif
-      
+
       _wm8978I2cWrite( 6,0b000000000); // Clock generation control - use external mclk
       _wm8978I2cWrite( 7,0b000000100); // Sets sample rate to ~24kHz (only used for internal calculations, not I2S)
       _wm8978I2cWrite(14,0b010001000); // 128x ADC oversampling - high pass filter disabled as it kills the bass response
@@ -893,62 +1084,57 @@ class WM8978Source : public I2SSource {
 
     }
 
+    audioreactive_I2CDevice *_codec = nullptr;
+
   public:
     WM8978Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+      _slotMask = I2S_STD_SLOT_LEFT;
     };
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin,
+                    uint8_t bitsPerSample = 32, bool useRightSlot = false, bool i2sMaster = true) {
       DEBUGSR_PRINTLN("WM8978Source:: initialize();");
 
-      // if ((i2sckPin < 0) || (mclkPin < 0)) { // WLEDMM not sure if this check is needed here, too
-      //    ERRORSR_PRINTF("\nAR: invalid I2S WM8978 pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin); 
-      //    return;
-      // }
-      // BUG: "use global I2C pins" are valid as -1, and -1 is seen as invalid here.
-      // Workaround: Set I2C pins here, which will also set them globally.
-      // Bug also exists in ES7243.
-       if ((i2c_sda < 0) || (i2c_scl < 0)) {  // check that global I2C pins are not "undefined"
-        ERRORSR_PRINTF("\nAR: invalid WM8978 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if ((i2c_sda < 0) || (i2c_scl < 0)) {
+        ERRORSR_PRINTF("\nAR: invalid WM8978 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
         return;
       }
-      if (!pinManager.joinWire(i2c_sda, i2c_scl)) {    // WLEDMM specific: start I2C with globally defined pins
-        ERRORSR_PRINTF("\nAR: failed to join I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if (!AR_I2C.isReady() && !AR_I2C.begin(i2c_sda, i2c_scl)) {
+        ERRORSR_PRINTF("\nAR: failed to install audioreactive I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+        return;
+      }
+      _codec = AR_I2C.addDevice(WM8978_ADDR, 400000);
+      if (!_codec) {
+        ERRORSR_PRINTLN("AR: failed to add WM8978 to I2C bus");
         return;
       }
 
       // First route mclk, then configure ADC over I2C, then configure I2S
       _wm8978InitAdc();
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
     }
 
     void deinitialize() {
       I2SSource::deinitialize();
+      _codec = nullptr;
     }
 
 };
 
 class AC101Source : public I2SSource {
   private:
-    // I2C initialization functions for WM8978
-    void _ac101I2cBegin() {
-      Wire.setClock(400000);
-    }
-
     void _ac101I2cWrite(uint8_t reg_addr, uint16_t val) {
       #ifndef AC101_ADDR
         #define AC101_ADDR 0x1A
       #endif
-      char send_buff[3];
-      send_buff[0] = reg_addr;
-      send_buff[1] = uint8_t((val >> 8) & 0xff);
-      send_buff[2] = uint8_t(val & 0xff);
-      Wire.beginTransmission(AC101_ADDR);
-      Wire.write((const uint8_t*)send_buff, 3);
-      uint8_t i2cErr = Wire.endTransmission();  // i2cErr == 0 means OK
-      if (i2cErr != 0) {
-        DEBUGSR_PRINTF("AR: AC101 I2C write failed with error=%d  (addr=0x%X, reg 0x%X, val 0x%X).\n", i2cErr, AC101_ADDR, reg_addr, val);
+      if (!_codec) return;
+      uint8_t buf[3];
+      buf[0] = reg_addr;
+      buf[1] = (uint8_t)((val >> 8) & 0xff);
+      buf[2] = (uint8_t)(val & 0xff);
+      if (i2c_master_transmit(_codec->handle(), buf, sizeof(buf), 50) != ESP_OK) {
+        DEBUGSR_PRINTF("AR: AC101 I2C write failed (addr=0x%X, reg 0x%X, val 0x%X).\n", _codec->addr(), reg_addr, val);
       }
     }
 
@@ -956,8 +1142,6 @@ class AC101Source : public I2SSource {
       // https://files.seeedstudio.com/wiki/ReSpeaker_6-Mics_Circular_Array_kit_for_Raspberry_Pi/reg/AC101_User_Manual_v1.1.pdf
       // This supports mostly the older AI Thinkier AudioKit A1S that has an AC101 chip
       // Newer versions use the ES3833 chip - which we also support.
-
-      _ac101I2cBegin();
 
       #define CHIP_AUDIO_RS     0x00
       #define SYSCLK_CTRL       0x03
@@ -996,265 +1180,930 @@ class AC101Source : public I2SSource {
 
     }
 
+    audioreactive_I2CDevice *_codec = nullptr;
+
   public:
     AC101Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       I2SSource(sampleRate, blockSize, sampleScale, i2sMaster) {
-      _config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+      _slotMask = I2S_STD_SLOT_LEFT;
     };
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin,
+                    uint8_t bitsPerSample = 32, bool useRightSlot = false, bool i2sMaster = true) {
       DEBUGSR_PRINTLN("AC101Source:: initialize();");
 
-      // if ((i2sckPin < 0) || (mclkPin < 0)) { // WLEDMM not sure if this check is needed here, too
-      //    ERRORSR_PRINTF("\nAR: invalid I2S WM8978 pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin); 
-      //    return;
-      // }
-      // BUG: "use global I2C pins" are valid as -1, and -1 is seen as invalid here.
-      // Workaround: Set I2C pins here, which will also set them globally.
-      // Bug also exists in ES7243.
-       if ((i2c_sda < 0) || (i2c_scl < 0)) {  // check that global I2C pins are not "undefined"
-        ERRORSR_PRINTF("\nAR: invalid AC101 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if ((i2c_sda < 0) || (i2c_scl < 0)) {
+        ERRORSR_PRINTF("\nAR: invalid AC101 global I2C pins: SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
         return;
       }
-      if (!pinManager.joinWire(i2c_sda, i2c_scl)) {    // WLEDMM specific: start I2C with globally defined pins
-        ERRORSR_PRINTF("\nAR: failed to join I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl); 
+      if (!AR_I2C.isReady() && !AR_I2C.begin(i2c_sda, i2c_scl)) {
+        ERRORSR_PRINTF("\nAR: failed to install audioreactive I2C bus with SDA=%d, SCL=%d\n", i2c_sda, i2c_scl);
+        return;
+      }
+      _codec = AR_I2C.addDevice(AC101_ADDR, 400000);
+      if (!_codec) {
+        ERRORSR_PRINTLN("AR: failed to add AC101 to I2C bus");
         return;
       }
 
       // First route mclk, then configure ADC over I2C, then configure I2S
       _ac101InitAdc();
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
     }
 
     void deinitialize() {
       I2SSource::deinitialize();
+      _codec = nullptr;
     }
 
 };
 
-// YEAH YEAH WE KNOW BUT NOBODY WILL
-// #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-// #if !defined(SOC_I2S_SUPPORTS_ADC) && !defined(SOC_I2S_SUPPORTS_ADC_DAC)
-//   #warning this MCU does not support analog sound input
-// #endif
-// #endif
+//-----------------------------------------------------------------------------------
+// esp_codec_dev-based audio sources (IDF 4.4+)
+// These use the official espressif esp_codec_dev driver which handles I2S internally.
+// Each class creates its own esp_codec_dev handle and uses it for audio input.
+//-----------------------------------------------------------------------------------
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 
-#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ARCH_RISCV)
-// ADC over I2S is only available in "classic" ESP32
-
-/* ADC over I2S Microphone
-   This microphone is an ADC pin sampled via the I2S interval
-   This allows to use the I2S API to obtain ADC samples with high sample rates
-   without the need of manual timing of the samples
+/* Base class for esp_codec_dev-based codecs
+   Manages the esp_codec_dev handle lifecycle.
+   Subclasses provide codec-specific configuration via virtual methods.
 */
-class I2SAdcSource : public I2SSource {
+class CodecDevSource : public AudioSource {
   public:
-    I2SAdcSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f) :
-      I2SSource(sampleRate, blockSize, sampleScale, true) {
-      _config = {
-        .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
-        .sample_rate = _sampleRate,
-        .bits_per_sample = I2S_SAMPLE_RESOLUTION,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
-        .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
-#else
-        .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-#endif
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 8,
-        .dma_buf_len = _blockSize,
-        .use_apll = false,
-        .tx_desc_auto_clear = false,
-        .fixed_mclk = 0        
-      };
-    }
+    void initialize(
+      int8_t i2swsPin  = -1,
+      int8_t i2ssdPin  = -1,
+      int8_t i2sckPin  = -1,
+      int8_t mclkPinIn = -1,
+      uint8_t bitsPerSample = 32,
+      bool useRightSlot  = false,
+      bool i2sMaster     = true) override
+    {
+      (void)mclkPinIn;
+      (void)useRightSlot;
+      (void)i2sMaster;
+      _deinitialize();
 
-    /* identify Audiosource type - I2S-ADC*/
-    AudioSourceType getType(void) {return(Type_I2SAdc);}
-
-    void initialize(int8_t audioPin, int8_t = I2S_PIN_NO_CHANGE, int8_t = I2S_PIN_NO_CHANGE, int8_t = I2S_PIN_NO_CHANGE) {
-      DEBUGSR_PRINTLN("I2SAdcSource:: initialize().");
-      _myADCchannel = 0x0F;
-      if(!pinManager.allocatePin(audioPin, false, PinOwner::UM_Audioreactive)) {
-         ERRORSR_PRINTF("failed to allocate GPIO for audio analog input: %d\n", audioPin);
-        return;
-      }
-      _audioPin = audioPin;
-
-      // Determine Analog channel. Only Channels on ADC1 are supported
-      int8_t channel = digitalPinToAnalogChannel(_audioPin);
-      if ((channel < 0) || (channel > 9)) {  // channel == -1 means "not an ADC pin"
-        USER_PRINTF("AR: Incompatible GPIO used for analog audio input: %d\n", _audioPin);
-        return;
-      } else {
-        adc_gpio_init(ADC_UNIT_1, adc_channel_t(channel));
-        _myADCchannel = channel;
-      }
-
-      // Install Driver
-      esp_err_t err = i2s_driver_install(I2S_NUM_0, &_config, 0, nullptr);
-      if (err != ESP_OK) {
-        ERRORSR_PRINTF("Failed to install i2s driver: %d\n", err);
+      if (i2swsPin < 0 || i2ssdPin < 0 || i2sckPin < 0) {
+        USER_PRINTLN("CodecDevSource: pins not configured, skipping.");
         return;
       }
 
-      // adc1_config_width(ADC_WIDTH_BIT_12);   // ensure that ADC runs with 12bit resolution - should not be needed, because i2s_set_adc_mode does that any way
-
-      // Enable I2S mode of ADC
-      err = i2s_set_adc_mode(ADC_UNIT_1, adc1_channel_t(channel));
-      if (err != ESP_OK) {
-        USER_PRINTF("AR: Failed to set i2s adc mode: %d\n", err);
-        return;
-      }
-
-      // see example in https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/I2S/HiFreq_ADC/HiFreq_ADC.ino
-      adc1_config_channel_atten(adc1_channel_t(channel), ADC_ATTEN_DB_11);   // configure ADC input amplification
-
-      #if defined(I2S_GRAB_ADC1_COMPLETELY)
-      // according to docs from espressif, the ADC needs to be started explicitly
-      // fingers crossed
-        err = i2s_adc_enable(I2S_NUM_0);
-        if (err != ESP_OK) {
-            DEBUGSR_PRINTF("Failed to enable i2s adc: %d\n", err);
-            //return;
-        }
-      #else
-        // bugfix: do not disable ADC initially - its already disabled after driver install.
-        //err = i2s_adc_disable(I2S_NUM_0);
-		    // //err = i2s_stop(I2S_NUM_0);
-        //if (err != ESP_OK) {
-        //    DEBUGSR_PRINTF("Failed to initially disable i2s adc: %d\n", err);
-        //}
+      // Join I2C bus if not already started (via the audioreactive_I2C class —
+      // installs an i2c_master_bus on AR_I2C_PORT, never touches Arduino Wire).
+      int8_t sda = -1, scl = -1;
+      if (i2c_sda >= 0 && i2c_scl >= 0) { sda = i2c_sda; scl = i2c_scl; }
+      #ifdef HW_PIN_SDA
+      else                               { sda = HW_PIN_SDA; scl = HW_PIN_SCL; }
       #endif
+      DEBUGSR_PRINTF("CodecDevSource: I2C pins SDA=%d SCL=%d (port=%d)\n", sda, scl, (int)AR_I2C.port());
+      if (sda < 0 || scl < 0) {
+        ERRORSR_PRINTF("CodecDevSource: invalid I2C pins SDA=%d SCL=%d\n", sda, scl);
+        return;
+      }
+      if (!AR_I2C.isReady() && !AR_I2C.begin(sda, scl)) {
+        ERRORSR_PRINTLN("CodecDevSource: audioreactive_I2C bus install failed");
+        return;
+      }
 
+      // Let subclass create the codec interface (this also creates the control interface)
+      _codecIf = _createCodecInterface();
+      if (!_codecIf) {
+        ERRORSR_PRINTLN("CodecDevSource: _createCodecInterface failed");
+        return;
+      }
+
+      // Pre-allocate the I²S RX channel up front, then hand it to the
+      // esp_codec_dev library via _createDataInterface(). The library's
+      // set_fs path dereferences the channel handle directly, so we must
+      // guarantee it's valid BEFORE the first esp_codec_dev_open() call —
+      // we can't rely on the lib creating the handle itself.
+      _allocI2sRxChannel(i2swsPin, i2ssdPin, i2sckPin, mclkPinIn,
+                           bitsPerSample, useRightSlot, i2sMaster);
+      if (!_rx_handle) {
+        ERRORSR_PRINTLN("CodecDevSource: I2S RX channel alloc failed");
+        return;
+      }
+
+      // Let subclass create the data interface (I2S)
+      _dataIf = _createDataInterface();
+      if (!_dataIf) {
+        ERRORSR_PRINTLN("CodecDevSource: _createDataInterface failed");
+        return;
+      }
+
+      // Create high-level esp_codec_dev device
+      esp_codec_dev_cfg_t dev_cfg = {
+        .dev_type = _codecDevType(),
+        .codec_if  = _codecIf,
+        .data_if   = _dataIf,
+      };
+      _codecDev = esp_codec_dev_new(&dev_cfg);
+      if (!_codecDev) {
+        ERRORSR_PRINTLN("CodecDevSource: esp_codec_dev_new failed");
+        return;
+      }
+
+      // Open with sample format
+      esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = bitsPerSample,
+        .channel         = 1,
+        .channel_mask    = 0,
+        .sample_rate     = _sampleRate,
+        .mclk_multiple   = 256,
+      };
+      int err = esp_codec_dev_open(_codecDev, &fs);
+      if (err != ESP_CODEC_DEV_OK) {
+        ERRORSR_PRINTF("CodecDevSource: esp_codec_dev_open failed: 0x%x\n", err);
+        esp_codec_dev_delete(_codecDev);
+        _codecDev = nullptr;
+        return;
+      }
+
+      // Configure the ES8311 via the canonical high-level esp_codec_dev API.
+      // The library's open() leaves the microphone at 0 dB gain (effectively
+      // muted for the on-board analog MEMS mic). The legacy ES8311Source
+      // explicitly writes register 0x17 = 0b10111111 (+30 dB PGA gain) and
+      // keeps the ADC unmuted (reg 0x1B = 0b00000101). Mirror that here.
+      esp_codec_dev_set_in_gain(_codecDev, 30.0f);    // +30 dB mic PGA (reg 0x17)
+      esp_codec_dev_set_in_mute(_codecDev, false);    // unmute (reg 0x1B = 1)
+
+      // Some IDF v5.3 + P4 combinations don't actually power up the analog
+      // path in es8311_codec_open(). Force it via direct register writes
+      // matching the legacy ES8311Source sequence.
+      // 0x0D bit 0 = analog power-up
+      // 0x0C bit 0 = digital power-up
+      // 0x0B bit 0 = system power-up
+      esp_codec_dev_write_reg(_codecDev, 0x0B, 0x00);
+      esp_codec_dev_write_reg(_codecDev, 0x0C, 0x01);
+      esp_codec_dev_write_reg(_codecDev, 0x0D, 0x01);
+      // 0x00 bits [2:0] = 0b000 = standby; 0b101 = ADC + DAC running.
+      // The legacy code ends with 0x00 = 0b10000000 (RESET+start).
+      esp_codec_dev_write_reg(_codecDev, 0x00, 0x80);
+
+      // ── DEBUG: read back key ES8311 registers + canonical state values
+      float inGain = -99.0f;
+      int outVol = -99;
+      bool inMute = true, outMute = true;
+      esp_codec_dev_get_in_gain(_codecDev, &inGain);
+      esp_codec_dev_get_out_vol(_codecDev, &outVol);
+      esp_codec_dev_get_in_mute(_codecDev, &inMute);
+      esp_codec_dev_get_out_mute(_codecDev, &outMute);
+      DEBUGSR_PRINTF("ES8311IDF: get_in_gain=%.1f get_out_vol=%d get_in_mute=%d get_out_mute=%d\n",
+                     inGain, outVol, inMute ? 1 : 0, outMute ? 1 : 0);
+      // Read back power/clock/gain registers
+      auto dump = [&](uint8_t reg, const char* name) {
+        int v = -1;
+        esp_err_t err = esp_codec_dev_read_reg(_codecDev, reg, &v);
+        DEBUGSR_PRINTF("ES8311IDF: reg 0x%02X (%s) = 0x%02X (err=%d)\n", reg, name, v & 0xFF, err);
+      };
+      dump(0x00, "STATE/CTRL");
+      dump(0x0B, "SYS_CTRL");
+      dump(0x0C, "DIG_PWR");
+      dump(0x0D, "ANA_PWR");
+      dump(0x14, "ADC_VOL");
+      dump(0x17, "ADC_GAIN");
+      dump(0x1B, "ADC_MUTE");
+      dump(0x1C, "ADC_HPF");
+
+      DEBUGSR_PRINTF("CodecDevSource: initialized (rate=%u)\n", (unsigned)_sampleRate);
       _initialized = true;
     }
 
+    void deinitialize() override { _deinitialize(); }
 
-    I2S_datatype postProcessSample(I2S_datatype sample_in) {
-      static I2S_datatype lastADCsample = 0;          // last good sample
-      static unsigned int broken_samples_counter = 0; // number of consecutive broken (and fixed) ADC samples
-      I2S_datatype sample_out = 0;
+    void getSamples(float *buffer, uint16_t num_samples) override {
+      if (!_initialized || !_rx_handle) return;
 
-      // bring sample down down to 16bit unsigned
-      I2S_unsigned_datatype rawData = * reinterpret_cast<I2S_unsigned_datatype *> (&sample_in); // C++ acrobatics to get sample as "unsigned"
-      #ifndef I2S_USE_16BIT_SAMPLES
-        rawData = (rawData >> 16) & 0xFFFF;                       // scale input down from 32bit -> 16bit
-        I2S_datatype lastGoodSample = lastADCsample / 16384 ;     // prepare "last good sample" accordingly (26bit-> 12bit with correct sign handling)
-      #else
-        rawData = rawData & 0xFFFF;                               // input is already in 16bit, just mask off possible junk
-        I2S_datatype lastGoodSample = lastADCsample * 4;          // prepare "last good sample" accordingly (10bit-> 12bit)
-      #endif
+      memset(buffer, 0, sizeof(float) * num_samples);
+      if (num_samples > I2S_SAMPLES_MAX) num_samples = I2S_SAMPLES_MAX;
 
-      // decode ADC sample data fields
-      uint16_t the_channel = (rawData >> 12) & 0x000F;           // upper 4 bit = ADC channel
-      uint16_t the_sample  =  rawData & 0x0FFF;                  // lower 12bit -> ADC sample (unsigned)
-      I2S_datatype finalSample = (int(the_sample) - 2048);       // convert unsigned sample to signed (centered at 0);
-
-      if ((the_channel != _myADCchannel) && (_myADCchannel != 0x0F)) { // 0x0F means "don't know what my channel is" 
-        // fix bad sample
-        finalSample = lastGoodSample;                             // replace with last good ADC sample
-        broken_samples_counter ++;
-        if (broken_samples_counter > 256) _myADCchannel = 0x0F;   // too  many bad samples in a row -> disable sample corrections
-        //Serial.print("\n!ADC rogue sample 0x"); Serial.print(rawData, HEX); Serial.print("\tchannel:");Serial.println(the_channel);
-      } else broken_samples_counter = 0;                          // good sample - reset counter
-
-      // back to original resolution
-      #ifndef I2S_USE_16BIT_SAMPLES
-        finalSample = finalSample << 16;                          // scale up from 16bit -> 32bit;
-      #endif
-
-      finalSample = finalSample / 4;                              // mimic old analog driver behaviour (12bit -> 10bit)
-      sample_out = (3 * finalSample + lastADCsample) / 4;         // apply low-pass filter (2-tap FIR)
-      //sample_out = (finalSample + lastADCsample) / 2;             // apply stronger low-pass filter (2-tap FIR)
-
-      lastADCsample = sample_out;                                 // update ADC last sample
-      return(sample_out);
-    }
-
-
-    void getSamples(float *buffer, uint16_t num_samples) {
-      /* Enable ADC. This has to be enabled and disabled directly before and
-       * after sampling, otherwise Wifi dies
-       */
-      if (_initialized) {
-        #if !defined(I2S_GRAB_ADC1_COMPLETELY)
-          // old code - works for me without enable/disable, at least on ESP32.
-          //esp_err_t err = i2s_start(I2S_NUM_0);
-          esp_err_t err = i2s_adc_enable(I2S_NUM_0);
-          if (err != ESP_OK) {
-            DEBUGSR_PRINTF("Failed to enable i2s adc: %d\n", err);
-            return;
-          }
-        #endif
-
-        I2SSource::getSamples(buffer, num_samples);
-
-        #if !defined(I2S_GRAB_ADC1_COMPLETELY)
-          // old code - works for me without enable/disable, at least on ESP32.
-          err = i2s_adc_disable(I2S_NUM_0);  //i2s_adc_disable() may cause crash with IDF 4.4 (https://github.com/espressif/arduino-esp32/issues/6832)
-          //err = i2s_stop(I2S_NUM_0);
-          if (err != ESP_OK) {
-            DEBUGSR_PRINTF("Failed to disable i2s adc: %d\n", err);
-            return;
-          }
-        #endif
-      }
-    }
-
-    void deinitialize() {
-      pinManager.deallocatePin(_audioPin, PinOwner::UM_Audioreactive);
-      _initialized = false;
-      _myADCchannel = 0x0F;
-      
-      esp_err_t err;
-      #if defined(I2S_GRAB_ADC1_COMPLETELY)
-        // according to docs from espressif, the ADC needs to be stopped explicitly
-        // fingers crossed
-        err = i2s_adc_disable(I2S_NUM_0);
-        if (err != ESP_OK) {
-          DEBUGSR_PRINTF("Failed to disable i2s adc: %d\n", err);
-        }
-      #endif
-
-      i2s_stop(I2S_NUM_0);
-      err = i2s_driver_uninstall(I2S_NUM_0);
+      // Read directly via i2s_channel_read (same as the legacy I2SSource
+      // path). The lib's esp_codec_dev_read was returning zeros — its
+      // internal read path doesn't work on the P4 with our I²S handle.
+      I2S_datatype raw[I2S_SAMPLES_MAX];
+      size_t bytes_read = 0;
+      esp_err_t err = i2s_channel_read(_rx_handle, (void *)raw,
+                                       num_samples * sizeof(I2S_datatype),
+                                       &bytes_read, portMAX_DELAY);
       if (err != ESP_OK) {
-        DEBUGSR_PRINTF("Failed to uninstall i2s driver: %d\n", err);
+        DEBUGSR_PRINTF("CodecDevSource: i2s_channel_read failed: %d\n", err);
         return;
       }
+      if (bytes_read != (num_samples * sizeof(I2S_datatype))) {
+        DEBUGSR_PRINTF("CodecDevSource: short read: %u / %u\n",
+                       (unsigned)bytes_read, (unsigned)(num_samples * sizeof(I2S_datatype)));
+        return;
+      }
+
+#ifdef I2S_SAMPLE_DOWNSCALE_TO_16BIT
+      for (uint16_t i = 0; i < num_samples; i++) {
+        buffer[i] = ((float)raw[i] / 65536.0f) * _sampleScale;
+      }
+#else
+      for (uint16_t i = 0; i < num_samples; i++) {
+        buffer[i] = ((float)raw[i] / 65536.0f) * _sampleScale;  // see I2SSource
+      }
+#endif
+    }
+
+  protected:
+    virtual esp_codec_dev_type_t _codecDevType() const = 0;
+    virtual const audio_codec_if_t *_createCodecInterface() = 0;
+    virtual const audio_codec_data_if_t *_createDataInterface() = 0;
+
+    CodecDevSource(SRate_t sampleRate, int blockSize, float sampleScale, bool i2sMaster = true)
+      : AudioSource(sampleRate, blockSize, sampleScale, i2sMaster)
+      , _codecDev(nullptr)
+      , _codecIf(nullptr)
+      , _dataIf(nullptr)
+      , _rx_handle(nullptr)
+    {}
+
+    virtual ~CodecDevSource() { _deinitialize(); }
+
+    esp_codec_dev_handle_t _codecDev;
+    i2s_chan_handle_t _rx_handle;
+    int8_t _wsPin  = I2S_GPIO_UNUSED;
+    int8_t _dinPin = I2S_GPIO_UNUSED;
+    int8_t _bckPin = I2S_GPIO_UNUSED;
+    int8_t _mclkPin = I2S_GPIO_UNUSED;
+
+    /* Pre-allocate the I²S RX channel with the user-requested bit-width and
+       slot. Mirrors I2SSource::initialize() but kept local to CodecDevSource
+       so the IDF path can share one channel allocation across all ES8311/
+       ES8388/etc. variants. Returns true on success. */
+    bool _allocI2sRxChannel(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin,
+                            int8_t mclkPin, uint8_t bitsPerSample,
+                            bool useRightSlot, bool i2sMaster) {
+      if (i2swsPin < 0 || i2ssdPin < 0 || i2sckPin < 0) return false;
+
+      // Tear down any previous allocation so the new pin set takes effect.
+      _deallocateI2sPins();
+
+      // Claim the I²S pins through pinManager so they show up in the
+      // GPIO info table and are protected from other usermods claiming
+      // the same pins. Mirror I2SSource::initialize()'s allocation pattern.
+      if (!pinManager.allocatePin(i2swsPin, true,  PinOwner::UM_Audioreactive) ||
+          !pinManager.allocatePin(i2ssdPin, false, PinOwner::UM_Audioreactive)) {
+        ERRORSR_PRINTF("\nAR: failed to allocate I2S pins: ws=%d, sd=%d\n", i2swsPin, i2ssdPin);
+        return false;
+      }
+      _wsPin  = i2swsPin;
+      _dinPin = i2ssdPin;
+      if (i2sckPin != I2S_GPIO_UNUSED) {
+        if (!pinManager.allocatePin(i2sckPin, true, PinOwner::UM_Audioreactive)) {
+          ERRORSR_PRINTF("\nAR: failed to allocate I2S pins: sck=%d\n", i2sckPin);
+          _deallocateI2sPins();
+          return false;
+        }
+        _bckPin = i2sckPin;
+      }
+      if (mclkPin != I2S_GPIO_UNUSED) {
+        if (!pinManager.allocatePin(mclkPin, true, PinOwner::UM_Audioreactive)) {
+          ERRORSR_PRINTF("\nAR: failed to allocate I2S pin: MCLK=%d\n", mclkPin);
+          _deallocateI2sPins();
+          return false;
+        }
+        _mclkPin = mclkPin;
+      }
+
+      if (_rx_handle) {
+        i2s_channel_disable(_rx_handle);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
+      }
+      i2s_data_bit_width_t data_width = I2S_DATA_BIT_WIDTH_16BIT;
+      switch (bitsPerSample) {
+        case 24: data_width = I2S_DATA_BIT_WIDTH_24BIT; break;
+        case 32: data_width = I2S_DATA_BIT_WIDTH_32BIT; break;
+        default: break;
+      }
+      i2s_std_slot_mask_t slot = useRightSlot ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT;
+      i2s_chan_config_t chan_cfg = {
+        .id            = AR_I2S_PORT,
+        .role          = i2sMaster ? I2S_ROLE_MASTER : I2S_ROLE_SLAVE,
+        .dma_desc_num  = 24,
+        .dma_frame_num = (uint32_t)_blockSize,
+        .auto_clear    = false,
+      };
+      esp_err_t err = i2s_new_channel(&chan_cfg, nullptr, &_rx_handle);
+      if (err != ESP_OK || !_rx_handle) {
+        ERRORSR_PRINTF("CodecDevSource: i2s_new_channel failed: %d\n", err);
+        return false;
+      }
+      i2s_std_slot_config_t std_slot_cfg = {
+        .data_bit_width = data_width,
+        .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+        .slot_mode      = I2S_SLOT_MODE_MONO,
+        .slot_mask      = slot,
+        .ws_width       = bitsPerSample,
+        .ws_pol         = false,
+        .bit_shift      = true,
+        .left_align     = true,
+        .big_endian     = false,
+        .bit_order_lsb  = false,
+      };
+      i2s_std_clk_config_t std_clk_cfg = {
+        .sample_rate_hz = _sampleRate,
+        .clk_src        = I2S_CLK_SRC_DEFAULT,
+        .mclk_multiple  = I2S_MCLK_MULTIPLE_256,
+      };
+      i2s_std_config_t std_cfg = {
+        .clk_cfg  = std_clk_cfg,
+        .slot_cfg = std_slot_cfg,
+        .gpio_cfg = {
+          .mclk        = (gpio_num_t)mclkPin,
+          .bclk        = (gpio_num_t)i2sckPin,
+          .ws          = (gpio_num_t)i2swsPin,
+          .dout        = I2S_GPIO_UNUSED,
+          .din         = (gpio_num_t)i2ssdPin,
+          .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
+        },
+      };
+      err = i2s_channel_init_std_mode(_rx_handle, &std_cfg);
+      if (err != ESP_OK) {
+        ERRORSR_PRINTF("CodecDevSource: i2s_channel_init_std_mode failed: %d\n", err);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
+        return false;
+      }
+      err = i2s_channel_enable(_rx_handle);
+      if (err != ESP_OK) {
+        ERRORSR_PRINTF("CodecDevSource: i2s_channel_enable failed: %d\n", err);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
+        _deallocateI2sPins();
+        return false;
+      }
+      return true;
+    }
+
+    /* Release the I2S pins we claimed via pinManager. */
+    void _deallocateI2sPins() {
+      if (_mclkPin != I2S_GPIO_UNUSED) { pinManager.deallocatePin(_mclkPin, PinOwner::UM_Audioreactive); _mclkPin = I2S_GPIO_UNUSED; }
+      if (_bckPin  != I2S_GPIO_UNUSED) { pinManager.deallocatePin(_bckPin,  PinOwner::UM_Audioreactive); _bckPin  = I2S_GPIO_UNUSED; }
+      if (_dinPin  != I2S_GPIO_UNUSED) { pinManager.deallocatePin(_dinPin,  PinOwner::UM_Audioreactive); _dinPin  = I2S_GPIO_UNUSED; }
+      if (_wsPin   != I2S_GPIO_UNUSED) { pinManager.deallocatePin(_wsPin,   PinOwner::UM_Audioreactive); _wsPin   = I2S_GPIO_UNUSED; }
     }
 
   private:
-    int8_t _audioPin;
-    int8_t _myADCchannel = 0x0F;       // current ADC channel for analog input. 0x0F means "undefined"
+    void _deinitialize() {
+      if (_codecDev) {
+        esp_codec_dev_close(_codecDev);
+        esp_codec_dev_delete(_codecDev);
+        _codecDev = nullptr;
+      }
+      // codec_if and data_if are freed by esp_codec_dev_delete
+      _codecIf = nullptr;
+      _dataIf = nullptr;
+
+      // Tear down the I²S RX channel we pre-allocated, and release the
+      // pins back to pinManager.
+      if (_rx_handle) {
+        i2s_channel_disable(_rx_handle);
+        i2s_del_channel(_rx_handle);
+        _rx_handle = nullptr;
+      }
+      _deallocateI2sPins();
+
+      _initialized = false;
+    }
+
+    const audio_codec_if_t    *_codecIf;
+    const audio_codec_data_if_t *_dataIf;
 };
+
+// ES8311 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES8311_SUPPORT
+class ES8311IDFSource : public CodecDevSource {
+  public:
+    ES8311IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+    ~ES8311IDFSource() override {
+      // The ctrl_if shim was calloc()'d in _createCodecInterface().
+      // The shim's `base` field sits at offset 0 of the allocation, so
+      // casting _ctrlIf back to void* and free()ing recovers the
+      // original block.
+      if (_ctrlIf) {
+        free((void *)_ctrlIf);
+        _ctrlIf = nullptr;
+      }
+      _codec = nullptr;  // AR_I2C owns the device handle
+    }
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      // Workaround for esp_codec_dev on IDF v5.x: the library's
+      // audio_codec_new_i2c_ctrl() returns a ctrl_if whose internal
+      // device handle is misconfigured for the P4 ES8311 (reliably NACKs).
+      // We build our own ctrl_if shim that wraps our AR_I2C-managed
+      // device handle, then open it explicitly (the library's own factory
+      // would do this internally before returning). The ES8311 register
+      // sequence is then driven by the library via our shim's write
+      // callback, which uses our (known-good) device handle.
+      if (!_codec) {
+        _codec = AR_I2C.addDevice(0x18);
+        if (!_codec) {
+          ERRORSR_PRINTLN("ES8311IDFSource: AR_I2C.addDevice(0x18) failed");
+          return nullptr;
+        }
+      }
+      if (!_ctrlIf) {
+        _ctrlIf = AR_I2C._ar_make_i2c_ctrl_if(_codec->handle());
+        if (!_ctrlIf) {
+          ERRORSR_PRINTLN("ES8311IDFSource: ctrl_if shim alloc failed");
+          return nullptr;
+        }
+        // Open the control interface explicitly — the library's factory
+        // would do this before returning; our shim is built on-demand so
+        // we have to do it here. Without this, es8311_codec_open() bails
+        // out with "Control interface not open yet".
+        _ctrlIf->open(_ctrlIf, nullptr, 0);
+      }
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      // Pre-codec register setup: replicate the ESPhome es8311.cpp
+      // sequence (the upstream-tested driver) via the shim's write_reg.
+      // The previous values were hand-tuned and may have had suboptimal
+      // bits set. See:
+      // https://github.com/esphome/esphome/blob/.../esphome/components/es8311/es8311.cpp
+      uint8_t v00 = 0x00, v01 = 0x01, v02 = 0x02, v10 = 0x10,
+              v1A = 0x1A, v3F = 0x3F, v6A = 0x6A, v80 = 0x80,
+              vC8 = 0xC8;
+      // Reset
+      _ctrlIf->write_reg(_ctrlIf, 0x00, 1, &v00, 1);
+      // configure_clock_() — values for 22050 Hz / MCLK=256
+      _ctrlIf->write_reg(_ctrlIf, 0x01, 1, &v3F, 1);    // enable all clocks
+      _ctrlIf->write_reg(_ctrlIf, 0x02, 1, &v00, 1);    // pre_div=0, pre_mult=0
+      _ctrlIf->write_reg(_ctrlIf, 0x03, 1, &v10, 1);    // ADC OSR=128
+      _ctrlIf->write_reg(_ctrlIf, 0x04, 1, &v00, 1);    // DAC OSR=128
+      _ctrlIf->write_reg(_ctrlIf, 0x05, 1, &v00, 1);    // div=1
+      _ctrlIf->write_reg(_ctrlIf, 0x06, 1, &v00, 1);    // BCLK divider
+      // configure_format_() — I²S 32-bit
+      _ctrlIf->write_reg(_ctrlIf, 0x09, 1, &v10, 1);    // SDP IN
+      _ctrlIf->write_reg(_ctrlIf, 0x0A, 1, &v10, 1);    // SDP OUT
+      // configure_mic_() — analog MIC + max PGA
+      _ctrlIf->write_reg(_ctrlIf, 0x14, 1, &v1A, 1);
+      _ctrlIf->write_reg(_ctrlIf, 0x16, 1, &v00, 1);
+      _ctrlIf->write_reg(_ctrlIf, 0x17, 1, &vC8, 1);
+      // Power-up
+      _ctrlIf->write_reg(_ctrlIf, 0x0D, 1, &v01, 1);    // analog
+      _ctrlIf->write_reg(_ctrlIf, 0x0E, 1, &v02, 1);    // PGA + ADC mod
+      _ctrlIf->write_reg(_ctrlIf, 0x12, 1, &v00, 1);    // DAC
+      _ctrlIf->write_reg(_ctrlIf, 0x13, 1, &v10, 1);    // HP drive
+      _ctrlIf->write_reg(_ctrlIf, 0x1C, 1, &v6A, 1);    // ADC EQ bypass
+      _ctrlIf->write_reg(_ctrlIf, 0x37, 1, &v00, 1);    // DAC EQ bypass (reg 0x37 = 0x00)
+      // Start
+      _ctrlIf->write_reg(_ctrlIf, 0x00, 1, &v80, 1);
+
+      static es8311_codec_cfg_t codec_cfg = {
+        .ctrl_if     = _ctrlIf,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+        .master_mode = true,
+        .use_mclk    = true,
+        .digital_mic = false,
+        .invert_mclk = false,
+        .invert_sclk = false,
+        .hw_gain     = {5.0f, 3.3f, 0.0f},
+        .no_dac_ref  = true,    // mono mic: leave right channel empty, not filled with DAC output
+        .mclk_div    = 256,
+      };
+      const audio_codec_if_t *codec = es8311_codec_new(&codec_cfg);
+      if (!codec) {
+        ERRORSR_PRINTLN("ES8311IDFSource: es8311_codec_new failed");
+      }
+      return codec;
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+
+    audioreactive_I2CDevice *_codec = nullptr;
+    const audio_codec_ctrl_if_t *_ctrlIf = nullptr;
+};
+#else
+#warning "ES8311 IDF source is not available on this target (CONFIG_CODEC_ES8311_SUPPORT is not set)"
 #endif
+
+// ES8388 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES8388_SUPPORT
+class ES8388IDFSource : public CodecDevSource {
+  public:
+    ES8388IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x20,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      static es8388_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .master_mode = true,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+        .hw_gain     = {5.0f, 3.3f, 0.0f},
+      };
+      return es8388_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES8388 IDF source is not available on this target (CONFIG_CODEC_ES8388_SUPPORT is not set)"
+#endif
+
+// ES8374 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES8374_SUPPORT
+class ES8374IDFSource : public CodecDevSource {
+  public:
+    ES8374IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x20,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      static es8374_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .master_mode = true,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+      };
+      return es8374_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES8374 IDF source is not available on this target (CONFIG_CODEC_ES8374_SUPPORT is not set)"
+#endif
+
+// ES7243 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES7243_SUPPORT
+class ES7243IDFSource : public CodecDevSource {
+  public:
+    ES7243IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x13,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static es7243_codec_cfg_t codec_cfg = {
+        .ctrl_if = ctrl_if,
+      };
+      return es7243_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES7243 IDF source is not available on this target (CONFIG_CODEC_ES7243_SUPPORT is not set)"
+#endif
+
+// ES7243E via esp_codec_dev
+#ifdef CONFIG_CODEC_ES7243E_SUPPORT
+class ES7243EIDFSource : public CodecDevSource {
+  public:
+    ES7243EIDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x13,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static es7243e_codec_cfg_t codec_cfg = {
+        .ctrl_if = ctrl_if,
+      };
+      return es7243e_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES7243E IDF source is not available on this target (CONFIG_CODEC_ES7243E_SUPPORT is not set)"
+#endif
+
+// ZL38063 via esp_codec_dev
+#ifdef CONFIG_CODEC_ZL38063_SUPPORT
+class ZL38063IDFSource : public CodecDevSource {
+  public:
+    ZL38063IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x30,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      static zl38063_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+        .reset_pin   = GPIO_NUM_NC,
+      };
+      return zl38063_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ZL38063 IDF source is not available on this target (CONFIG_CODEC_ZL38063_SUPPORT is not set)"
+#endif  // CONFIG_CODEC_ZL38063_SUPPORT
+
+// CJC8910 via esp_codec_dev
+#ifdef CONFIG_CODEC_CJC8910_SUPPORT
+class CJC8910IDFSource : public CodecDevSource {
+  public:
+    CJC8910IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x30,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      static cjc8910_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+        .invert_lr   = false,
+        .invert_sclk = false,
+        .hw_gain     = {5.0f, 3.3f, 0.0f},
+      };
+      return cjc8910_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "CJC8910 IDF source is not available on this target (CONFIG_CODEC_CJC8910_SUPPORT is not set)"
+#endif  // CONFIG_CODEC_CJC8910_SUPPORT
+
+// ES8389 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES8389_SUPPORT
+class ES8389IDFSource : public CodecDevSource {
+  public:
+    ES8389IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x20,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+      if (!gpio_if) return nullptr;
+
+      static es8389_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .gpio_if     = gpio_if,
+        .codec_mode  = ESP_CODEC_DEV_WORK_MODE_ADC,
+        .pa_pin      = GPIO_NUM_NC,
+        .pa_reverted = false,
+        .master_mode = true,
+        .use_mclk    = true,
+        .digital_mic = false,
+        .invert_mclk = false,
+        .invert_sclk = false,
+        .hw_gain     = {5.0f, 3.3f, 0.0f},
+        .no_dac_ref  = false,
+        .mclk_div    = 256,
+      };
+      return es8389_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES8389 IDF source is not available on this target (CONFIG_CODEC_ES8389_SUPPORT is not set)"
+#endif
+
+// ES7210 via esp_codec_dev
+#ifdef CONFIG_CODEC_ES7210_SUPPORT
+class ES7210IDFSource : public CodecDevSource {
+  public:
+    ES7210IDFSource(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f)
+      : CodecDevSource(sampleRate, blockSize, sampleScale) {}
+
+  protected:
+    esp_codec_dev_type_t _codecDevType() const override {
+      return ESP_CODEC_DEV_TYPE_IN;
+    }
+
+    const audio_codec_if_t *_createCodecInterface() override {
+      audio_codec_i2c_cfg_t i2c_cfg = {
+        .port       = AR_I2C.port(),
+        .addr       = 0x40,
+        .bus_handle = AR_I2C.busHandle(),
+      };
+      const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+      if (!ctrl_if) return nullptr;
+
+      static es7210_codec_cfg_t codec_cfg = {
+        .ctrl_if     = ctrl_if,
+        .master_mode = true,
+        .mic_selected = 0,
+        .mclk_src    = ES7210_MCLK_FROM_PAD,
+        .mclk_div    = 256,
+      };
+      return es7210_codec_new(&codec_cfg);
+    }
+
+    const audio_codec_data_if_t *_createDataInterface() override {
+      audio_codec_i2s_cfg_t i2s_cfg = {
+        .port       = AR_I2S_PORT,
+        .rx_handle  = _rx_handle,
+        .tx_handle  = nullptr,
+      };
+      return audio_codec_new_i2s_data(&i2s_cfg);
+    }
+};
+#else
+#warning "ES7210 IDF source is not available on this target (CONFIG_CODEC_ES7210_SUPPORT is not set)"
+#endif
+
+#endif  // ESP_IDF_VERSION >= 4.4.0
+
+// YEAH YEAH WE KNOW BUT NOBODY WILL
+// I2SAdcSource (classic-ESP32 ADC mic) was removed when migrating to the IDF v5 new I2S driver,
+// because i2s_set_adc_mode / i2s_adc_enable / I2S_MODE_ADC_BUILT_IN have no replacement in the new API.
 
 /* SPH0645 Microphone
    This is an I2S microphone with some timing quirks that need
    special consideration.
 */
 
-// https://github.com/espressif/esp-idf/issues/7192  SPH0645 i2s microphone issue when migrate from legacy esp-idf version (IDFGH-5453)
-// a user recommended this: Try to set .communication_format to I2S_COMM_FORMAT_STAND_I2S and call i2s_set_clk() after i2s_set_pin().
+// SPH0645 workaround note:
+// The original legacy-driver workaround (REG_SET_BIT on I2S_TIMING_REG/I2S_CONF_REG)
+// addressed esp-idf issue #7192 (IDFGH-5453). In the IDF v5 new I2S driver those
+// registers/macros are no longer exported. The new driver correctly configures
+// Philips-standard framing by default, and the workaround does not appear to be
+// required when using the new API. If a board regresses, file an issue.
 class SPH0654 : public I2SSource {
   public:
     SPH0654(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f, bool i2sMaster=true) :
       I2SSource(sampleRate, blockSize, sampleScale, i2sMaster)
     {}
 
-    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t = I2S_PIN_NO_CHANGE) {
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin = I2S_GPIO_UNUSED,
+                    uint8_t bitsPerSample = 24, bool useRightSlot = false, bool i2sMaster = true) {
       DEBUGSR_PRINTLN("SPH0654:: initialize();");
-      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin);
-      #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ARCH_RISCV)
-// these registers are only existing in "classic" ESP32
-      REG_SET_BIT(I2S_TIMING_REG(AR_I2S_PORT), BIT(9));
-      REG_SET_BIT(I2S_CONF_REG(AR_I2S_PORT), I2S_RX_MSB_SHIFT);
-#else
-      // #warning FIX ME! Please. // never gonna fix this so we can stop talking about it.
-#endif
+      // SPH0645 puts 24-bit data on the wire.
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin, bitsPerSample, useRightSlot, i2sMaster);
     }
 };
-#endif
