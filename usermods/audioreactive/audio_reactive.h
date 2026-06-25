@@ -1356,22 +1356,6 @@ class AudioReactive : public Usermod {
     #else
     bool i2sMaster = (SR_I2S_MASTER != 0);
     #endif
-    // Runtime-configurable I2S parameters (replace legacy compile-time macros).
-    #ifndef SR_I2S_BITS_PER_SAMPLE
-    uint8_t i2sBitsPerSample = 32;       // 16, 24, or 32 — matches legacy 32-bit default
-    #else
-    uint8_t i2sBitsPerSample = SR_I2S_BITS_PER_SAMPLE;
-    #endif
-    #ifndef SR_I2S_USE_RIGHT_SLOT
-    bool i2sUseRightSlot = false;        // false = LEFT slot, true = RIGHT slot
-    #else
-    bool i2sUseRightSlot = (SR_I2S_USE_RIGHT_SLOT != 0);
-    #endif
-    #ifndef SR_I2S_MASTER
-    bool i2sMaster = true;               // false = I2S SLAVE role
-    #else
-    bool i2sMaster = (SR_I2S_MASTER != 0);
-    #endif
 #endif
     // new "V2" audiosync struct - 44 Bytes
     struct __attribute__ ((packed)) audioSyncPacket {  // WLEDMM "packed" ensures that there are no additional gaps
