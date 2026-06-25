@@ -19,7 +19,11 @@ void updateBaudRate(uint32_t rate){
   }
 
   if (Serial) Serial.flush();
-  Serial.begin(rate);
+  #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT != 0
+    Serial.begin(rate);
+  #else
+    Serial.begin(rate, SERIAL_8N1, SOC_RX0, SOC_TX0, false, 20000UL, 120U);
+  #endif
 }
 
 // RGB LED data return as JSON array. Slow, but easy to use on the other end.
@@ -132,7 +136,7 @@ void handleSerial() {
   PinOwner srxo = pinManager.getPinOwner(hardwareRX);
   if (srxo != PinOwner::DebugOut && srxo != PinOwner::None) return;
   
-  if (Serial.available() > 1) { serial_drain(); return; } // I dunno, something was really gicving me serial garbage.
+  // if (Serial.available() > 1) { serial_drain(); return; } // I dunno, something was really giving me serial garbage.
 
   unsigned long startTime = millis();
   while ((Serial.available() > 0) && (millis() - startTime < SERIAL_MAXTIME_MILLIS)) {
