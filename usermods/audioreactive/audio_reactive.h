@@ -208,6 +208,11 @@ static uint8_t doSlidingFFT = 1;                            // 1 = use sliding w
 static uint8_t useAutoLevel = 1;                           // 1 = per-band slow-decay AGC (auto-balance loudest band to fill display)
 static float bandAutoGain[NUM_GEQ_CHANNELS] = {0.0f};     // per-band auto-gain (slow-decay AGC state)
 static bool  bandAutoGainInited = false;                   // first-call init flag (seed at 1.0 once)
+static uint8_t useBandCompress = 0;                        // 1 = per-band log compression: log(1+k*x) / log(1+k*Xmax) — compresses within-band dynamic range
+static constexpr float BAND_COMPRESS_K = 4.0f;             // compression factor (k=4: ~3 dB at top, ~20 dB at floor)
+static uint8_t useNoiseFloorSub = 0;                       // 1 = subtract per-band slow min (noise floor) from each band — helps in quiet environments
+static uint8_t useHistogramNorm = 0;                       // 1 = single global gain via loudest-band peak (alternative to per-band AGC)
+static uint8_t useBand0Lifter = 0;                        // 1 = soft "dance music fixer": weak coupling from band 1 to band 0 to compensate for poor low-freq mic response. band0 follows band1's contour without matching it.
 
 // shared vars for debugging
 #ifdef MIC_LOGGER
@@ -408,7 +413,7 @@ static void computeBandsPsychoacoustic(float* fftCalc, float wc) {
   // and highest bands don't dominate.
   float damping[NUM_GEQ_CHANNELS];
   for (int k = 0; k < NUM_GEQ_CHANNELS; k++) damping[k] = 1.0f;
-  damping[0] = 0.85f;        // sub-bass roll-off
+  damping[0] = 1.00;        // sub-bass roll-off
   damping[1] = 0.92f;        // bass roll-off
   damping[NUM_GEQ_CHANNELS - 1] = 0.70f;  // top bin roll-off (matches legacy 0.70f)
   if (NUM_GEQ_CHANNELS >= 2)
@@ -954,6 +959,89 @@ void FFTcode(void * parameter)
           }
           fftCalc[k] *= bandAutoGain[k];
         }
+      }
+
+      // #4 Noise floor subtraction: track a slow minimum per band, subtract
+      // it so quiet content isn't masked by the mic's noise floor. Helps
+      // when each band has a different residual noise level.
+      if (useNoiseFloorSub) {
+        static float bandFloor[NUM_GEQ_CHANNELS] = {0.0f};
+        static bool  bandFloorInited = false;
+        const float FLOOR_DECAY = 0.9999f;
+        const float FLOOR_SMOOTH = 0.001f;
+        if (!bandFloorInited) {
+          for (int k = 0; k < NUM_GEQ_CHANNELS; k++) bandFloor[k] = 0.0f;
+          bandFloorInited = true;
+        }
+        for (int k = 0; k < NUM_GEQ_CHANNELS; k++) {
+          // Track the slow minimum, then push the floor up slowly so
+          // transient dips don't get locked in.
+          bandFloor[k] = (fftCalc[k] < bandFloor[k])
+                          ? fftCalc[k]
+                          : (bandFloor[k] * FLOOR_DECAY + fftCalc[k] * FLOOR_SMOOTH);
+          float v = fftCalc[k] - bandFloor[k];
+          if (v < 0.0f) v = 0.0f;
+          fftCalc[k] = v;
+        }
+      }
+
+      // #3 Histogram-based display gain: pick a single global gain that
+      // makes the loudest visible band hit ~85% of the display, regardless
+      // of how loud the source is. Periodically updated.
+      if (useHistogramNorm && !useAutoLevel) {
+        // Skip if AGC is on — AGC already does per-band equalization.
+        static float histMax = 1.0f;
+        const float HIST_DECAY = 0.999f;
+        const float HIST_TARGET = 0.85f * 4096.0f;
+        float curMax = 0.0f;
+        for (int k = 0; k < NUM_GEQ_CHANNELS; k++)
+          if (fftCalc[k] > curMax) curMax = fftCalc[k];
+        if (curMax > 0.001f) {
+          if (curMax > HIST_TARGET) {
+            histMax = HIST_TARGET / curMax;
+          } else {
+            histMax = histMax * HIST_DECAY + (1.0f - HIST_DECAY);
+            if (histMax > 1.0f) histMax = 1.0f;
+          }
+          for (int k = 0; k < NUM_GEQ_CHANNELS; k++)
+            fftCalc[k] *= histMax;
+        }
+      }
+
+      // #5 Per-band log compression (soft-knee).
+      // Apply log(1 + x) to soften peaks without boosting the floor.
+      // Map [0, Xmax] -> [0, Xmax] via log(1+x)/log(1+Xmax) so peaks get
+      // compressed but small signals pass through nearly linearly.
+      // For k=4 / Xmax=4096: x=50 -> 1230, x=200 -> 2115, x=1000 -> 3123.
+      if (useBandCompress) {
+        const float Xmax = 4096.0f;
+        const float logXmax = logf(1.0f + Xmax);
+        for (int k = 0; k < NUM_GEQ_CHANNELS; k++) {
+          if (fftCalc[k] > 0.0f) {
+            // Use Xmax per-band so the curve normalises at the band's
+            // current peak. This compresses within-band transients while
+            // preserving per-band equalisation from the AGC step.
+            float bandMax = fftCalc[k];
+            for (int j = 0; j < 8; j++) {
+              if (bandMax > 0.0f) break;
+              bandMax = 0.0f;
+            }
+            // Apply log(1+x)/log(1+bandMax) — noop if bandMax <= 1
+            if (bandMax > 1.0f) {
+              float logBandMax = logf(1.0f + bandMax);
+              fftCalc[k] = (logf(1.0f + fftCalc[k]) / logBandMax) * bandMax;
+            }
+          }
+        }
+      }
+
+      // "Dance music fixer" — soft lift on band 0 from band 1. Compensates
+      // for mics with poor sub-bass response (e.g. the ESP32-P4 EV board's
+      // onboard mic) by adding a fraction of band 1 to band 0 when band 1
+      // is non-zero. Band 0 keeps its own shape; bands stay distinct.
+      if (useBand0Lifter && NUM_GEQ_CHANNELS >= 2 && fftCalc[1] > 0.0f) {
+        const float α = 0.15f;  // 15% coupling — adds without matching
+        fftCalc[0] += α * fftCalc[1];
       }
 
     } else { // if second run skipped
@@ -3148,6 +3236,10 @@ class AudioReactive : public Usermod {
       poweruser[F("FFT_Window")] = fftWindow;
       poweruser[F("I2S_FastPath")] = doSlidingFFT;
       poweruser[F("AutoLevel")] = useAutoLevel;
+      poweruser[F("BandCompress")] = useBandCompress;
+      poweruser[F("NoiseFloorSub")] = useNoiseFloorSub;
+      poweruser[F("HistogramNorm")] = useHistogramNorm;
+      poweruser[F("Band0Lifter")] = useBand0Lifter;
 
       JsonObject freqScale = top.createNestedObject("frequency");
       freqScale[F("scale")] = FFTScalingMode;
@@ -3249,6 +3341,10 @@ class AudioReactive : public Usermod {
 
       configComplete &= getJsonValue(top["experiments"][F("I2S_FastPath")], doSlidingFFT);
       configComplete &= getJsonValue(top["experiments"][F("AutoLevel")], useAutoLevel);
+      configComplete &= getJsonValue(top["experiments"][F("BandCompress")], useBandCompress);
+      configComplete &= getJsonValue(top["experiments"][F("NoiseFloorSub")], useNoiseFloorSub);
+      configComplete &= getJsonValue(top["experiments"][F("HistogramNorm")], useHistogramNorm);
+      configComplete &= getJsonValue(top["experiments"][F("Band0Lifter")], useBand0Lifter);
 
 
       configComplete &= getJsonValue(top["frequency"][F("scale")], FFTScalingMode);
@@ -3486,8 +3582,28 @@ class AudioReactive : public Usermod {
 
       oappend(SET_F("dd=addDropdown(ux,xx+':AutoLevel');"));
       oappend(SET_F("addOption(dd,'Off',0);"));
-      oappend(SET_F("addOption(dd,'On  (⎌)',1);"));
+      oappend(SET_F("addOption(dd,'AGC: per-band  (⎌)',1);"));
       oappend(SET_F("addInfo(ux+':'+xx+':AutoLevel',1,'🐺');"));
+
+      oappend(SET_F("dd=addDropdown(ux,xx+':BandCompress');"));
+      oappend(SET_F("addOption(dd,'Off  (⎌)',0);"));
+      oappend(SET_F("addOption(dd,'Per-band log: soften peaks',1);"));
+      oappend(SET_F("addInfo(ux+':'+xx+':BandCompress',1,'🐺');"));
+
+      oappend(SET_F("dd=addDropdown(ux,xx+':NoiseFloorSub');"));
+      oappend(SET_F("addOption(dd,'Off  (⎌)',0);"));
+      oappend(SET_F("addOption(dd,'Subtract per-band floor',1);"));
+      oappend(SET_F("addInfo(ux+':'+xx+':NoiseFloorSub',1,'🐺');"));
+
+      oappend(SET_F("dd=addDropdown(ux,xx+':HistogramNorm');"));
+      oappend(SET_F("addOption(dd,'Off  (⎌)',0);"));
+      oappend(SET_F("addOption(dd,'Global gain via loudest band',1);"));
+      oappend(SET_F("addInfo(ux+':'+xx+':HistogramNorm',1,'🐺');"));
+
+      oappend(SET_F("dd=addDropdown(ux,xx+':Band0Lifter');"));
+      oappend(SET_F("addOption(dd,'Off  (⎌)',0);"));
+      oappend(SET_F("addOption(dd,'Lift band 0 from band 1',1);"));
+      oappend(SET_F("addInfo(ux+':'+xx+':Band0Lifter',1,'🐺');"));
 
       oappend(SET_F("dd=addDropdown(ux,'dynamics:limiter');"));
       oappend(SET_F("addOption(dd,'Off',0);"));
