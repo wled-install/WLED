@@ -306,7 +306,7 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     static uint8_t* ppaBuffer = nullptr;
 
     if (!ppaBuffer) {
-      ppaBuffer = (uint8_t*)heap_caps_aligned_alloc(CACHE_LINE, PPA_BUF_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+      ppaBuffer = (uint8_t*)heap_caps_malloc(PPA_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);
       if (!ppaBuffer) return false;
     }
 
@@ -331,8 +331,11 @@ static bool sendLiveLedsWs(uint32_t wsClient) {
     srm_config.scale_x = scale;
     srm_config.scale_y = scale;
     srm_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-    if (ppa_do_scale_rotate_mirror(preview_ppa_srm_handle, &srm_config) != ESP_OK) return false;
+    
+    if (ppa_do_scale_rotate_mirror(preview_ppa_srm_handle, &srm_config) != ESP_OK) {
+      USER_PRINTF("PPA Scale/Rotate/Mirror failed! Buffer Size used: %u\n", PPA_BUF_SIZE);
+      return false;
+    }
 
     AsyncWebSocketBuffer wsBuf(bufSize);
     if (!wsBuf) return false;
