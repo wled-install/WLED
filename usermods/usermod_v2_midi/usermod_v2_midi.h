@@ -271,6 +271,28 @@ class MidiUsermod : public Usermod {
   // so a controller-initiated change doesn't echo back.
   // ---------------------------------------------------------------------------
   void onStateChange(uint8_t mode) override {
+    // FULL-FEATURE repaint: for each of the 64 pads, light it up based on
+    // whether its preset slot is saved, and whether that preset is the
+    // currently-active one (green if so, magenta if a playlist is also
+    // running, blue if saved but not active, off if not saved / unmapped).
+    // Also drives the Track 1/2 LEDs (power, nightlight) and Scene Launch 8
+    // (blackout indicator).
+    //
+    // NOTE: getPresetName() acquires the JSON buffer. We call it once per
+    // non-zero mapped pad (up to 64 times per state change). The lock
+    // contention with the webserver that caused the
+    // "ERROR: Locking JSON buffer failed! (still locked by 11)" log spam
+    // earlier is mitigated by:
+    //   - feedback_throttle_ms (default 50) keeps us from re-running on
+    //     every micro-state-change
+    //   - suppress_feedback_until_ms window blocks the controller's own
+    //     state-change echo
+    //   - getPresetName holds the buffer briefly per call and releases
+    //     between iterations
+    // If the lock contention comes back, the fix is to acquire the JSON
+    // buffer once at the top of this function and check all 64 slots
+    // inside a single critical section — but that requires refactoring
+    // getPresetName to take a pre-acquired buffer.
     if (!enabled || !midi_connected || !feedback_enabled) return;
     if (mode == CALL_MODE_INIT || mode == CALL_MODE_NO_NOTIFY) return;
     uint32_t now = millis();
@@ -310,6 +332,10 @@ class MidiUsermod : public Usermod {
     // Scene Launch 8 (note 119) lit when blackout (bri == 0).
     midi_out_queue(0x90, 0x77, bri == 0 ? 1 : 0);
   }
+
+  // ---------------------------------------------------------------------------
+  // Public hooks called from wled.cpp's app_queue drain
+  // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
   // Public hooks called from wled.cpp's app_queue drain

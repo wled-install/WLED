@@ -32,6 +32,7 @@ static const char *TAG = "WLED";
   #include "usb/usb_host.h"
   #include "usb/msc_host_vfs.h"
   #include "hal/usb_dwc_ll.h"
+  #include "esp_private/usb_phy.h"
   #include "ImageCacheManager.h"
 
   #ifdef USERMOD_MIDI_USB
@@ -323,6 +324,22 @@ static const char *TAG = "WLED";
       usb_host_config_t host_config = {};
       host_config.intr_flags = ESP_INTR_FLAG_LEVEL1;
       host_config.peripheral_map = BIT(0); // <--- this may be a bug of the current IDFv5.5 with USB High-Speed devices.
+      host_config.skip_phy_setup = true;   // we set up the PHY ourselves
+      // CONFIG_SOC_USB_UTMI_PHY_NUM == 1 on ESP32-P4
+      
+      {
+        const usb_phy_config_t phy_config = {
+            .controller = USB_PHY_CTRL_OTG,
+            .target = USB_PHY_TARGET_UTMI,
+            .otg_mode = USB_OTG_MODE_HOST,
+            .otg_speed = USB_PHY_SPEED_HIGH, // <-- the fix
+            .ext_io_conf = nullptr,
+            .otg_io_conf = nullptr,
+        };
+        usb_phy_handle_t phy_h = nullptr;
+        ESP_ERROR_CHECK(usb_new_phy(&phy_config, &phy_h));
+        USER_PRINTF("USB: PHY init in HS mode (skip_phy_setup workaround)\n");
+      }
 
       // Bias Mode	  nptx_fifo_lines	  ptx_fifo_lines	rx_fifo_lines
       // Balanced	    256	              128	            512 (896 - 256 - 128)
@@ -366,7 +383,7 @@ static const char *TAG = "WLED";
       bool has_clients = true;
       while (true) {
           uint32_t event_flags;
-          usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+          usb_host_lib_handle_events(10, &event_flags);
 
           #ifdef USERMOD_MIDI_USB
           midi_usb_poll();
