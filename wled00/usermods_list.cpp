@@ -157,6 +157,11 @@
 #include "../usermods/usermod_v2_pioneer_prolink/usermod_v2_pioneer_prolink.h"
 #endif
 
+#ifdef USERMOD_MIDI_USB
+#include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
+MidiUsermod* midiUsermodPtr = nullptr;
+#endif
+
 #ifdef USERMOD_KLIPPER_PERCENTAGE
   #include "../usermods/usermod_v2_klipper_percentage/usermod_v2_klipper_percentage.h"
 #endif
@@ -360,6 +365,11 @@ void registerUsermods()
 
 #ifdef USERMOD_PIONEER_PROLINK
   usermods.add(new ProLinkUsermod());
+#endif
+
+#ifdef USERMOD_MIDI_USB
+  midiUsermodPtr = new MidiUsermod();
+  usermods.add(midiUsermodPtr);
 #endif
 
 #ifdef USERMOD_ARTNETMAP

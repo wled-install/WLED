@@ -31,7 +31,21 @@ static const char *TAG = "WLED";
   #include <dirent.h>
   #include "usb/usb_host.h"
   #include "usb/msc_host_vfs.h"
+  #include "hal/usb_dwc_ll.h"
   #include "ImageCacheManager.h"
+
+  #ifdef USERMOD_MIDI_USB
+    #include "../usermods/usermod_v2_midi/midi_usb_host.h"
+    // Pull in the full MidiUsermod class definition so background_loop_nonblocking
+    // can call handleIncomingMidi() / setConnected() through midiUsermodPtr.
+    // (wled.h only forward-declares it to keep the include light.)
+    #include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
+    // midi_usb_host.cpp provides the USB Host client implementation. The
+    // WLED build_src_filter only scans wled00/, so this .cpp is pulled in
+    // here (gated by USERMOD_MIDI_USB so it never ships on non-MIDI builds).
+    // All definitions are `static` so there's no ODR risk.
+    #include "../usermods/usermod_v2_midi/midi_usb_host.cpp"
+  #endif
   
   #define MNT_PATH "/usb"     // Base mount path prefix, devices will be mounted as /usb0, /usb1, /usb2...
   #define MAX_MSC_DEVICES  CONFIG_FATFS_VOLUME_COUNT 
@@ -136,19 +150,14 @@ static const char *TAG = "WLED";
 
   static msc_dev_entry_t *msc_devices[MAX_MSC_DEVICES] = {0};
 
-  static QueueHandle_t app_queue;
+  // Definition of app_queue (declared extern in wled.h). wled_serial.cpp and
+  // ws.cpp also touch this for legacy "USB disk arrived" notifications — they
+  // get the extern declaration through wled.h.
+  QueueHandle_t app_queue;
 
-  typedef struct {
-    enum {
-      APP_QUIT,                // Signals request to exit the application
-      APP_DEVICE_CONNECTED,    // USB device connect event
-      APP_DEVICE_DISCONNECTED, // USB device disconnect event
-    } id;
-    union {
-      uint8_t new_dev_address; // Address of new USB device for APP_DEVICE_CONNECTED event
-      msc_host_device_handle_t device_handle; // Handle of removed USB device for APP_DEVICE_DISCONNECTED event
-    } data;
-  } app_message_t;
+  // app_message_t (incl. MIDI event IDs) lives in usb_host_messages.h so that
+  // midi_usb_host.cpp can build & submit them with the same layout.
+  #include "../usermods/usermod_v2_midi/usb_host_messages.h"
 
   static inline int find_free_slot(void)
   {
@@ -350,10 +359,18 @@ static const char *TAG = "WLED";
       };
       ESP_ERROR_CHECK(msc_host_install(&msc_config));
 
+      #ifdef USERMOD_MIDI_USB
+      midi_usb_init();
+      #endif
+
       bool has_clients = true;
       while (true) {
           uint32_t event_flags;
           usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+
+          #ifdef USERMOD_MIDI_USB
+          midi_usb_poll();
+          #endif
 
           // Release devices once all clients has deregistered
           if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
@@ -731,6 +748,30 @@ void background_loop_nonblocking(void* pvParameters) {
         }
         break;
       }
+
+      #ifdef USERMOD_MIDI_USB
+      case app_message_t::APP_MIDI_PACKET: {
+        if (midiUsermodPtr) {
+          midiUsermodPtr->handleIncomingMidi(
+              msg.data.midi.status,
+              msg.data.midi.data1,
+              msg.data.midi.data2);
+        }
+        break;
+      }
+
+      case app_message_t::APP_MIDI_DEVICE_CONNECTED: {
+        USER_PRINTLN("USB MIDI Device Connected");
+        if (midiUsermodPtr) midiUsermodPtr->setConnected(true);
+        break;
+      }
+
+      case app_message_t::APP_MIDI_DEVICE_DISCONNECTED: {
+        USER_PRINTLN("USB MIDI Device Disconnected");
+        if (midiUsermodPtr) midiUsermodPtr->setConnected(false);
+        break;
+      }
+      #endif
 
       default:
         USER_PRINTF("Unknown USB Error message ID: %d\n", msg.id);

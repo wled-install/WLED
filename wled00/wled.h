@@ -1085,4 +1085,12 @@ public:
   // This new function will replace initConnection() and initAP()
   void setWiFiMode(WiFiConnectionState newState);
 };
+
+// USB Host (P4) — extern symbols shared between wled.cpp and midi_usb_host.cpp.
+// Defined in wled.cpp; consumed by midi_usb_host.cpp via include of wled.h.
+extern QueueHandle_t app_queue;  // only used on P4 builds where usb_task is compiled
+#ifdef USERMOD_MIDI_USB
+class MidiUsermod;
+extern MidiUsermod* midiUsermodPtr;  // defined in usermods_list.cpp
+#endif
 #endif        // WLED_H
