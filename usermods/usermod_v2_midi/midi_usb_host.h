@@ -22,9 +22,3 @@ void midi_usb_poll(void);
 // asynchronous submission on the OUT endpoint. Safe to call from any task.
 // Returns false if the ring buffer is full or the host hasn't been initialised.
 bool midi_out_queue(uint8_t status, uint8_t d1, uint8_t d2);
-
-// Queue a System Exclusive message for submission on the OUT endpoint.
-// Splits the SysEx bytes into 4-byte USB-MIDI event packets (CIN 0x4 for
-// start/continuation, CIN 0x5/0x6/0x7 for the final packet). Safe to call
-// from any task. Returns false if the ring buffer fills up mid-message.
-bool midi_out_sysex(const uint8_t* data, size_t len);
