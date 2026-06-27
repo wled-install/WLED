@@ -510,9 +510,14 @@ class MidiUsermod : public Usermod {
 
     if (presetCache != nullptr) {
       // Mirror what doSaveState() does on a real save so the LED feedback
-      // shows the new pad as saved immediately.
+      // shows the new pad as saved immediately. Match WLED's own detection
+      // (presets.cpp:361) — `!presetObj["playlist"].isNull()`. The
+      // "playlist" key is stored as a JsonObject containing the ps/dur/
+      // transition arrays (see playlist.cpp:167 serializePlaylist), so
+      // checking isNull() is the correct gate; is<JsonArray>() would miss
+      // it and the destination pad would paint blue instead of magenta.
       presetCache[dest].exists = true;
-      presetCache[dest].isPlaylist = src_obj[F("playlist")].is<JsonArray>();
+      presetCache[dest].isPlaylist = !src_obj[F("playlist")].isNull();
       String nm;
       if (src_obj["n"]) {
         nm = (const char*)(src_obj["n"]);
@@ -760,6 +765,12 @@ class MidiUsermod : public Usermod {
     AutoPlaylistState aps = queryAutoPlaylist();
     bool music_playing = aps.musicIsActive;
     uint8_t music_playlist_preset = aps.musicPlaylist;  // 0 if unset
+    // True when the currently-active WLED playlist IS the configured music
+    // playlist. Used to swap magenta→yellow for the currently-playing child
+    // pad (and the parent pad) so the user sees a unified yellow palette
+    // for the music playlist's full state.
+    bool active_playlist_is_music = (music_playlist_preset > 0
+                                  && (uint8_t)playlist_parent == music_playlist_preset);
 
     for (int i = 0; i < 64; i++) {
       uint8_t color;
@@ -790,6 +801,15 @@ class MidiUsermod : public Usermod {
         // Music playlist saved but not currently active — solid yellow.
         color = 13;
         status = 0x96;
+      } else if (playlist_active && active_playlist_is_music
+                 && (uint8_t)preset == active
+                 && (uint8_t)preset != playlist_parent) {
+        // Currently-playing child of the MUSIC playlist (parent is the
+        // music slot, child is a different preset in the music playlist).
+        // Fast blink YELLOW instead of magenta, so the child blends with
+        // the parent's yellow pulse.
+        color = 13;
+        status = 0x9B;
       } else if (playlist_active && (uint8_t)preset == playlist_parent) {
         // Playlist anchor pad — slow pulse so it's distinguishable
         // from the currently-playing child (which fast-blinks). Both
