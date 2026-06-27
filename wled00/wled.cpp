@@ -1744,7 +1744,7 @@ void WLED::setup() {
     DEBUG_PRINTLN( "Failed to create USB Host app_queue");
     return;
   }
-  xTaskCreatePinnedToCore(usb_task, "usb_task", 4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(usb_task, "usb_task", 8192, NULL, 2, NULL, 0);
   DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
 #endif
 
