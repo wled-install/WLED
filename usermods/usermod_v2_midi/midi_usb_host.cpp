@@ -184,7 +184,7 @@ void midi_usb_init(void) {
   }
   #endif
 
-  MIDI_LOG("init: USB Host client ready (basics: IN-only, no OUT)");
+  MIDI_LOG("init: USB Host client ready");
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +228,10 @@ void midi_usb_poll(void) {
   }
 
   #if 1
-  // OUT path disabled (basics version).
+  // OUT path: drain ring buffer and submit bulk-OUT URBs to the controller.
+  // Single in-flight URB (same pattern as IN — ESP-IDF allows only one
+  // in-flight URB per endpoint). midi_out_transfer_cb clears midi_out_in_flight
+  // when the URB completes, allowing the next one to be submitted.
   if (midi_dev_hdl && midi_out_ep && midi_out_xfer && !midi_out_in_flight && midi_out_rb) {
     size_t got = 0;
     const uint8_t* data = (const uint8_t*)xRingbufferReceiveUpTo(
@@ -300,23 +303,66 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
   if (msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     MIDI_LOG("event: NEW_DEV addr=%d", msg->new_dev.address);
     if (midi_open_and_configure(msg->new_dev.address) == ESP_OK) {
-      // Don't push to WLED's app_queue in the basics version — the
-      // MidiUsermod still exists, but we just log. This keeps the
-      // out-of-the-box flow: connect, log, disconnect.
-      // (If you want to also notify the usermod for status display,
-      // re-enable this. It only does setConnected(true) right now.)
+      // Tell the usermod a device is now connected and which one it is.
+      // setConnected(true) flips midi_connected, which unblocks the
+      // "if (!midi_connected) return;" guard in onStateChange so the
+      // controller's LEDs light up to reflect current WLED state.
       if (midiUsermodPtr) {
         midiUsermodPtr->setDeviceInfo(midi_vendor, midi_product,
           midi_device_lookup(midi_vendor, midi_product));
+        // CAPTURE currentPreset BEFORE stateUpdated() — stateUpdated
+        // does `if (stateChanged) currentPreset = 0` in led.cpp:106,
+        // which wipes the boot preset's identity right before our
+        // onStateChange sees it. Reading it here, before we fire
+        // stateUpdated, lets us preserve the active preset through the
+        // stateUpdated wipe.
+        midiUsermodPtr->captureActivePreset(currentPreset);
+        midiUsermodPtr->setConnected(true);
       }
       app_message_t m = {};
       m.id = app_message_t::APP_MIDI_DEVICE_CONNECTED;
       xQueueSend(app_queue, &m, 0);
+      // USB MIDI Device Connected — always repaint the controller, on
+      // first boot AND on every re-connect. The immediate stateUpdated
+      // catches the common case; the 500ms-delayed second paint catches
+      // any state that settled after the immediate one (preset cache
+      // rebuilds on first boot, re-applied presets from prior disconnect,
+      // etc.).
+      if (midiUsermodPtr) {
+        MIDI_LOG("connect: repainting controller (immediate + 500ms)");
+        stateUpdated(CALL_MODE_BUTTON);
+
+        // 1500ms-delayed "settled" repaint. Always spawn — multiple paints
+        // are harmless and idempotent (each just re-sends the full state).
+        // The 1500ms delay gives WLED's setup loop time to apply the boot
+        // preset / load the boot playlist before we paint — otherwise the
+        // first paint sees currentPreset=0 and currentPlaylist=0 (defaults)
+        // and the playlist parent pad shows as plain blue until the 500ms
+        // paint kicks in. 1500ms comfortably covers WLED's setup work
+        // including playlist loading from LittleFS.
+        struct RepaintCtx { MidiUsermod* ptr; };
+        RepaintCtx* ctx = new RepaintCtx{ midiUsermodPtr };
+        xTaskCreate(
+          [](void* arg) {
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            auto* c = (RepaintCtx*)arg;
+            if (c->ptr) {
+              MIDI_LOG("connect: settled repaint firing");
+              c->ptr->requestFullRepaint();
+            }
+            delete c;
+            vTaskDelete(NULL);
+          },
+          "midi_repaint", 2048, ctx, 1, nullptr);
+      }
     } else {
       MIDI_LOG("event: NEW_DEV addr=%d configure failed (likely MSC or unknown device)", msg->new_dev.address);
     }
   } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
     MIDI_LOG("event: DEV_GONE");
+    if (midiUsermodPtr) {
+      midiUsermodPtr->setConnected(false);
+    }
     midi_close_device();
     app_message_t m = {};
     m.id = app_message_t::APP_MIDI_DEVICE_DISCONNECTED;
