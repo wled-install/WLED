@@ -1737,16 +1737,16 @@ void WLED::setup() {
   ESP_ERROR_CHECK(ppa_register_client(&ppa_srm_config, &preview_ppa_srm_handle));
   ESP_ERROR_CHECK(jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle));
 #endif
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)
-  DEBUG_PRINTLN("Initializing USB Host...");
-  app_queue = xQueueCreate(APP_QUEUE_SIZE, sizeof(app_message_t));
-  if (!app_queue) {
-    DEBUG_PRINTLN( "Failed to create USB Host app_queue");
-    return;
-  }
-  xTaskCreatePinnedToCore(usb_task, "usb_task", 8192, NULL, 2, NULL, 0);
-  DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
-#endif
+// #if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)
+//   DEBUG_PRINTLN("Initializing USB Host...");
+//   app_queue = xQueueCreate(APP_QUEUE_SIZE, sizeof(app_message_t));
+//   if (!app_queue) {
+//     DEBUG_PRINTLN( "Failed to create USB Host app_queue");
+//     return;
+//   }
+//   xTaskCreatePinnedToCore(usb_task, "usb_task", 8192, NULL, 2, NULL, 0);
+//   DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
+// #endif
 
   if ((strncmp("ESP32-PICO", ESP.getChipModel(), 10) == 0) || (strncmp("ESP32-U4WDH", ESP.getChipModel(), 11) == 0))
   { // WLEDMM detect pico board and esp32-mini1 board at runtime
@@ -1834,6 +1834,17 @@ void WLED::setup() {
     USER_PRINTLN("Done!");
   }
   #endif 
+
+  #if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(SOC_USB_OTG_SUPPORTED)
+  DEBUG_PRINTLN("Initializing USB Host...");
+  app_queue = xQueueCreate(APP_QUEUE_SIZE, sizeof(app_message_t));
+  if (!app_queue) {
+    DEBUG_PRINTLN("Failed to create USB Host app_queue");
+    return;
+  }
+  xTaskCreatePinnedToCore(usb_task, "usb_task", 8192, NULL, 2, NULL, 0);
+  DEBUG_PRINTLN("Setup complete. Waiting for USB Host events.");
+  #endif
 
 #if defined(STATUSLED) && STATUSLED>=0
   if (!pinManager.isPinAllocated(STATUSLED)) {

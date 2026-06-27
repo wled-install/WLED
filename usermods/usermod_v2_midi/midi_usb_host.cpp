@@ -115,7 +115,13 @@ static volatile bool midi_in_error_recovery_needed = false;
 #if 1
 static usb_transfer_t* midi_out_xfer = nullptr;
 static volatile bool   midi_out_in_flight = false;
-static uint8_t          out_rb_storage[512]       __attribute__((aligned(4)));
+// OUT ring buffer. Holds USB-MIDI event packets (4 bytes each).
+// A full controller repaint queues ~150 packets (80 wipe + 64 pads +
+// tracks + scenes), so 512 bytes (128 packets) was too small and
+// dropped late packets — most noticeably the post-power-on scene 8
+// send, which would get dropped before the OUT thread could drain.
+// 2048 bytes (512 packets) gives comfortable headroom.
+static uint8_t          out_rb_storage[2048]      __attribute__((aligned(4)));
 static StaticRingbuffer_t out_rb_struct;
 static RingbufHandle_t    midi_out_rb = nullptr;
 #endif
@@ -329,31 +335,29 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
       // rebuilds on first boot, re-applied presets from prior disconnect,
       // etc.).
       if (midiUsermodPtr) {
-        MIDI_LOG("connect: repainting controller (immediate + 500ms)");
-        stateUpdated(CALL_MODE_BUTTON);
-
-        // 1500ms-delayed "settled" repaint. Always spawn — multiple paints
-        // are harmless and idempotent (each just re-sends the full state).
-        // The 1500ms delay gives WLED's setup loop time to apply the boot
-        // preset / load the boot playlist before we paint — otherwise the
-        // first paint sees currentPreset=0 and currentPlaylist=0 (defaults)
-        // and the playlist parent pad shows as plain blue until the 500ms
-        // paint kicks in. 1500ms comfortably covers WLED's setup work
-        // including playlist loading from LittleFS.
+        // USB_Task now starts after the SD card in WLED's task list
+        // (the boot-blocking mount task runs first), so by the time
+        // we get this connect callback, the segment/preset structures
+        // are already initialized and a direct repaint is safe.
+        // Always do an immediate repaint to handle the common case
+        // where the boot preset was already applied, plus a 1500ms-
+        // delayed repaint for the case where the boot playlist is
+        // still being set up (currentPlaylist may be 0 at t=0 even
+        // though currentPreset is set).
+        midiUsermodPtr->requestFullRepaint();
+        // Single delayed "settled" repaint using a static buffer (no
+        // heap allocation, so no race with the SD-card task).
         struct RepaintCtx { MidiUsermod* ptr; };
-        RepaintCtx* ctx = new RepaintCtx{ midiUsermodPtr };
+        static RepaintCtx s_repaint_ctx;
+        s_repaint_ctx.ptr = midiUsermodPtr;
         xTaskCreate(
           [](void* arg) {
-            vTaskDelay(pdMS_TO_TICKS(1500));
             auto* c = (RepaintCtx*)arg;
-            if (c->ptr) {
-              MIDI_LOG("connect: settled repaint firing");
-              c->ptr->requestFullRepaint();
-            }
-            delete c;
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            if (c->ptr) c->ptr->requestFullRepaint();
             vTaskDelete(NULL);
           },
-          "midi_repaint", 2048, ctx, 1, nullptr);
+          "midi_repaint", 2048, &s_repaint_ctx, 1, nullptr);
       }
     } else {
       MIDI_LOG("event: NEW_DEV addr=%d configure failed (likely MSC or unknown device)", msg->new_dev.address);
