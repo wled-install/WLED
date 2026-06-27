@@ -431,8 +431,46 @@ void registerUsermods()
 #endif
 
 #ifdef USERMOD_AUTO_PLAYLIST
-  usermods.add(new AutoPlaylistUsermod(false));
+  // Capture the pointer so the MIDI usermod can read AutoPlaylist state
+  // (musicPlaylist preset id, autoChange flag, etc.) for LED feedback.
+  autoPlaylistUsermodPtr = new AutoPlaylistUsermod(false);
+  usermods.add(autoPlaylistUsermodPtr);
 #endif
 
 
+}
+
+// ---------------------------------------------------------------------------
+// queryAutoPlaylist — defined here (not in usermod_v2_midi.h) because the
+// full AutoPlaylistUsermod definition needs to be visible at the call site
+// for getMidiState() to resolve. auto_playlist.h's static-member definitions
+// can't be repeated across TUs without multiple-definition link errors, and
+// wled.cpp pulls in midi_usb_host.cpp via #include, so any TU other than
+// this one would re-include auto_playlist.h. Placing the definition in
+// usermods_list.cpp keeps it in exactly one TU.
+//
+// musicPlaylist / autoChange are read straight from AutoPlaylistUsermod.
+// Falls back to zeroed defaults when AutoPlaylist isn't compiled in or
+// registered.
+// ---------------------------------------------------------------------------
+AutoPlaylistState queryAutoPlaylist() {
+  AutoPlaylistState s;
+#ifdef USERMOD_AUTO_PLAYLIST
+  if (autoPlaylistUsermodPtr != nullptr) {
+    auto m = autoPlaylistUsermodPtr->getMidiState();
+    s.present       = m.present;
+    s.autoChange    = m.autoChange;
+    s.musicPlaylist = m.musicPlaylist;
+    // "active" = usermod is doing something useful right now:
+    //   autoChange is on, OR a music playlist is configured with at
+    //   least one autoChangeIds entry.
+    s.active        = s.autoChange
+                   || (s.musicPlaylist > 0 && m.hasAutoChangeIds);
+    // "music is playing" = AutoPlaylist is active AND current WLED
+    // playlist matches the configured music slot.
+    s.musicIsActive = s.active && s.musicPlaylist > 0
+                   && (int)currentPlaylist == (int)s.musicPlaylist;
+  }
+#endif
+  return s;
 }

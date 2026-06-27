@@ -101,6 +101,31 @@ class AutoPlaylistUsermod : public Usermod {
       initDone = true;
     }
 
+    // Compact state snapshot for cross-usermod consumers (e.g. the MIDI
+    // usermod's LED feedback). Returns a struct with only POD fields
+    // so consumers don't have to include audio_reactive.h (which has
+    // plain globals and breaks link if pulled into multiple TUs).
+    struct MidiState {
+      bool  present;          // AutoPlaylist usermod is compiled in + registered
+      bool  autoChange;       // autoChange flag is set
+      byte  musicPlaylist;    // configured music playlist slot (0 if unset)
+      bool  hasAutoChangeIds; // at least one preset in autoChangeIds
+      bool  musicIsActive;    // current WLED playlist matches music slot
+    };
+    MidiState getMidiState() const {
+      MidiState s;
+      s.present          = true;
+      s.autoChange       = autoChange;
+      s.musicPlaylist    = musicPlaylist;
+      s.hasAutoChangeIds = !autoChangeIds.empty();
+      // Music is "playing" when this usermod has loaded the configured
+      // music playlist. We detect that via the current WLED playlist
+      // slot matching.
+      s.musicIsActive    = s.musicPlaylist > 0
+                        && (int)currentPlaylist == (int)s.musicPlaylist;
+      return s;
+    }
+
     // gets called every time WiFi is (re-)connected. Initialize own network
     // interfaces here
     void connected() {
@@ -513,6 +538,8 @@ class AutoPlaylistUsermod : public Usermod {
     }
 
 };
+
+AutoPlaylistUsermod* autoPlaylistUsermodPtr = nullptr;
 
 const char AutoPlaylistUsermod::_name[]                PROGMEM = "AutoPlaylist";
 const char AutoPlaylistUsermod::_autoPlaylistEnabled[] PROGMEM = "enabled";

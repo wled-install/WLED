@@ -22,6 +22,25 @@
 #include "wled.h"
 #include "midi_usb_host.h"  // midi_out_queue() for pad/track feedback
 
+// Forward-declared hook for cross-usermod state. Defined in
+// usermod_v2_auto_playlist.h when AutoPlaylist is compiled in.
+class AutoPlaylistUsermod;
+extern AutoPlaylistUsermod* autoPlaylistUsermodPtr;
+
+// Music playlist state. Populated by queryAutoPlaylist() (defined in
+// midi_usb_host.cpp so the full AutoPlaylistUsermod definition is
+// visible at the call site — auto_playlist.h transitively pulls in
+// audio_reactive.h which has plain globals that break the link if
+// included from multiple TUs).
+struct AutoPlaylistState {
+  bool   present       = false;   // AutoPlaylist is compiled in + registered
+  bool   active        = false;   // AutoChange on, OR autoChangeIds non-empty
+  bool   autoChange    = false;   // AutoPlaylist's autoChange flag
+  uint8_t musicPlaylist = 0;       // the configured music playlist slot
+  bool   musicIsActive = false;   // current WLED playlist == musicPlaylist AND usermod is active
+};
+AutoPlaylistState queryAutoPlaylist();
+
 class MidiUsermod : public Usermod {
  private:
   bool initDone = false;
@@ -1218,29 +1237,9 @@ class MidiUsermod : public Usermod {
   }
 
   // Music playlist helper — light the music playlist pad in yellow (instead
-// of the default magenta) so the user can find it at a glance. The user
-// configures `music_playlist_id` in the usermod settings page. We don't
-// detect "is the music playlist actively playing" via the AutoPlaylist
-// usermod (that header transitively pulls in audio_reactive.h which has
-// plain globals and breaks the link if included from multiple TUs).
-// Instead we treat the configured music playlist slot as the music
-// marker regardless of whether AutoPlaylist is currently driving it.
-struct AutoPlaylistState {
-  bool   present       = false;   // music_playlist_id is set (>0)
-  bool   active        = false;   // (placeholder, future AutoPlaylist integration)
-  bool   autoChange    = false;   // (placeholder)
-  uint8_t musicPlaylist = 0;       // the configured music playlist slot
-  bool   musicIsActive = false;   // true if current playlist == musicPlaylist
-};
-
-inline AutoPlaylistState queryAutoPlaylist() {
-  AutoPlaylistState s;
-  s.musicPlaylist = music_playlist_id;
-  s.present       = music_playlist_id > 0;
-  s.musicIsActive = (music_playlist_id > 0
-                  && (int)currentPlaylist == (int)music_playlist_id);
-  return s;
-}
+// of the default magenta) so the user can find it at a glance. Pulls
+// state from the AutoPlaylist usermod (if compiled in and registered),
+// with a fallback to the local music_playlist_id config field.
 
 // Wipe every LED on the controller — all 64 RGB pads (NoteOn velocity
 // 0 = off) and all 16 single-color buttons (Track 1-8 + Scene 1-8).
