@@ -102,10 +102,18 @@ class MidiUsermod : public Usermod {
   // without AutoPlaylist could be added here if needed.
 
   // Select-mode runtime state for the preset-copy flow.
-  // Press Scene 5 to enter; press pad A (source); press pad B (destination);
-  // preset A is copied to slot B if B is empty. Press Scene 5 again to exit.
+  // Hold Scene 7 to activate (a "hold to activate" gesture like shift);
+  // press pad A (source); press pad B (destination); preset A is copied
+  // to slot B if B is empty. Release Scene 7 to exit.
   bool     select_mode_active        = false;
   uint8_t  select_source_pad         = 0xFF;  // 0xFF = no source selected yet
+
+  // Copy-failure flash. When a copy attempt fails (destination exists,
+  // JSON buffer busy, source missing from file, file write failed,
+  // etc.), the destination pad index is remembered here so paintPads()
+  // can paint it red-fast-blink as long as the select key is held.
+  // Cleared on Scene 7 release.
+  int8_t   copy_failed_pad           = -1;    // -1 = no failure pending
 
   // Reboot arm-and-execute state. First press of Shift + Scene 1 sets
   // `reboot_armed = true` and starts a slow flash on Scene 1 LED. Second
@@ -114,6 +122,16 @@ class MidiUsermod : public Usermod {
   bool     reboot_armed              = false;
   uint32_t reboot_armed_ms           = 0;
   static constexpr uint32_t REBOOT_ARM_TIMEOUT_MS = 5000;
+
+  // Delete confirmation state. First press of Shift + a loaded pad
+  // arms the delete: the pad flashes red (fast-blink 0x9B, color 5)
+  // until either (a) shift is released (cancel), (b) the timeout
+  // elapses (cancel), or (c) the same pad is pressed again while
+  // shift is still held (confirm and delete). -1 means no pad is
+  // currently armed for delete.
+  int8_t   delete_armed_pad          = -1;
+  uint32_t delete_armed_ms           = 0;
+  static constexpr uint32_t DELETE_ARM_TIMEOUT_MS = 5000;
 
   // Target segment for the toggleMirrorX / toggleReverseX / toggleMirrorY
   // / toggleReverseY / toggleTranspose actions. Defaults to the main
@@ -670,26 +688,21 @@ class MidiUsermod : public Usermod {
   }
 
   // Copy a preset from src slot to dest slot by editing /presets.json
-  // directly. The destination is assumed to be empty (caller checks).
-  // Preserves presetCache[dest] so the on-screen LED updates without
-  // requiring a full preset cache rebuild.
+  // directly. Returns true on success, false on any failure (caller
+  // surfaces the failure by flashing the destination pad red while
+  // the select key is held). Preserves presetCache[dest] so the
+  // on-screen LED updates without requiring a full preset cache rebuild.
   static constexpr const char PRESETS_FILE[] = "/presets.json";
 
-  void copyPresetToSlot(int src, int dest) {
-    USER_PRINTF("[MIDI] copyPresetToSlot entry: src=%d dest=%d\n", src, dest);
-    if (src <= 0 || src > 250 || dest <= 0 || dest > 250 || src == dest) {
-      USER_PRINTF("[MIDI] copyPresetToSlot: invalid args src=%d dest=%d\n", src, dest);
-      return;
-    }
-    bool dest_exists = getCachedPresetExists(dest);
-    USER_PRINTF("[MIDI] copyPresetToSlot: getCachedPresetExists(%d) = %d\n", dest, dest_exists ? 1 : 0);
-    if (dest_exists) {
+  bool copyPresetToSlot(int src, int dest) {
+    if (src <= 0 || src > 250 || dest <= 0 || dest > 250 || src == dest) return false;
+    if (getCachedPresetExists(dest)) {
       USER_PRINTLN(F("[MIDI] copyPresetToSlot: destination already exists, no-op"));
-      return;
+      return false;
     }
     if (!requestJSONBufferLock(20)) {
       USER_PRINTLN(F("[MIDI] copyPresetToSlot: JSON buffer busy"));
-      return;
+      return false;
     }
     // Allocate our own JsonDocument for the presets.json content (don't
     // touch WLED's fileDoc — it's owned by the JSON / preset subsystem).
@@ -699,14 +712,11 @@ class MidiUsermod : public Usermod {
     // 3rd copy, producing a truncated JSON that WLED's next read
     // couldn't parse.
     DynamicJsonDocument copy_doc(64 * 1024);
-    USER_PRINTF("[MIDI] copyPresetToSlot: copy_doc size=%d\n", (int)copy_doc.size());
     bool ok = readObjectFromFile(PRESETS_FILE, nullptr, &copy_doc);
-    USER_PRINTF("[MIDI] copyPresetToSlot: readObjectFromFile ok=%d copy_doc used=%d\n",
-                ok ? 1 : 0, (int)copy_doc.memoryUsage());
     if (!ok) {
       releaseJSONBufferLock();
       USER_PRINTLN(F("[MIDI] copyPresetToSlot: read presets.json failed"));
-      return;
+      return false;
     }
     JsonObject root = copy_doc.as<JsonObject>();
     char src_key[4];
@@ -714,7 +724,7 @@ class MidiUsermod : public Usermod {
     if (!root.containsKey(src_key)) {
       releaseJSONBufferLock();
       USER_PRINTF("[MIDI] copyPresetToSlot: source preset %d not in file\n", src);
-      return;
+      return false;
     }
     char dest_key[4];
     snprintf(dest_key, sizeof(dest_key), "%d", dest);
@@ -735,8 +745,7 @@ class MidiUsermod : public Usermod {
       dest_obj[kv.key().c_str()] = kv.value();
       kv_count++;
     }
-    USER_PRINTF("[MIDI] copyPresetToSlot: copied %u top-level fields from src=%d to dest=%d\n",
-                (unsigned)kv_count, src, dest);
+    // WLEDMM: copy all top-level fields, count them only for debug.
 
     // Write the file ourselves. writeObjectToFile() can't be used here:
     // it calls bufferedFind(key), and passing key=nullptr dereferences
@@ -750,7 +759,7 @@ class MidiUsermod : public Usermod {
       File wf = WLED_FS.open(PRESETS_FILE, "w");
       if (!wf) {
         USER_PRINTLN(F("[MIDI] copyPresetToSlot: failed to open presets.json for write"));
-        return;
+        return false;
       }
       size_t written = wf.print(full_json);
       wf.close();
@@ -767,12 +776,10 @@ class MidiUsermod : public Usermod {
       if (readObjectFromFileUsingId(PRESETS_FILE, dest, &verify_doc)) {
         write_ok = true;
       }
-      USER_PRINTF("[MIDI] copyPresetToSlot: wrote %u bytes, verify %s\n",
-                  (unsigned)written, write_ok ? "OK" : "FAIL");
     }
     if (!write_ok) {
-      USER_PRINTLN(F("[MIDI] copyPresetToSlot: file write did not produce a readable destination — bailing"));
-      return;
+      // WLEDMM v3: file write did not produce a readable destination — bailing (debug removed)
+      return false;
     }
     updateFSInfo();
 
@@ -811,6 +818,7 @@ class MidiUsermod : public Usermod {
     // call pushInterfaceUpdate() here — the event has already been
     // published by core's writeObjectToFileUsingId path.
     USER_PRINTF("[MIDI] copyPresetToSlot: %d -> %d OK\n", src, dest);
+    return true;
   }
 
  public:
@@ -1155,6 +1163,12 @@ class MidiUsermod : public Usermod {
   // playlists, magenta for looping playlists, green for the active
   // regular preset, blue for any other saved preset, off otherwise.
   void paintPads() {
+    // Disarm any expired delete arm BEFORE painting, so this cycle's
+    // render reflects the disarmed state and the pad reverts to its
+    // normal color immediately (rather than flashing red for one extra
+    // cycle after the timeout).
+    disarmExpiredDeleteArm();
+
     const bool playlist_active = (currentPlaylist > 0);
     const byte active = tracked_active_preset;
     const byte playlist_parent = playlist_active ? (byte)currentPlaylist : 0;
@@ -1235,7 +1249,21 @@ class MidiUsermod : public Usermod {
 
     for (int i = 0; i < kNumPads; i++) {
       const int8_t preset = pad_to_preset[i];
-      const auto [color, status] = paint_pad(preset);
+      auto [color, status] = paint_pad(preset);
+      // Two visual overrides take precedence over the normal category
+      // paint:
+      //   * delete_armed_pad: the pad is flashing red-fast-blink to
+      //     ask the user to confirm a destructive delete. Cleared on
+      //     shift release, timeout, or successful second press.
+      //   * copy_failed_pad: the destination pad is flashing
+      //     red-fast-blink to signal a copy failure. Cleared on Scene 7
+      //     release.
+      // Status 0x9B is the fast-blink used by playlist children;
+      // color 5 is plain red in the APC Mini MK2 palette.
+      if (i == delete_armed_pad || i == copy_failed_pad) {
+        color  = 5;
+        status = 0x9B;
+      }
       // A switch from solid to pulse (e.g., when a playlist starts
       // and the parent should pulse) needs to be sent even if the
       // color didn't change.
@@ -1358,6 +1386,19 @@ class MidiUsermod : public Usermod {
     }
   }
 
+  // Disarm the delete arm state if the second press didn't arrive
+  // within DELETE_ARM_TIMEOUT_MS. The fall-through paint loop in
+  // paintPads() will then re-render the affected pad to its
+  // non-armed color. Mirrors disarmExpiredRebootArm() — called at
+  // the start of paintPads() so the disarm happens before this
+  // cycle's paint.
+  void disarmExpiredDeleteArm() {
+    if (delete_armed_pad >= 0
+        && (millis() - delete_armed_ms) > DELETE_ARM_TIMEOUT_MS) {
+      delete_armed_pad = -1;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Public hooks called from wled.cpp's app_queue drain
   // ---------------------------------------------------------------------------
@@ -1379,21 +1420,28 @@ class MidiUsermod : public Usermod {
           // Track 9 (shift) has no LED per the APC Mini MK2 docs, so no
           // visual feedback to clear. Just update internal state.
           //
-          // Releasing shift mid-arm cancels the reboot arm so the
-          // Track 4 LED reverts to solid red on the next paint. (The
-          // shift+Track 4 execute path only runs while shift is held,
-          // so this guarantees we can't accidentally reboot by
-          // releasing shift between the arm and execute.)
+          // Releasing shift mid-arm cancels BOTH the reboot arm and
+          // the delete arm so their LEDs revert to solid on the next
+          // paint. The shift+Track 4 execute path only runs while
+          // shift is held, so this guarantees we can't accidentally
+          // reboot by releasing shift between the arm and execute.
+          // Same logic for the two-press delete confirmation.
+          bool repaint = false;
           if (reboot_armed) {
             reboot_armed = false;
-            stateUpdated(CALL_MODE_BUTTON);
+            repaint = true;
           }
+          if (delete_armed_pad >= 0) {
+            delete_armed_pad = -1;
+            repaint = true;
+          }
+          if (repaint) stateUpdated(CALL_MODE_BUTTON);
         }
         // WLEDMM v3: also clear select_mode_active when Scene 7 is
         // released via the velocity-0 NoteOn path (some controllers
         // send a 0-velocity NoteOn instead of a true NoteOff).
         if (d1 == kNoteFirstScene + 6) {
-          USER_PRINTF("[MIDI] select-mode: velocity-0 NoteOn on Scene 7, clear select_mode_active\n");
+          // WLEDMM v3: clear select_mode_active on Scene 7 release (debug removed)
           select_mode_active = false;
         }
         return;
@@ -1414,7 +1462,7 @@ class MidiUsermod : public Usermod {
       // no way to turn it off.
       if (d1 == kNoteFirstScene + 6) {   // Scene 7 (kNoteFirstScene=0x70, +6=0x76)
         if (copy_enabled) {
-          USER_PRINTF("[MIDI] select-mode: NoteOn Scene 7, set select_mode_active=true\n");
+          // WLEDMM v3: selectMode now a "hold to activate" gesture (debug removed)
           select_mode_active = true;
           select_source_pad  = 0xFF;  // no source selected yet
         }
@@ -1439,83 +1487,96 @@ class MidiUsermod : public Usermod {
 
         // --- Select mode: Scene 5 pressed, waiting for source then dest ---
         if (select_mode_active) {
-          USER_PRINTF("[MIDI] select-mode: d1=%u preset=%d src=%d\n",
-                      (unsigned)d1, (int)preset, (int)pad_to_preset[d1]);
           if (select_source_pad == 0xFF) {
             // First pad = source.
             select_source_pad = (uint8_t)d1;
-            USER_PRINTF("[MIDI] select-mode source = pad %u (preset %d)\n",
-                         (unsigned)d1, (int)preset);
+            // Clear any stale copy-failure flash from a previous attempt.
+            // Otherwise the previous destination's red flash would persist
+            // visually (copy_failed_pad was only cleared on Scene 7 release,
+            // which the user may not have done between attempts).
+            if (copy_failed_pad >= 0) {
+              copy_failed_pad = -1;
+              stateUpdated(CALL_MODE_BUTTON);
+            }
           } else if ((uint8_t)d1 != select_source_pad) {
             // Second pad = destination. Copy preset if destination is empty.
             //
-            // WLEDMM v3: set select_mode_active = false BEFORE the
-            // copy so the LED paint triggered by copyPresetToSlot's
-            // internal stateUpdated() reflects the post-copy state.
-            // Otherwise the LED would render with the "in select mode"
-            // state for one paint cycle, then never re-paint (the
-            // select_mode_active=false is set after, but no second
-            // stateUpdated runs), leaving the Scene 7 LED stuck in
-            // its blinking state.
+            // On any failure (copy disabled, unmapped dest, dest already
+            // occupied, or internal copyPresetToSlot failure) we keep
+            // select_mode_active = true so the user can try again, and
+            // stash the failed pad in copy_failed_pad so paintPads can
+            // flash it red-fast-blink while the select key is held.
             if (!copy_enabled) {
-              USER_PRINTLN(F("[MIDI] select-mode copy ignored — copy_enabled is false"));
-              select_mode_active = false;
-              select_source_pad = 0xFF;
-              stateUpdated(CALL_MODE_BUTTON);   // refresh LEDs so the
-                                              // source/destination pad
-                                              // LEDs revert to their normal
-                                              // color (otherwise they stay in
-                                              // the "selected" state forever).
+              copy_failed_pad = (int8_t)d1;
+              stateUpdated(CALL_MODE_BUTTON);
             } else {
               int8_t dest_preset = pad_to_preset[d1];
-              bool dest_free = (dest_preset > 0) && !getCachedPresetExists(dest_preset);
-              USER_PRINTF("[MIDI] select-mode dest=%d copy_enabled=%d dest_free=%d (cached)\n",
-                          (int)dest_preset, 1, dest_free ? 1 : 0);
-              if (dest_free) {
-                // Capture the source preset before clearing
-                // select_source_pad; copyPresetToSlot needs it.
-                int8_t src_preset = pad_to_preset[select_source_pad];
-                USER_PRINTF("[MIDI] select-mode copying src=%d to dest=%d\n",
-                            (int)src_preset, (int)dest_preset);
-                select_mode_active = false;
+              if (dest_preset <= 0 || getCachedPresetExists(dest_preset)) {
+                // Destination unmapped or already occupied — flash the
+                // destination pad red while the select key is held.
+                copy_failed_pad = (int8_t)d1;
                 select_source_pad = 0xFF;
-                copyPresetToSlot(src_preset, dest_preset);
-              } else {
-                USER_PRINTLN(F("[MIDI] select-mode copy: destination occupied or invalid, no-op"));
-                select_mode_active = false;
-                select_source_pad = 0xFF;
-                // WLEDMM v3: refresh the LEDs so the source/destination
-                // pad LEDs revert to their non-select-mode state. Without
-                // this, the destination pad appears to "light up" because
-                // it stays in whatever state the last paint set it to
-                // (e.g., the "active destination" indicator from a
-                // previous copy).
                 stateUpdated(CALL_MODE_BUTTON);
+              } else {
+                // Attempt the copy. Source is still needed for the call.
+                int8_t src_preset = pad_to_preset[select_source_pad];
+                bool ok = copyPresetToSlot(src_preset, dest_preset);
+                select_source_pad = 0xFF;
+                if (ok) {
+                  select_mode_active = false;
+                  copy_failed_pad = -1;
+                  stateUpdated(CALL_MODE_BUTTON);
+                } else {
+                  // Internal failure (JSON busy, source missing,
+                  // file write failed). Flash destination red while
+                  // select key is still held; user can release and
+                  // re-press to retry.
+                  copy_failed_pad = (int8_t)d1;
+                  stateUpdated(CALL_MODE_BUTTON);
+                }
               }
             }
-          } else {
-            USER_PRINTF("[MIDI] select-mode: second pad is same as source (d1=%u), ignored\n",
-                        (unsigned)d1);
           }
           return;
         }
 
         if (shift_held) {
           // Shift + pad: SAVE by default; DELETE when delete_enabled is true
-          // AND the preset slot is already occupied. Saving stays on the
-          // current preset; deleting fires a state change so the pad clears.
+          // AND the preset slot is already occupied.
+          //
+          // Delete is a two-press confirmation. The first press arms
+          // (paintPads flashes the pad red-fast-blink until shift is
+          // released, the timeout elapses, or the same pad is pressed
+          // again). Releasing shift cancels the arm — paintPads then
+          // reverts the pad to its normal color. The second press
+          // (shift still held) confirms and deletes.
           if (delete_enabled && getCachedPresetExists(preset)) {
-            deletePreset((uint8_t)preset);
-            tracked_active_preset = 0;  // no preset active after delete (unless GUI restores)
-            stateUpdated(CALL_MODE_BUTTON_PRESET);
-            // WLEDMM v3: the onEvent(PresetListMutated) handler
-            // forces the WS push with cooldown bypass. No need for
-            // pushInterfaceUpdate() here.
+            if (delete_armed_pad == d1) {
+              // Second press while shift still held: confirm delete.
+              delete_armed_pad = -1;
+              deletePreset((uint8_t)preset);
+              tracked_active_preset = 0;  // no preset active after delete (unless GUI restores)
+              stateUpdated(CALL_MODE_BUTTON_PRESET);
+              // WLEDMM v3: the onEvent(PresetListMutated) handler
+              // forces the WS push with cooldown bypass. No need for
+              // pushInterfaceUpdate() here.
+            } else {
+              // First press: arm. Paint will flash red until shift is
+              // released (cancel), the timeout elapses (cancel), or the
+              // same pad is pressed again (confirm).
+              delete_armed_pad = (int8_t)d1;
+              delete_armed_ms  = millis();
+              stateUpdated(CALL_MODE_BUTTON);
+            }
           } else {
-            // Default: save current state to this preset slot. The preset
-            // number in the name uses the MAPPED slot (e.g., preset 1) not
-            // the raw MIDI note, so the label matches what the user sees
-            // in the WLED UI.
+            // Default: save current state to this preset slot. Also clears
+            // any pending delete arm — the user is changing their mind to
+            // a save action. The preset number in the name uses the MAPPED
+            // slot (e.g., preset 1) not the raw MIDI note, so the label
+            // matches what the user sees in the WLED UI.
+            if (delete_armed_pad >= 0) {
+              delete_armed_pad = -1;
+            }
             char name[40];
             char suffix[16];
             snprintf(suffix, sizeof(suffix), " (Pad %d)", (int)preset);
@@ -1603,14 +1664,34 @@ class MidiUsermod : public Usermod {
 
     if (status == 0x80) {                // NoteOff
       if (d1 == kNoteShift) {
-        USER_PRINTF("[MIDI] NoteOff shift d1=%u, clear shift_held\n", (unsigned)d1);
+        // WLEDMM v3: clear shift_held on release (debug removed)
         shift_held = false;
+        // Also cancel any in-progress delete arm. Same logic as the
+        // velocity-0 NoteOn path above — releasing shift cancels
+        // both the reboot arm and the delete arm. Triggers a repaint
+        // so the pad reverts from red-flash to its normal color.
+        bool repaint = false;
+        if (reboot_armed) {
+          reboot_armed = false;
+          repaint = true;
+        }
+        if (delete_armed_pad >= 0) {
+          delete_armed_pad = -1;
+          repaint = true;
+        }
+        if (repaint) stateUpdated(CALL_MODE_BUTTON);
       }
       // WLEDMM v3: clear select_mode_active on Scene 7 release
       // (pairs with the NoteOn "hold to activate" handling above).
+      // Also clear any pending copy-failure flash so the destination
+      // pad reverts to its normal color once the select key is released.
       if (d1 == kNoteFirstScene + 6) {
-        USER_PRINTF("[MIDI] select-mode: NoteOff Scene 7, clear select_mode_active\n");
+        // WLEDMM v3: clear select_mode_active on Scene 7 release (debug removed)
         select_mode_active = false;
+        if (copy_failed_pad >= 0) {
+          copy_failed_pad = -1;
+          stateUpdated(CALL_MODE_BUTTON);
+        }
       }
       return;
     }
