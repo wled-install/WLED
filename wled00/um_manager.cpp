@@ -1,4 +1,5 @@
 #include "wled.h"
+#include "event_bus.h"  // WLEDMM v3: wled::Event, wled::EventBus
 /*
  * Registration and management utility for v2 usermods
  */
@@ -42,6 +43,12 @@ bool UsermodManager::onMqttMessage(char* topic, char* payload) {
 }
 void UsermodManager::onUpdateBegin(bool init) { for (unsigned i = 0; i < numMods; i++) ums[i]->onUpdateBegin(init); } // notify usermods that update is to begin
 void UsermodManager::onStateChange(uint8_t mode) { for (unsigned i = 0; i < numMods; i++) ums[i]->onStateChange(mode); } // notify usermods that WLED state changed
+// WLEDMM v3: pre-state-change fan-out. Fires before stateUpdated()
+// wipes currentPreset, so usermods can latch pre-wipe values.
+void UsermodManager::onPreStateChange(uint8_t mode) { for (unsigned i = 0; i < numMods; i++) ums[i]->onPreStateChange(mode); }
+// WLEDMM v3: event bus fan-out. Synchronous; runs in the publisher's
+// task context. Handlers must be short.
+void UsermodManager::onEvent(const wled::Event& ev) { for (unsigned i = 0; i < numMods; i++) ums[i]->onEvent(ev); }
 
 /*
  * Enables usermods to lookup another Usermod.

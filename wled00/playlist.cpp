@@ -146,6 +146,21 @@ if (millis() - presetCycledTime > (100 * playlistEntryDur) || doAdvancePlaylist)
     // playlist roll-over
     if (!playlistIndex) {
       if (playlistRepeat == 1) { //stop if all repetitions are done
+        // WLEDMM v3: publish PlaylistEnded BEFORE unloadPlaylist so
+        // the payload can carry the playlist id and end-preset
+        // (which are still valid globals at this point). Subscribers
+        // can react to "playlist truly ended" without watching
+        // currentPlaylist in their loop() anymore.
+        {
+          wled::Event ev = {};
+          ev.type = wled::EventType::PlaylistEnded;
+          ev.timestamp_ms = millis();
+          ev.source_id = 0;  // WLED core
+          ev.payload.playlistEnded.playlist = currentPlaylist;
+          ev.payload.playlistEnded.hadEndPreset = (playlistEndPreset != 0);
+          ev.payload.playlistEnded.endPreset = playlistEndPreset;
+          wled::EventBus::publish(ev);
+        }
         unloadPlaylist();
         if (playlistEndPreset) applyPreset(playlistEndPreset);
         return;

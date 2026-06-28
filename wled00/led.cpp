@@ -102,6 +102,18 @@ void stateUpdated(byte callMode) {
   //                     6: fx changed 7: hue 8: preset cycle 9: blynk 10: alexa 11: ws send only 12: button preset
   setValuesFromFirstSelectedSeg();
 
+  // WLEDMM v3: detect power edge. prev_bri is the value at the start
+  // of the previous stateUpdated call. A transition across 0
+  // (off→on or on→off) is what subscribers care about.
+  static byte prev_bri = 0;
+  const bool was_off = (prev_bri == 0);
+  const bool is_off  = (bri == 0);
+
+  // WLEDMM v3: pre-state-change latch. Fires BEFORE the currentPreset
+  // wipe below so subscribers can read pre-wipe values (e.g., the
+  // active preset before it gets zeroed). Default no-op.
+  usermods.onPreStateChange(callMode);
+
   if (bri != briOld || stateChanged) {
     if (stateChanged) currentPreset = 0; //something changed, so we are no longer in the preset
 
@@ -131,6 +143,20 @@ void stateUpdated(byte callMode) {
 
   //deactivate nightlight if target brightness is reached
   if (bri == nightlightTargetBri && callMode != CALL_MODE_NO_NOTIFY && nightlightMode != NL_MODE_SUN) nightlightActive = false;
+
+  // WLEDMM v3: publish PowerEdge if bri crossed zero this cycle.
+  // Synchronous fan-out; runs in stateUpdated's call context. Handlers
+  // must be short (no busMutex, no blocking I/O).
+  if (was_off != is_off) {
+    wled::Event ev = {};
+    ev.type = wled::EventType::PowerEdge;
+    ev.timestamp_ms = millis();
+    ev.source_id = 0;  // WLED core
+    ev.payload.powerEdge.wasOff = was_off;
+    ev.payload.powerEdge.isOff  = is_off;
+    wled::EventBus::publish(ev);
+  }
+  prev_bri = bri;
 
   // notify usermods of state change
   usermods.onStateChange(callMode);

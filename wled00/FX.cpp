@@ -14293,3 +14293,67 @@ void WS2812FX::setupEffectData() {
   #endif // WLED_DISABLE_PARTICLESYSTEM1D
 
 }
+// WLEDMM v3: sorted effect index — maps display position (alphabetical
+// by name) to effect id. Used by the MIDI usermod's "next/prev effect"
+// actions and any other consumer that needs the web-UI's display order
+// rather than the internal id sequence. Built lazily on first call;
+// ~6.5 KB heap allocation (one EffectIndexEntry per effect, ~36 bytes).
+// The internal id sequence in strip.getModeData() is NOT alphabetical
+// (effect ids are assigned in the order modes were added in
+// FX_fcn.cpp), so we have to sort by name to match the web UI.
+
+namespace {
+  struct EffectIndexEntry { char name[32]; uint8_t id; };
+  EffectIndexEntry *g_effect_index = nullptr;
+  uint16_t          g_effect_index_count = 0;
+  bool              g_effect_index_built = false;
+
+  void ensureEffectIndex() {
+    if (g_effect_index_built) return;
+    uint16_t n = strip.getModeCount();
+    if (n == 0) return;
+    g_effect_index = (EffectIndexEntry*)malloc(sizeof(EffectIndexEntry) * n);
+    if (!g_effect_index) return;
+    g_effect_index_count = n;
+    for (uint16_t i = 0; i < n; i++) {
+      const char* nm = strip.getModeData(i);
+      if (!nm) nm = "";
+      // Copy from PROGMEM into RAM. Names can include "@..." metadata
+      // (effect parameters); strip the suffix so the sort key is the
+      // display name only.
+      char buf[32]; buf[0] = 0;
+      strncpy_P(buf, nm, sizeof(buf) - 1); buf[sizeof(buf) - 1] = 0;
+      char* at = strchr(buf, '@');
+      if (at) *at = 0;
+      strlcpy(g_effect_index[i].name, buf, sizeof(g_effect_index[i].name));
+      g_effect_index[i].id = (uint8_t)i;
+    }
+    // Insertion sort by name. Stable enough for ~180 entries.
+    for (uint16_t i = 1; i < n; i++) {
+      EffectIndexEntry cur = g_effect_index[i];
+      uint16_t j = i;
+      while (j > 0 && strcasecmp(g_effect_index[j - 1].name, cur.name) > 0) {
+        g_effect_index[j] = g_effect_index[j - 1];
+        j--;
+      }
+      g_effect_index[j] = cur;
+    }
+    g_effect_index_built = true;
+  }
+}  // namespace
+
+// WLEDMM v3: number of effects in the sorted display order. Returns 0
+// if the index hasn't been built yet (will be built on next call).
+uint16_t getEffectDisplayCount() {
+  ensureEffectIndex();
+  return g_effect_index_count;
+}
+
+// WLEDMM v3: look up the effect id at the given display position
+// (0..getEffectDisplayCount()-1). Returns 0 (Solid) if pos is out of
+// range or the index failed to build.
+uint8_t getEffectIdByDisplayIndex(uint16_t pos) {
+  ensureEffectIndex();
+  if (!g_effect_index || pos >= g_effect_index_count) return 0;
+  return g_effect_index[pos].id;
+}

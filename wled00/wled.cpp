@@ -780,12 +780,41 @@ void background_loop_nonblocking(void* pvParameters) {
       case app_message_t::APP_MIDI_DEVICE_CONNECTED: {
         USER_PRINTLN("USB MIDI Device Connected");
         if (midiUsermodPtr) midiUsermodPtr->setConnected(true);
+        // WLEDMM v3: publish UsbDeviceChanged so the MIDI usermod's
+        // onEvent() can update its own state from the event payload
+        // (and the setConnected/setDeviceInfo callbacks can be
+        // eventually removed).
+        {
+          wled::Event ev = {};
+          ev.type = wled::EventType::UsbDeviceChanged;
+          ev.timestamp_ms = millis();
+          ev.source_id = 0;  // WLED core
+          ev.payload.usbDevice.connected = true;
+          ev.payload.usbDevice.vid = msg.data.midi_device_info.vid;
+          ev.payload.usbDevice.pid = msg.data.midi_device_info.pid;
+          strncpy(ev.payload.usbDevice.name, msg.data.midi_device_info.name,
+                  sizeof(ev.payload.usbDevice.name) - 1);
+          ev.payload.usbDevice.name[sizeof(ev.payload.usbDevice.name) - 1] = '\0';
+          wled::EventBus::publish(ev);
+        }
         break;
       }
 
       case app_message_t::APP_MIDI_DEVICE_DISCONNECTED: {
         USER_PRINTLN("USB MIDI Device Disconnected");
         if (midiUsermodPtr) midiUsermodPtr->setConnected(false);
+        // WLEDMM v3: publish UsbDeviceChanged (disconnect).
+        {
+          wled::Event ev = {};
+          ev.type = wled::EventType::UsbDeviceChanged;
+          ev.timestamp_ms = millis();
+          ev.source_id = 0;  // WLED core
+          ev.payload.usbDevice.connected = false;
+          ev.payload.usbDevice.vid = 0;
+          ev.payload.usbDevice.pid = 0;
+          ev.payload.usbDevice.name[0] = '\0';
+          wled::EventBus::publish(ev);
+        }
         break;
       }
       #endif

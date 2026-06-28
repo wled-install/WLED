@@ -41,6 +41,14 @@ typedef struct {
       uint8_t data1;
       uint8_t data2;
     } midi;
+    // WLEDMM v3: device descriptor populated by the USB Host client when
+    // posting APP_MIDI_DEVICE_CONNECTED. wled.cpp publishes a
+    // UsbDeviceChanged v3 event with this payload.
+    struct {
+      uint16_t vid;
+      uint16_t pid;
+      char     name[24];
+    } midi_device_info;
 #endif
   } data;
 } app_message_t;

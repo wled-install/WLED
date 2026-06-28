@@ -327,6 +327,22 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
       }
       app_message_t m = {};
       m.id = app_message_t::APP_MIDI_DEVICE_CONNECTED;
+      // WLEDMM v3: include the device descriptor so wled.cpp can
+      // publish a UsbDeviceChanged event with the real VID/PID/name.
+      m.data.midi_device_info.vid = midi_vendor;
+      m.data.midi_device_info.pid = midi_product;
+      {
+        // Look up the human-readable name from the VID/PID. Falls
+        // back to a hex string if no match.
+        const char* nm = midi_device_lookup(midi_vendor, midi_product);
+        if (nm) {
+          strncpy(m.data.midi_device_info.name, nm,
+                  sizeof(m.data.midi_device_info.name) - 1);
+          m.data.midi_device_info.name[sizeof(m.data.midi_device_info.name) - 1] = '\0';
+        } else {
+          m.data.midi_device_info.name[0] = '\0';
+        }
+      }
       xQueueSend(app_queue, &m, 0);
       // USB MIDI Device Connected — always repaint the controller, on
       // first boot AND on every re-connect. The immediate stateUpdated

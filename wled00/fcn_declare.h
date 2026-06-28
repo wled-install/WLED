@@ -249,10 +249,37 @@ void handleSerialInput(char inpuit);
 struct PresetMetadata {
   bool exists;
   bool isPlaylist;
+  uint8_t repeat;     // WLEDMM v3: playlist repeat count (0 = infinite, N>0 = finite N+1)
   char name[33]; // adjust size to match your actual struct
 };
 
 extern PresetMetadata* presetCache;
+
+// WLEDMM v3: read the playlist repeat value for a saved preset slot.
+// Returns 0 if the slot doesn't exist, isn't a playlist, or the cache
+// hasn't been built yet. 0 also means "infinite loop" for a valid
+// playlist — callers that need to distinguish should check
+// getCachedPresetExists(slot) && isPlaylist first.
+uint8_t getPresetRepeat(byte slot);
+
+// WLEDMM v3: preset navigation helpers. The MIDI usermod's
+// jumpPreset() and similar code in other usermods (e.g., Pioneer
+// v3) all need to walk the preset list — these helpers provide
+// a single, correct implementation.
+//
+// All functions return 0 if no valid slot is found (0 is a reserved
+// "no preset" value in WLED's currentPreset). Wrap-around: getNextPreset
+// at slot 250 returns 1, getPreviousPreset at slot 1 returns 250.
+byte getNextPreset(byte slot);
+byte getPreviousPreset(byte slot);
+byte getFirstPreset();   // lowest existing slot, 0 if none
+byte getLastPreset();    // highest existing slot, 0 if none
+uint16_t getPresetCount();  // total number of saved presets (all types)
+
+// WLEDMM v3: count of saved PLAYLIST presets specifically. The MIDI
+// usermod uses this to decide whether to show a "playlists" group
+// indicator on the controller.
+uint16_t getPlaylistPresetCount();
 
 // Optionally declare helpers too
 std::vector<int> buildPresetPool();
@@ -323,6 +350,8 @@ typedef struct UM_Exchange_Data {
 } um_data_t;
 const unsigned int um_data_size = sizeof(um_data_t);  // 12 bytes
 
+#include "event_bus.h"  // WLEDMM v3: wled::Event, wled::EventBus, wled::EventType
+
 class Usermod {
   protected:
     um_data_t *um_data; // um_data should be allocated using new in (derived) Usermod's setup() or constructor
@@ -350,12 +379,17 @@ class Usermod {
     }
     virtual bool readFromConfig(JsonObject& obj) {                           // Note as of 2021-06 readFromConfig() now needs to return a bool, see usermod_v2_example.h
       JsonObject top = obj[FPSTR(_name)];                                    // WLEDMM: get enabled and _name
-      return !top.isNull() && getJsonValue(top[FPSTR("enabled")], enabled); 
+      return !top.isNull() && getJsonValue(top[FPSTR("enabled")], enabled);
     }
     virtual void onMqttConnect(bool sessionPresent) {}                       // fired when MQTT connection is established (so usermod can subscribe)
     virtual bool onMqttMessage(char* topic, char* payload) { return false; } // fired upon MQTT message received (wled topic)
     virtual void onUpdateBegin(bool) {}                                      // fired prior to and after unsuccessful firmware update
     virtual void onStateChange(uint8_t mode) {}                              // fired upon WLED state change
+    // WLEDMM v3 hooks — see event_bus.h and the onPreStateChange call
+    // site in led.cpp. Both default to no-op so existing usermods are
+    // unaffected.
+    virtual void onPreStateChange(uint8_t mode) {}                           // fired BEFORE stateUpdated wipes currentPreset; latch pre-wipe values here
+    virtual void onEvent(const wled::Event& ev) {}                          // fired for every v3 event; see event_bus.h
     virtual uint16_t getId() {return USERMOD_ID_UNSPECIFIED;}
 };
 
@@ -382,9 +416,14 @@ class UsermodManager {
     bool onMqttMessage(char* topic, char* payload);
     void onUpdateBegin(bool);
     void onStateChange(uint8_t);
+    void onPreStateChange(uint8_t);   // WLEDMM v3: fan-out for pre-state-change latch
+    void onEvent(const wled::Event& ev);  // WLEDMM v3: fan-out for the v3 event bus
     bool add(Usermod* um);
     Usermod* lookup(uint16_t mod_id);
     Usermod* lookupName(const char *mod_name); //WLEDMM
+    // WLEDMM v3: index-based accessor used by EventBus::publish() to
+    // walk all usermods. Returns nullptr if i is out of range.
+    Usermod* getMod(unsigned i) { return (i < numMods) ? ums[i] : nullptr; }
     byte getModCount() {return numMods;};
 };
 

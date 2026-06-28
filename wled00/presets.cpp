@@ -83,6 +83,21 @@ static void doSaveState() {
   releaseJSONBufferLock();
   updateFSInfo();
 
+  // WLEDMM v3: publish PresetListMutated. The preset cache
+  // (presetCache[]) was already updated above; this event tells
+  // subscribers to refresh their UI / invalidate their state. We
+  // publish AFTER releaseJSONBufferLock so subscribers that want
+  // to do their own file reads can grab the lock.
+  if (persist && presetToSave > 0 && presetToSave <= 250) {
+    wled::Event ev = {};
+    ev.type = wled::EventType::PresetListMutated;
+    ev.timestamp_ms = millis();
+    ev.source_id = 0;  // WLED core
+    ev.payload.presetListMutated.kind = (uint8_t)wled::PresetMutationKind::Saved;
+    ev.payload.presetListMutated.slot = presetToSave;
+    wled::EventBus::publish(ev);
+  }
+
   // clean up
   saveLedmap = -1;
   presetToSave = 0;
@@ -220,6 +235,18 @@ void handlePresets() {
   releaseJSONBufferLock(); // will also clear fileDoc
   if (changePreset) notify(tmpMode); // force UDP notification
   stateUpdated(tmpMode);  // was colorUpdated() if anything breaks
+  // WLEDMM v3: publish PresetApplied after stateUpdated so subscribers
+  // see the post-state-change world. Payload carries the preset id
+  // explicitly so handlers don't need to read currentPreset (which
+  // stateUpdated may have just wiped to 0 via the led.cpp:106 wipe).
+  if (changePreset && tmpPreset > 0 && tmpPreset < 255) {
+    wled::Event ev = {};
+    ev.type = wled::EventType::PresetApplied;
+    ev.timestamp_ms = millis();
+    ev.source_id = 0;  // WLED core
+    ev.payload.presetApplied.preset = tmpPreset;
+    wled::EventBus::publish(ev);
+  }
   updateInterfaces(tmpMode);
 }
 
@@ -285,10 +312,23 @@ void deletePreset(byte index) {
   if (presetCache != nullptr && index > 0 && index <= 250) {
     presetCache[index].exists = false;
     presetCache[index].isPlaylist = false;
+    presetCache[index].repeat = 0;  // WLEDMM v3
     presetCache[index].name[0] = '\0';
     #if defined(CONFIG_SOC_PPA_SUPPORTED)
     update_screen_background = true;
     #endif
+  }
+  // WLEDMM v3: publish PresetListMutated so subscribers can react
+  // (e.g., the MIDI usermod's pushInterfaceUpdate() workaround
+  // becomes an onEvent handler).
+  if (index > 0 && index <= 250) {
+    wled::Event ev = {};
+    ev.type = wled::EventType::PresetListMutated;
+    ev.timestamp_ms = millis();
+    ev.source_id = 0;  // WLED core
+    ev.payload.presetListMutated.kind = (uint8_t)wled::PresetMutationKind::Deleted;
+    ev.payload.presetListMutated.slot = index;
+    wled::EventBus::publish(ev);
   }
 }
 
@@ -359,6 +399,15 @@ void buildPresetCache() {
       presetCache[i].exists = true; // Mark as existing
 
       presetCache[i].isPlaylist = !presetObj[F("playlist")].isNull();
+
+      // WLEDMM v3: capture the playlist repeat value so subscribers
+      // (e.g., the MIDI usermod) can color an idle playlist pad
+      // differently for finite vs. infinite playlists without
+      // re-reading /presets.json.
+      if (presetCache[i].isPlaylist) {
+        JsonObject pl = presetObj[F("playlist")];
+        presetCache[i].repeat = (uint8_t)(pl[F("repeat")].as<int>() | 0);
+      }
 
       if (presetObj["n"]) {
         // sanitize the JSON string before copying
@@ -594,4 +643,82 @@ void handleSerialInput(char next) {
     handlePresets();
   }
   #endif
+}
+// WLEDMM v3: read the playlist repeat value for a saved preset slot.
+// Returns 0 if the slot doesn't exist or the cache hasn't been built.
+// 0 also means "infinite loop" for a valid playlist preset — callers
+// that need to distinguish should check getCachedPresetExists(slot)
+// and the isPlaylist flag first.
+uint8_t getPresetRepeat(byte slot) {
+  if (presetCache == nullptr || slot == 0 || slot > 250) return 0;
+  if (!presetCache[slot].exists || !presetCache[slot].isPlaylist) return 0;
+  return presetCache[slot].repeat;
+}
+
+// WLEDMM v3: preset navigation helpers. Single, correct
+// implementation that all consumers (MIDI, Pioneer v3, future
+// usermods) share instead of each rolling their own.
+
+// Walk forward from `slot` (inclusive) to find the next existing
+// preset. Wraps around. Returns 0 only if the cache has no presets
+// at all (in which case the wrap-around would still find one).
+byte getNextPreset(byte slot) {
+  if (presetCache == nullptr) return 0;
+  if (slot == 0) slot = 1;            // start at 1 if caller passed 0
+  else if (slot >= 250) slot = 1;     // wrap from 250 -> 1
+  else slot = slot + 1;               // step forward
+  // Worst case: walk all 250 slots once.
+  for (uint16_t i = 0; i < 250; i++) {
+    if (presetCache[slot].exists) return slot;
+    if (slot >= 250) slot = 1; else slot++;
+  }
+  return 0;
+}
+
+// Walk backward from `slot` (inclusive) to find the previous existing
+// preset. Wraps around.
+byte getPreviousPreset(byte slot) {
+  if (presetCache == nullptr) return 0;
+  if (slot == 0) slot = 250;
+  else if (slot <= 1) slot = 250;     // wrap from 1 -> 250
+  else slot = slot - 1;               // step back
+  for (uint16_t i = 0; i < 250; i++) {
+    if (presetCache[slot].exists) return slot;
+    if (slot <= 1) slot = 250; else slot--;
+  }
+  return 0;
+}
+
+byte getFirstPreset() {
+  if (presetCache == nullptr) return 0;
+  for (byte i = 1; i <= 250; i++) {
+    if (presetCache[i].exists) return i;
+  }
+  return 0;
+}
+
+byte getLastPreset() {
+  if (presetCache == nullptr) return 0;
+  for (int16_t i = 250; i >= 1; i--) {
+    if (presetCache[i].exists) return (byte)i;
+  }
+  return 0;
+}
+
+uint16_t getPresetCount() {
+  if (presetCache == nullptr) return 0;
+  uint16_t n = 0;
+  for (uint16_t i = 1; i <= 250; i++) {
+    if (presetCache[i].exists) n++;
+  }
+  return n;
+}
+
+uint16_t getPlaylistPresetCount() {
+  if (presetCache == nullptr) return 0;
+  uint16_t n = 0;
+  for (uint16_t i = 1; i <= 250; i++) {
+    if (presetCache[i].exists && presetCache[i].isPlaylist) n++;
+  }
+  return n;
 }

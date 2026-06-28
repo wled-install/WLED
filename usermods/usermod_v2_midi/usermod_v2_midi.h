@@ -27,6 +27,25 @@
 class AutoPlaylistUsermod;
 extern AutoPlaylistUsermod* autoPlaylistUsermodPtr;
 
+// Single source of truth for the action verbs. The same strings are
+// used by:
+//   * runAction() — dispatch via strcmp.
+//   * The track/scene default action assignments in the constructor.
+//   * appendConfigData() — emitted into the GUI dropdown.
+// Add a new action here AND add a matching runAction() branch, and the
+// GUI dropdown picks it up automatically.
+static constexpr const char* kGUIVerbs[] = {
+  "power", "blackout", "full", "nightlight",
+  "nextfx", "prevfx", "nextpal", "prevpal",
+  "nextpreset", "prevpreset",
+  "toggleCheck1", "toggleCheck2", "toggleCheck3",
+  "toggleMirrorX", "toggleReverseX",
+  "toggleMirrorY", "toggleReverseY",
+  "toggleTranspose", "toggleFreeze",
+  "fullRepaint", "rebootArm", "selectMode",
+};
+static constexpr uint8_t kNumGUIVerbs = sizeof(kGUIVerbs) / sizeof(kGUIVerbs[0]);
+
 // Playlist globals from wled00/playlist.cpp — used to detect one-shot
 // playlists (playlistRepeat == 1, plays once and stops) so we can
 // paint them in a distinct color from regular looping playlists.
@@ -36,17 +55,11 @@ extern AutoPlaylistUsermod* autoPlaylistUsermodPtr;
 extern byte playlistRepeat;
 extern byte playlistEndPreset;
 
-// Per-preset playlist repeat cache. WLED's global playlistRepeat only
-// reflects the currently-active playlist; we need each saved playlist's
-// own repeat value to color its pad correctly when idle (one-shot cyan
-// vs. looping magenta). Built lazily by reading /presets.json once and
-// invalidated when presetsModifiedTime changes. The cache state and
-// the ensurePlaylistRepeatCache() function live in
-// wled00/playlist_repeat_cache.cpp to avoid multiple-definition link
-// errors when this header is included from multiple TUs.
-extern unsigned long presetsModifiedTime;
-extern uint8_t cached_playlist_repeat[251];
-void ensurePlaylistRepeatCache();
+// Per-preset playlist repeat is now read directly from the WLED
+// core's preset cache via getPresetRepeat(slot) (see fcn_declare.h /
+// presets.cpp). The previous usermod-side cache (cached_playlist_repeat[]
+// + ensurePlaylistRepeatCache() in playlist_repeat_cache.cpp) is gone
+// — that whole file has been deleted as part of the v3 migration.
 
 // Music playlist state. Populated by queryAutoPlaylist() (defined in
 // midi_usb_host.cpp so the full AutoPlaylistUsermod definition is
@@ -70,10 +83,7 @@ class MidiUsermod : public Usermod {
   // Persistent config
   // ---------------------------------------------------------------------------
   bool     enabled                = true;
-  uint8_t  midi_channel          = 1;        // 1..16
   bool     feedback_enabled      = true;
-  uint8_t  feedback_mode         = 0;        // 0=off, 1=state, 2=segment, 3=preset
-  uint16_t feedback_throttle_ms  = 15;
 
   // Action gate flags — configurable from the usermod settings page.
   // Defaults match Troy's preference:
@@ -87,9 +97,9 @@ class MidiUsermod : public Usermod {
 
   // "Music" playlist slot — the pad mapped to this preset is lit yellow
   // instead of the default magenta, so the user can find their music
-  // playlist at a glance. 0 = disabled (use plain magenta for all
-  // playlists, like before). Set via the usermod settings page.
-  uint8_t  music_playlist_id        = 0;
+  // playlist at a glance. The slot is read live from the AutoPlaylist
+  // usermod (queryAutoPlaylist().musicPlaylist); a fallback for builds
+  // without AutoPlaylist could be added here if needed.
 
   // Select-mode runtime state for the preset-copy flow.
   // Press Scene 5 to enter; press pad A (source); press pad B (destination);
@@ -125,53 +135,6 @@ class MidiUsermod : public Usermod {
   // Pads 0..63 -> preset ID 1..64. -1 means unused.
   int8_t   pad_to_preset[64];
 
-  // Alphabetically-sorted effect id list, populated lazily on first
-  // next-fx/prev-fx call from strip.getModeData() + strip.getModeCount().
-  // Built once and cached because effect names are stable for the
-  // lifetime of the firmware. Each entry is the WLED effect id; the
-  // sorted order matches what the web UI shows (alphabetical by name).
-  struct EffectIndexEntry { char name[32]; uint8_t id; };
-  EffectIndexEntry *effect_index = nullptr;
-  uint16_t          effect_index_count = 0;
-  bool              effect_index_built = false;
-
-  // Build `effect_index` if not already built. Safe to call multiple
-  // times; the second call is a no-op once `effect_index_built` is set.
-  // Memory: ~36 bytes per effect × ~180 effects ≈ 6.5 KB, freed on
-  // reboot (we never deallocate).
-  void ensureEffectIndex() {
-    if (effect_index_built) return;
-    uint16_t n = strip.getModeCount();
-    if (n == 0) return;
-    effect_index = (EffectIndexEntry*)malloc(sizeof(EffectIndexEntry) * n);
-    if (!effect_index) return;
-    effect_index_count = n;
-    for (uint16_t i = 0; i < n; i++) {
-      const char* nm = strip.getModeData(i);
-      if (!nm) nm = "";
-      // Copy from PROGMEM into RAM. Names can include "@..." metadata;
-      // we strip at the first '@' so the sort key is the display name
-      // (matching how json.cpp's serializeModeNames does it).
-      char buf[32]; buf[0] = 0;
-      strncpy_P(buf, nm, sizeof(buf) - 1); buf[sizeof(buf) - 1] = 0;
-      char* at = strchr(buf, '@');
-      if (at) *at = 0;
-      strlcpy(effect_index[i].name, buf, sizeof(effect_index[i].name));
-      effect_index[i].id = (uint8_t)i;
-    }
-    // Sort by name (case-insensitive). Stable enough for a ~180-entry list.
-    for (uint16_t i = 1; i < n; i++) {
-      EffectIndexEntry cur = effect_index[i];
-      uint16_t j = i;
-      while (j > 0 && strcasecmp(effect_index[j - 1].name, cur.name) > 0) {
-        effect_index[j] = effect_index[j - 1];
-        j--;
-      }
-      effect_index[j] = cur;
-    }
-    effect_index_built = true;
-  }
-
   // Optional CC-based "save preset" path. When save_preset_cc > 0 and an
   // incoming CC equals that number with a value in 1..16, save the current
   // WLED state to that preset slot. Useful for controllers without a shift
@@ -197,7 +160,6 @@ class MidiUsermod : public Usermod {
   uint16_t    midi_product                = 0;
   char        midi_device_name[32]        = {0};
 
-  uint32_t    last_feedback_ms            = 0;
   uint32_t    suppress_feedback_until_ms  = 0;
 
   // Active preset tracker — see onStateChange() comment for why we need this.
@@ -224,6 +186,7 @@ class MidiUsermod : public Usermod {
   uint8_t     last_scene3_led             = 0xFF;  // Scene 3 (note 114) — toggleMirrorY indicator
   uint8_t     last_scene4_led             = 0xFF;  // Scene 4 (note 115) — toggleReverseY indicator
   uint8_t     last_scene5_led             = 0xFF;  // Scene 5 (note 116) — toggleTranspose indicator
+  uint8_t     last_scene6_led             = 0xFF;  // Scene 6 (note 117) — default unused (kept for symmetry)
   uint8_t     last_scene7_led             = 0xFF;  // Scene 7 (note 118) — select mode (copy preset)
   uint8_t     last_scene8_led             = 0xFF;  // Scene 8 (note 119) — power
   uint8_t     last_check1_led             = 0xFF;  // Track 1 (note 100) — check1
@@ -239,6 +202,31 @@ class MidiUsermod : public Usermod {
   // 0xFF sentinel for "never sent" — distinct from valid colors 0..127
   static constexpr uint8_t UNSENT = 0xFF;
 
+  // APC Mini MK2 note/CC layout (per Akai v1.0 PDF):
+  //   Pads 0..63       (notes 0x00..0x3F)  -> Presets 1..64
+  //   Track buttons    (notes 0x64..0x6B)  -> 100..107
+  //   Scene launches   (notes 0x70..0x77)  -> 112..119
+  //   Shift            (note 0x7A)         -> 122 (no LED)
+  //   Faders 1..6      (CC 0x30..0x35)     -> 48..53 (effect params)
+  //   Faders 7..8      (CC 0x36..0x37)     -> 54..55 (default unused)
+  //   Master fader     (CC 0x38)           -> 56 (global brightness)
+  static constexpr uint8_t kNumPads          = 64;
+  static constexpr uint8_t kPadsPerRow       = 8;
+  static constexpr uint8_t kNumTracks        = 8;
+  static constexpr uint8_t kNumScenes        = 8;
+  static constexpr uint8_t kNumCCs           = 128;
+  static constexpr uint8_t kNoteFirstTrack   = 0x64;
+  static constexpr uint8_t kNoteLastTrack    = 0x6B;
+  static constexpr uint8_t kNoteFirstScene   = 0x70;
+  static constexpr uint8_t kNoteLastScene    = 0x77;
+  static constexpr uint8_t kNoteShift        = 0x7A;
+  static constexpr uint8_t kCCFaderFirst     = 0x30;
+  static constexpr uint8_t kCCFaderLast      = 0x35;
+  static constexpr uint8_t kCCFader7         = 0x36;
+  static constexpr uint8_t kCCFader8         = 0x37;
+  static constexpr uint8_t kCCMasterFader    = 0x38;
+  static constexpr uint8_t kActionBufSize    = 16;
+
   // Throttle for fader-driven websocket pushes. Sweeping a fader would
   // otherwise generate one WS message per CC packet (e.g., 127 messages
   // per sweep). This caps the rate to one push per interval — the GUI
@@ -251,55 +239,134 @@ class MidiUsermod : public Usermod {
   // to avoid ODR violations when the header is included from multiple TUs
   // (usermods_list.cpp + wled.cpp via midi_usb_host.cpp).
   static constexpr const char _name[]    PROGMEM = "MidiUsb";
-  static constexpr const char _enabled[] PROGMEM = "enabled";
   static constexpr const char _key_enabled[] PROGMEM = "enabled";
-  static constexpr const char _key_channel[] PROGMEM = "channel";
   static constexpr const char _key_feedback_enabled[] PROGMEM = "feedback_enabled";
-  static constexpr const char _key_feedback_mode[] PROGMEM = "feedback_mode";
-  static constexpr const char _key_feedback_throttle_ms[] PROGMEM = "feedback_throttle_ms";
-  static constexpr const char _key_pads[] PROGMEM = "pads";
-  static constexpr const char _key_track_buttons[] PROGMEM = "track_buttons";
-  static constexpr const char _key_scene_buttons[] PROGMEM = "scene_buttons";
-  static constexpr const char _key_cc_map[] PROGMEM = "cc_map";
-  static constexpr const char _key_action[] PROGMEM = "action";
-  static constexpr const char _key_preset[] PROGMEM = "preset";
-  static constexpr const char _key_note[] PROGMEM = "note";
-  static constexpr const char _key_cc[] PROGMEM = "cc";
 
   // ---------------------------------------------------------------------------
   // Action dispatcher (private)
   // ---------------------------------------------------------------------------
-  static void setAction(char* dst, const char* src) {
-    strncpy(dst, src, 15);
-    dst[15] = '\0';
+  // Templated so the size limit is enforced at compile time per call site
+  // (matches the kActionBufSize bound on every action buffer).
+  template<size_t N>
+  static void setAction(char (&dst)[N], const char* src) {
+    strncpy(dst, src, N - 1);
+    dst[N - 1] = '\0';
+  }
+
+  // Wipe every per-LED "last sent" dedup slot back to UNSENT, so the next
+  // paint loop re-sends every LED instead of deduping. Used by the
+  // fullRepaint action and the power-on transition. Cheaper than
+  // wipeAllLeds() (no midi_out_queue traffic) and works for pads AND
+  // single-color buttons in one call.
+  void invalidateAllLedDedup() {
+    memset(last_pad_color,  UNSENT, sizeof(last_pad_color));
+    memset(last_pad_status, UNSENT, sizeof(last_pad_status));
+    last_scene1_led  = UNSENT;
+    last_scene2_led  = UNSENT;
+    last_scene3_led  = UNSENT;
+    last_scene4_led  = UNSENT;
+    last_scene5_led  = UNSENT;
+    last_scene6_led  = UNSENT;  // see note: scene 6 is unused but kept for symmetry
+    last_scene7_led  = UNSENT;
+    last_scene8_led  = UNSENT;
+    last_check1_led  = UNSENT;
+    last_check2_led  = UNSENT;
+    last_check3_led  = UNSENT;
+    last_track4_led  = UNSENT;
+    last_track5_led  = UNSENT;
+    last_track6_led  = UNSENT;
+    last_track7_led  = UNSENT;
+    last_track8_led  = UNSENT;
+  }
+
+  // Reset the 1.2s interface-update cooldown and force a WS push. Used
+  // after preset-list mutations (save/copy/delete) that stateUpdated()
+  // doesn't itself trip. Same pattern as wsPushIfDue() but unconditional
+  // and a different mode.
+  void pushInterfaceUpdate(uint8_t mode) {
+    interfaceUpdateCallMode = mode;
+    lastInterfaceUpdate = 0;
+    updateInterfaces(mode);
+  }
+
+  // Wipe every LED and reboot. Used by both the rebootArm action and the
+  // shift+fullRepaint action; the 200ms drain keeps the OUT ring from
+  // losing the final wipe packets before the CPU halts.
+  void executeReboot() {
+    reboot_armed = false;
+    wipeAllLeds();
+    unsigned long drain_start = millis();
+    for (int i = 0; i < 200; i++) { midi_usb_poll(); delay(1); }
+    USER_PRINTF("[MIDI] reboot drain took %lu ms\n",
+                (unsigned long)(millis() - drain_start));
+    ESP.restart();
+  }
+
+  // Build a human-readable preset name for the save flow: the current
+  // effect's display name (FX metadata stripped at '@', trailing
+  // whitespace trimmed) followed by `suffix` (" (Pad N)" or " (CC N)").
+  // Buffer must be at least 40 bytes (matches the call sites in
+  // handleIncomingMidi).
+  void buildPresetSaveName(char* out, size_t out_size, const char* suffix) {
+    const char* fx_name = strip.getModeData(strip.getMainSegment().mode);
+    String fx_clean = strip_unicode(String(fx_name ? fx_name : ""));
+    int at_pos = fx_clean.indexOf('@');
+    if (at_pos >= 0) fx_clean = fx_clean.substring(0, at_pos);
+    while (fx_clean.length() > 0 &&
+           isspace((unsigned char)fx_clean[fx_clean.length() - 1])) {
+      fx_clean.remove(fx_clean.length() - 1);
+    }
+    // Reserve room for the suffix + null. snprintf truncates cleanly if
+    // the effect name is longer than the available buffer.
+    size_t suffix_len = strlen(suffix);
+    size_t max_name = (out_size > suffix_len + 1) ? (out_size - suffix_len - 1) : 0;
+    snprintf(out, out_size, "%.*s%s", (int)max_name, fx_clean.c_str(), suffix);
   }
 
   // Apply a verb action (from a track / scene button press, or from a CC whose
   // mapping is a verb rather than a parameter name). value is the optional
   // argument for actions like "save<N>" (currently unused — shift+pad uses
   // savePreset() directly).
+  //
+  // Dispatch: simple "value → write" and "verb → toggle" actions are
+  // resolved via the static kActionHandlers table. Actions whose behaviour
+  // depends on `shift_held` (rebootArm, fullRepaint+shift) or whose
+  // dispatch is fan-out (toggleCheck1..3, toggleMirrorX..Y/Transpose)
+  // stay as inline if-chains below the table lookup.
+  using ActionFn = void (MidiUsermod::*)(uint8_t value);
+
+  // Build the dispatch table on first use, inside runAction(). The
+  // table can't be a static constexpr class member because the act_*
+  // method bodies are defined further down — taking their addresses
+  // inline in the table would force forward-declaring every method
+  // (and g++ rejects the "declare then inline-define" pattern for
+  // static constexpr member tables). A function-local static
+  // initializes on first call, when the class is fully defined, so
+  // the address-of is well-formed. Built once, no per-call cost.
+
   void runAction(const char* action, uint8_t value = 0) {
     if (!action || !*action) return;
 
-    // Parameter setters (7-bit MIDI value -> 8-bit WLED global).
+    // ---- Fader parameter setters (CC-mapped, not user-assignable) ----
+    // 7-bit MIDI value → 8-bit WLED global. These are wired to fader
+    // CCs in the constructor and don't appear in the GUI dropdown
+    // (kGUIVerbs), so they don't go through the dispatch table below.
     if (!strcmp(action, "bri")) {
-      bri = (uint8_t)(value << 1);
+      bri = cc7_to_wled8(value);
       strip.setBrightness(bri, true);
       stateUpdated(CALL_MODE_BUTTON);
       return;
     }
     if (!strcmp(action, "effectSpeed")) {
-      effectSpeed = (uint8_t)(value << 1);
+      effectSpeed = cc7_to_wled8(value);
       applyValuesToSelectedSegs();
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
-      // Throttle WS pushes for fader movements so the GUI doesn't get
-      // spammed while the user sweeps a fader — one push per ~250 ms.
       wsPushIfDue();
       return;
     }
     if (!strcmp(action, "effectIntensity")) {
-      effectIntensity = (uint8_t)(value << 1);
+      effectIntensity = cc7_to_wled8(value);
       applyValuesToSelectedSegs();
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
@@ -329,16 +396,15 @@ class MidiUsermod : public Usermod {
       return;
     }
     if (!strcmp(action, "effectCustom1")) {
-      // custom1/custom2/custom3 are per-Segment (FX.h:424), not globals. Write
-      // to the main segment's custom1; effects read it on each frame.
-      strip.getMainSegment().custom1 = (uint8_t)(value << 1);
+      // custom1/custom2 are per-Segment (FX.h:424), not globals.
+      strip.getMainSegment().custom1 = cc7_to_wled8(value);
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
       wsPushIfDue();
       return;
     }
     if (!strcmp(action, "effectCustom2")) {
-      strip.getMainSegment().custom2 = (uint8_t)(value << 1);
+      strip.getMainSegment().custom2 = cc7_to_wled8(value);
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
       wsPushIfDue();
@@ -346,109 +412,69 @@ class MidiUsermod : public Usermod {
     }
     if (!strcmp(action, "effectCustom3")) {
       // 0..31 — clamp to the range (FX uses this for fine detail where
-      // 5 bits of resolution is enough). value << 1 would give 0..254
-      // which is too coarse for the intended use.
-      int v = value;
+      // 5 bits of resolution is enough).
+      uint8_t v = value;
       if (v > 31) v = 31;
-      strip.getMainSegment().custom3 = (uint8_t)v;
+      strip.getMainSegment().custom3 = v;
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
       wsPushIfDue();
       return;
     }
 
-    // Toggle / verb actions.
-    if (!strcmp(action, "power")) {
-      toggleOnOff();
-      stateUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    if (!strcmp(action, "nightlight")) {
-      nightlightActive = !nightlightActive;
-      stateUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    if (!strcmp(action, "nextpreset")) {
-      jumpPreset(+1);  // skips empty slots AND playlists
-      return;
-    }
-    if (!strcmp(action, "prevpreset")) {
-      jumpPreset(-1);  // skips empty slots AND playlists
-      return;
-    }
-    if (!strcmp(action, "nextfx")) {
-      // Walk the alphabetically-sorted effect index (matching the web
-      // UI listing order) rather than the internal id sequence. The
-      // built-in FX are declared in a quasi-arbitrary order in FX_fcn.cpp
-      // and incrementing effectCurrent by 1 jumps to unrelated effects.
-      ensureEffectIndex();
-      if (effect_index && effect_index_count > 0) {
-        // Find current effect in the sorted list.
-        uint16_t cur_pos = 0;
-        for (uint16_t i = 0; i < effect_index_count; i++) {
-          if (effect_index[i].id == effectCurrent) { cur_pos = i; break; }
+    // ---- User-assignable verbs (track/scene buttons + GUI dropdown) ----
+    // Indexes match kGUIVerbs; nullptr entries are handled inline below.
+    //   0  power         10 toggleCheck1
+    //   1  blackout      11 toggleCheck2
+    //   2  full          12 toggleCheck3
+    //   3  nightlight    13 toggleMirrorX
+    //   4  nextfx        14 toggleReverseX
+    //   5  prevfx        15 toggleMirrorY
+    //   6  nextpal       16 toggleReverseY
+    //   7  prevpal       17 toggleTranspose
+    //   8  nextpreset    18 toggleFreeze
+    //   9  prevpreset    19 fullRepaint (inline: shift-gated)
+    //                    20 rebootArm   (inline: shift-gated)
+    //                    21 selectMode
+    static const ActionFn kActionHandlers[kNumGUIVerbs] = {
+      /* 0  power         */ &MidiUsermod::act_power,
+      /* 1  blackout      */ &MidiUsermod::act_blackout,
+      /* 2  full          */ &MidiUsermod::act_full,
+      /* 3  nightlight    */ &MidiUsermod::act_nightlight,
+      /* 4  nextfx        */ &MidiUsermod::act_nextfx,
+      /* 5  prevfx        */ &MidiUsermod::act_prevfx,
+      /* 6  nextpal       */ &MidiUsermod::act_nextpal,
+      /* 7  prevpal       */ &MidiUsermod::act_prevpal,
+      /* 8  nextpreset    */ &MidiUsermod::act_nextpreset,
+      /* 9  prevpreset    */ &MidiUsermod::act_prevpreset,
+      /* 10 toggleCheck1  */ nullptr,  // inline (fan-out)
+      /* 11 toggleCheck2  */ nullptr,
+      /* 12 toggleCheck3  */ nullptr,
+      /* 13 toggleMirrorX */ nullptr,  // inline (fan-out)
+      /* 14 toggleReverseX*/ nullptr,
+      /* 15 toggleMirrorY */ nullptr,
+      /* 16 toggleReverseY*/ nullptr,
+      /* 17 toggleTransp. */ nullptr,
+      /* 18 toggleFreeze  */ &MidiUsermod::act_freeze,
+      /* 19 fullRepaint   */ nullptr,  // inline (shift-gated)
+      /* 20 rebootArm     */ nullptr,  // inline (shift-gated)
+      /* 21 selectMode    */ &MidiUsermod::act_selectMode,
+    };
+    for (uint8_t i = 0; i < kNumGUIVerbs; i++) {
+      if (!strcmp(action, kGUIVerbs[i])) {
+        if (kActionHandlers[i]) {
+          (this->*kActionHandlers[i])(value);
+          return;
         }
-        uint16_t next_pos = (cur_pos + 1) % effect_index_count;
-        effectCurrent = effect_index[next_pos].id;
-      } else {
-        // Fallback to id-sequence if the index failed to build.
-        effectCurrent = (uint8_t)((effectCurrent + 1) % strip.getModeCount());
+        break;  // handled inline below
       }
-      applyValuesToSelectedSegs();
-      colorUpdated(CALL_MODE_BUTTON);
-      wsPushIfDue();
-      return;
-    }
-    if (!strcmp(action, "prevfx")) {
-      ensureEffectIndex();
-      if (effect_index && effect_index_count > 0) {
-        uint16_t cur_pos = 0;
-        for (uint16_t i = 0; i < effect_index_count; i++) {
-          if (effect_index[i].id == effectCurrent) { cur_pos = i; break; }
-        }
-        uint16_t prev_pos = (cur_pos == 0) ? (effect_index_count - 1) : (cur_pos - 1);
-        effectCurrent = effect_index[prev_pos].id;
-      } else {
-        effectCurrent = (effectCurrent == 0)
-            ? (uint8_t)(strip.getModeCount() - 1)
-            : (uint8_t)(effectCurrent - 1);
-      }
-      applyValuesToSelectedSegs();
-      colorUpdated(CALL_MODE_BUTTON);
-      wsPushIfDue();
-      return;
-    }
-    if (!strcmp(action, "nextpal")) {
-      effectPalette = (uint8_t)((effectPalette + 1) % strip.getPaletteCount());
-      applyValuesToSelectedSegs();
-      colorUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    if (!strcmp(action, "prevpal")) {
-      effectPalette = (effectPalette == 0)
-          ? (uint8_t)(strip.getPaletteCount() - 1)
-          : (uint8_t)(effectPalette - 1);
-      applyValuesToSelectedSegs();
-      colorUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    if (!strcmp(action, "blackout")) {
-      bri = 0;
-      strip.setBrightness(0, true);
-      stateUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    if (!strcmp(action, "full")) {
-      bri = 255;
-      strip.setBrightness(255, true);
-      stateUpdated(CALL_MODE_BUTTON);
-      return;
     }
 
-    // Per-effect checkmark toggles (Segment::check1/2/3 — FX-specific
-    // options that some effects like Freqwave / DJ Light / etc. expose).
-    // If the current effect doesn't use a given check, toggling it is a
-    // harmless no-op (the bool just gets set but doesn't affect rendering).
+    // ---- Per-effect checkmark toggles (Segment::check1/2/3) ----
+    // FX-specific options that some effects like Freqwave / DJ Light /
+    // etc. expose. If the current effect doesn't use a given check,
+    // toggling it is a harmless no-op. We sync the strip, the state,
+    // and the websocket push in that order.
     if (!strcmp(action, "toggleCheck1") ||
         !strcmp(action, "toggleCheck2") ||
         !strcmp(action, "toggleCheck3")) {
@@ -456,70 +482,15 @@ class MidiUsermod : public Usermod {
       if      (!strcmp(action, "toggleCheck1")) seg.check1 = !seg.check1;
       else if (!strcmp(action, "toggleCheck2")) seg.check2 = !seg.check2;
       else                                      seg.check3 = !seg.check3;
-      // We need THREE things for a complete UI sync:
-      //   1. colorUpdated(CALL_MODE_BUTTON) — triggers the LED strip to
-      //      re-render so the FX actually picks up the new check value.
-      //      stateUpdated() alone doesn't re-render.
-      //   2. stateUpdated(CALL_MODE_BUTTON) — fires our own onStateChange
-      //      handler so the controller's pad/track LEDs reflect anything
-      //      derived from the new state (and any other usermods see it).
-      //   3. wsPushIfDue() — pushes a fresh websocket message if it's
-      //      been long enough since the last push. Throttled so the GUI
-      //      isn't spammed.
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
       wsPushIfDue();
       return;
     }
-    // Toggle the preset-copy "select mode" on any track/scene button
-    // that's been assigned the "selectMode" action. The press without
-    // a prior armed source starts the source-pending state; the LED on
-    // this button blinks while armed so the user knows where to start.
-    if (!strcmp(action, "selectMode")) {
-      select_mode_active = !select_mode_active;
-      select_source_pad = 0xFF;
-      DEBUG_PRINTF("[MIDI] select-mode %s (button note 0x%02X)\n",
-                   select_mode_active ? "ENABLED" : "DISABLED", d1);
-      stateUpdated(CALL_MODE_BUTTON);
-      return;
-    }
-    // Arm the reboot on any button assigned "rebootArm", held with
-    // shift. First press: arm. Second press (with shift STILL held):
-    // execute. Releasing shift early cancels the arm.
-    if (!strcmp(action, "rebootArm") && shift_held) {
-      if (!reboot_enabled) {
-        DEBUG_PRINTLN(F("[MIDI] rebootArm ignored — reboot_enabled is false"));
-        return;
-      }
-      if (!reboot_armed) {
-        reboot_armed = true;
-        reboot_armed_ms = millis();
-        DEBUG_PRINTLN(F("[MIDI] reboot ARMED — press shift+button again to execute"));
-        stateUpdated(CALL_MODE_BUTTON);
-      } else {
-        DEBUG_PRINTLN(F("[MIDI] reboot EXECUTING — turning off LEDs and restarting"));
-        reboot_armed = false;
-        wipeAllLeds();
-        unsigned long drain_start = millis();
-        for (int i = 0; i < 200; i++) { midi_usb_poll(); delay(1); }
-        DEBUG_PRINTF("[MIDI] reboot drain took %lu ms\n", (unsigned long)(millis() - drain_start));
-        ESP.restart();
-      }
-      return;
-    }
 
-    // Segment transform toggles. These act on `target_segment` (defaults
-    // to the main segment, index 0 — see the member var declaration for
-    // config persistence). The naming mirrors the WLED JSON keys ("mi"
-    // for mirror X, "rv" for reverse X, "miy" for mirror Y, "rvy" for
-    // reverse Y, "tp" for transpose — see FX.h:404-412). For non-2D
-    // segments the Y/transpose flags are harmless no-ops.
-    //
-    // Note: a stateChanged flag is needed so WLED's stateUpdated() actually
-    // notifies other usermods (the existing code path didn't push Y/transpose
-    // toggles through that). colorUpdated() re-renders the strip; the 2D
-    // markDirty() helper blanks the segment first so the mirror/reverse
-    // doesn't smear old pixels.
+    // ---- Segment transform toggles (mirror/reverse/transpose) ----
+    // Act on `target_segment` (default main segment, index 0). For
+    // non-2D segments the Y/transpose flags are harmless no-ops.
     if (!strcmp(action, "toggleMirrorX") ||
         !strcmp(action, "toggleReverseX") ||
         !strcmp(action, "toggleMirrorY") ||
@@ -531,85 +502,156 @@ class MidiUsermod : public Usermod {
       else if (!strcmp(action, "toggleMirrorY"))   seg.mirror_y  = !seg.mirror_y;
       else if (!strcmp(action, "toggleReverseY"))  seg.reverse_y = !seg.reverse_y;
       else                                         seg.transpose = !seg.transpose;
-      // Re-render and propagate the change.
       colorUpdated(CALL_MODE_BUTTON);
       stateUpdated(CALL_MODE_BUTTON);
       wsPushIfDue();
       return;
     }
 
-    // Freeze the current segment (pause FX, keep LEDs at last state).
-    if (!strcmp(action, "toggleFreeze")) {
-      Segment& seg = strip.getMainSegment();
-      seg.freeze = !seg.freeze;
-      stateUpdated(CALL_MODE_BUTTON);
+    // ---- Shift-gated: rebootArm (only meaningful while shift held) ----
+    // First press: arm. Second press (shift STILL held): execute.
+    // Releasing shift early cancels (see handleIncomingMidi NoteOff path).
+    if (!strcmp(action, "rebootArm") && shift_held) {
+      if (!reboot_enabled) {
+        USER_PRINTLN(F("[MIDI] rebootArm ignored — reboot_enabled is false"));
+        return;
+      }
+      if (!reboot_armed) {
+        reboot_armed = true;
+        reboot_armed_ms = millis();
+        USER_PRINTLN(F("[MIDI] reboot ARMED — press shift+button again to execute"));
+        stateUpdated(CALL_MODE_BUTTON);
+      } else {
+        USER_PRINTLN(F("[MIDI] reboot EXECUTING — turning off LEDs and restarting"));
+        executeReboot();
+      }
       return;
     }
 
-    // Force a full controller repaint (e.g., after a manual state change
-    // that the regular throttle/suppress logic skipped).
-    //
-    // Shift + fullRepaint is the default reboot-arm flow: Track 4's
-    // default action is fullRepaint, and the user expects
-    // shift+Track 4 to arm/execute reboot. So if shift is held and
-    // this is the first press, arm; second press (still held) executes.
-    // Releasing shift early cancels.
+    // ---- Shift-gated: fullRepaint ----
+    // Plain press: repaint (reset dedup so fall-through re-sends).
+    // Shift+press: arm/execute reboot. Releasing shift early cancels.
     if (!strcmp(action, "fullRepaint")) {
       if (shift_held && reboot_enabled) {
         if (!reboot_armed) {
           reboot_armed = true;
           reboot_armed_ms = millis();
-          DEBUG_PRINTLN(F("[MIDI] reboot ARMED (via shift+fullRepaint) — press again to execute"));
+          USER_PRINTLN(F("[MIDI] reboot ARMED (via shift+fullRepaint) — press again to execute"));
           stateUpdated(CALL_MODE_BUTTON);
         } else {
-          DEBUG_PRINTLN(F("[MIDI] reboot EXECUTING — turning off LEDs and restarting"));
-          reboot_armed = false;
-          wipeAllLeds();
-          unsigned long drain_start = millis();
-          for (int i = 0; i < 200; i++) { midi_usb_poll(); delay(1); }
-          DEBUG_PRINTF("[MIDI] reboot drain took %lu ms\n", (unsigned long)(millis() - drain_start));
-          ESP.restart();
+          USER_PRINTLN(F("[MIDI] reboot EXECUTING — turning off LEDs and restarting"));
+          executeReboot();
         }
         return;
       }
-      // Plain press: repaint.
-      // Bypass the throttle: reset last_feedback_ms so the repaint fires.
-      last_feedback_ms = 0;
-      // Reset dedup arrays so everything gets re-sent.
-      memset(last_pad_color, 0xFF, sizeof(last_pad_color));
-      memset(last_pad_status, 0xFF, sizeof(last_pad_status));
-      last_check1_led = 0xFF;
-      last_check2_led = 0xFF;
-      last_check3_led = 0xFF;
-      last_scene1_led = 0xFF;
-      last_scene2_led = 0xFF;
-      last_scene3_led = 0xFF;
-      last_scene4_led = 0xFF;
-      last_scene5_led = 0xFF;
-      last_scene7_led = 0xFF;
-      last_scene8_led = 0xFF;
-      last_track4_led = 0xFF;
-      last_track5_led = 0xFF;
-      last_track6_led = 0xFF;
-      last_track7_led = 0xFF;
-      last_track8_led = 0xFF;
+      invalidateAllLedDedup();
       stateUpdated(CALL_MODE_BUTTON);
       return;
     }
 
-    // Reboot the ESP. Only invoked if the user has explicitly enabled
-    // reboot_enabled in the usermod settings — accidental reboots from
-    // a stray button press would be very annoying.
+    // ---- Direct reboot (no arm) ----
+    // Only invoked if the user has explicitly enabled reboot_enabled
+    // in the usermod settings — accidental reboots from a stray button
+    // press would be very annoying.
     if (!strcmp(action, "reboot")) {
       if (!reboot_enabled) {
-        DEBUG_PRINTLN(F("[MIDI] reboot ignored — reboot_enabled is false"));
+        USER_PRINTLN(F("[MIDI] reboot ignored — reboot_enabled is false"));
         return;
       }
-      DEBUG_PRINTLN(F("[MIDI] reboot requested via controller — restarting"));
+      USER_PRINTLN(F("[MIDI] reboot requested via controller — restarting"));
       delay(100);  // let the OUT packet finish flushing
       ESP.restart();
       return;
     }
+  }
+
+  // ---- Per-action handler methods (one per kActionHandlers[] entry) ----
+  // All take a uint8_t value; methods that don't use it just ignore it.
+
+  // 7-bit MIDI CC → 8-bit WLED global. (value << 1) is the canonical
+  // mapping for bri/effectSpeed/effectIntensity/effectCustom1/2.
+  static constexpr uint8_t cc7_to_wled8(uint8_t v) { return (uint8_t)(v << 1); }
+
+  void act_power(uint8_t) {
+    toggleOnOff();
+    stateUpdated(CALL_MODE_BUTTON);
+  }
+  void act_blackout(uint8_t) {
+    bri = 0;
+    strip.setBrightness(0, true);
+    stateUpdated(CALL_MODE_BUTTON);
+  }
+  void act_full(uint8_t) {
+    bri = 255;
+    strip.setBrightness(255, true);
+    stateUpdated(CALL_MODE_BUTTON);
+  }
+  void act_nightlight(uint8_t) {
+    nightlightActive = !nightlightActive;
+    stateUpdated(CALL_MODE_BUTTON);
+  }
+  void act_nextfx(uint8_t) {
+    // Walk the alphabetically-sorted effect index (matching the web
+    // UI listing order) rather than the internal id sequence. The
+    // sorted index is built lazily inside the core helper.
+    const uint16_t count = getEffectDisplayCount();
+    if (count > 0) {
+      uint16_t cur_pos = 0;
+      for (uint16_t i = 0; i < count; i++) {
+        if (getEffectIdByDisplayIndex(i) == effectCurrent) { cur_pos = i; break; }
+      }
+      uint16_t next_pos = (cur_pos + 1) % count;
+      effectCurrent = getEffectIdByDisplayIndex(next_pos);
+    } else {
+      effectCurrent = (uint8_t)((effectCurrent + 1) % strip.getModeCount());
+    }
+    applyValuesToSelectedSegs();
+    colorUpdated(CALL_MODE_BUTTON);
+    wsPushIfDue();
+  }
+  void act_prevfx(uint8_t) {
+    const uint16_t count = getEffectDisplayCount();
+    if (count > 0) {
+      uint16_t cur_pos = 0;
+      for (uint16_t i = 0; i < count; i++) {
+        if (getEffectIdByDisplayIndex(i) == effectCurrent) { cur_pos = i; break; }
+      }
+      uint16_t prev_pos = (cur_pos == 0) ? (count - 1) : (cur_pos - 1);
+      effectCurrent = getEffectIdByDisplayIndex(prev_pos);
+    } else {
+      effectCurrent = (effectCurrent == 0)
+          ? (uint8_t)(strip.getModeCount() - 1)
+          : (uint8_t)(effectCurrent - 1);
+    }
+    applyValuesToSelectedSegs();
+    colorUpdated(CALL_MODE_BUTTON);
+    wsPushIfDue();
+  }
+  void act_nextpal(uint8_t) {
+    effectPalette = (uint8_t)((effectPalette + 1) % strip.getPaletteCount());
+    applyValuesToSelectedSegs();
+    colorUpdated(CALL_MODE_BUTTON);
+  }
+  void act_prevpal(uint8_t) {
+    effectPalette = (effectPalette == 0)
+        ? (uint8_t)(strip.getPaletteCount() - 1)
+        : (uint8_t)(effectPalette - 1);
+    applyValuesToSelectedSegs();
+    colorUpdated(CALL_MODE_BUTTON);
+  }
+  void act_nextpreset(uint8_t) { jumpPreset(+1); }   // skips empty + playlists
+  void act_prevpreset(uint8_t) { jumpPreset(-1); }
+  void act_freeze(uint8_t) {
+    Segment& seg = strip.getMainSegment();
+    seg.freeze = !seg.freeze;
+    stateUpdated(CALL_MODE_BUTTON);
+  }
+  void act_selectMode(uint8_t) {
+    select_mode_active = !select_mode_active;
+    select_source_pad = 0xFF;
+    USER_PRINTF("[MIDI] select-mode %s\n",
+                select_mode_active ? "ENABLED" : "DISABLED");
+    stateUpdated(CALL_MODE_BUTTON);
   }
 
   // Push a websocket state update if it's been long enough since the
@@ -666,11 +708,11 @@ class MidiUsermod : public Usermod {
   void copyPresetToSlot(int src, int dest) {
     if (src <= 0 || src > 250 || dest <= 0 || dest > 250 || src == dest) return;
     if (getCachedPresetExists(dest)) {
-      DEBUG_PRINTLN(F("[MIDI] copyPresetToSlot: destination already exists, no-op"));
+      USER_PRINTLN(F("[MIDI] copyPresetToSlot: destination already exists, no-op"));
       return;
     }
     if (!requestJSONBufferLock(20)) {
-      DEBUG_PRINTLN(F("[MIDI] copyPresetToSlot: JSON buffer busy"));
+      USER_PRINTLN(F("[MIDI] copyPresetToSlot: JSON buffer busy"));
       return;
     }
     // Allocate our own JsonDocument for the presets.json content (don't
@@ -679,7 +721,7 @@ class MidiUsermod : public Usermod {
     bool ok = readObjectFromFile(PRESETS_FILE, nullptr, &copy_doc);
     if (!ok) {
       releaseJSONBufferLock();
-      DEBUG_PRINTLN(F("[MIDI] copyPresetToSlot: read presets.json failed"));
+      USER_PRINTLN(F("[MIDI] copyPresetToSlot: read presets.json failed"));
       return;
     }
     JsonObject root = copy_doc.as<JsonObject>();
@@ -687,7 +729,7 @@ class MidiUsermod : public Usermod {
     snprintf(src_key, sizeof(src_key), "%d", src);
     if (!root.containsKey(src_key)) {
       releaseJSONBufferLock();
-      DEBUG_PRINTF("[MIDI] copyPresetToSlot: source preset %d not in file\n", src);
+      USER_PRINTF("[MIDI] copyPresetToSlot: source preset %d not in file\n", src);
       return;
     }
     char dest_key[4];
@@ -714,17 +756,15 @@ class MidiUsermod : public Usermod {
     // copy_doc to a String and overwrite the file with it.
     String full_json;
     serializeJson(copy_doc, full_json);
-    // (broken DEBUG_PRINTF removed)full_json.length());
     releaseJSONBufferLock();
     {
       File wf = WLED_FS.open(PRESETS_FILE, "w");
       if (!wf) {
-        DEBUG_PRINTLN(F("[MIDI] copyPresetToSlot: failed to open presets.json for write"));
+        USER_PRINTLN(F("[MIDI] copyPresetToSlot: failed to open presets.json for write"));
         return;
       }
       size_t written = wf.print(full_json);
       wf.close();
-      // (debug print removed to fix literal-newline-in-string bug)
     }
     updateFSInfo();
 
@@ -750,10 +790,8 @@ class MidiUsermod : public Usermod {
     stateUpdated(CALL_MODE_BUTTON_PRESET);
     // Bypass the 1.2s interface-update cooldown so the GUI sees the new
     // preset list immediately.
-    interfaceUpdateCallMode = CALL_MODE_BUTTON_PRESET;
-    lastInterfaceUpdate = 0;
-    updateInterfaces(CALL_MODE_BUTTON_PRESET);
-    DEBUG_PRINTF("[MIDI] copyPresetToSlot: %d -> %d OK\n", src, dest);
+    pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
+    USER_PRINTF("[MIDI] copyPresetToSlot: %d -> %d OK\n", src, dest);
   }
 
  public:
@@ -768,11 +806,11 @@ class MidiUsermod : public Usermod {
     // top-left pad (note 56) maps to preset 1, top-right (note 63) to
     // preset 8, next row down to 9..16, etc., ending with bottom-left
     // (note 0) = preset 57 and bottom-right (note 7) = preset 64.
-    for (int i = 0; i < 64; i++) {
-      uint8_t row_from_bottom = i / 8;       // 0..7
-      uint8_t col            = i % 8;       // 0..7
-      uint8_t row_from_top   = 7 - row_from_bottom;
-      pad_to_preset[i] = (int8_t)(row_from_top * 8 + col + 1);
+    for (int i = 0; i < kNumPads; i++) {
+      uint8_t row_from_bottom = i / kPadsPerRow;       // 0..7
+      uint8_t col            = i % kPadsPerRow;       // 0..7
+      uint8_t row_from_top   = (kPadsPerRow - 1) - row_from_bottom;
+      pad_to_preset[i] = (int8_t)(row_from_top * kPadsPerRow + col + 1);
     }
 
     // Track buttons:
@@ -831,24 +869,24 @@ class MidiUsermod : public Usermod {
     for (int i = 0; i < 8; i++) setAction(scene_button_shift_action[i], "");
 
     // Clear all CC actions.
-    for (int i = 0; i < 128; i++) cc_to_action[i][0] = '\0';
+    for (int i = 0; i < kNumCCs; i++) cc_to_action[i][0] = '\0';
 
-    // Fader 9 (CC 0x38 = 56) -> Global brightness.
-    setAction(cc_to_action[56], "bri");
-    // Faders 1..6 (CC 0x30..0x35 = 48..53) -> Effect parameters:
+    // Fader 9 (CC kCCMasterFader) -> Global brightness.
+    setAction(cc_to_action[kCCMasterFader], "bri");
+    // Faders 1..6 (CC kCCFaderFirst..kCCFaderLast) -> Effect parameters:
     //   1 = speed    (0..255)
     //   2 = intensity (0..255)
     //   3 = custom1  (0..255)
     //   4 = custom2  (0..255)
     //   5 = custom3  (0..31, clamped — FX uses this for fine detail)
     //   6 = palette  (0..127 direct, modulo palette count)
-    setAction(cc_to_action[48], "effectSpeed");
-    setAction(cc_to_action[49], "effectIntensity");
-    setAction(cc_to_action[50], "effectCustom1");
-    setAction(cc_to_action[51], "effectCustom2");
-    setAction(cc_to_action[52], "effectCustom3");
-    setAction(cc_to_action[53], "effectPalette");
-    // Faders 7..8 (CC 0x36..0x37 = 54..55) default unused.
+    setAction(cc_to_action[kCCFaderFirst + 0], "effectSpeed");
+    setAction(cc_to_action[kCCFaderFirst + 1], "effectIntensity");
+    setAction(cc_to_action[kCCFaderFirst + 2], "effectCustom1");
+    setAction(cc_to_action[kCCFaderFirst + 3], "effectCustom2");
+    setAction(cc_to_action[kCCFaderFirst + 4], "effectCustom3");
+    setAction(cc_to_action[kCCFaderFirst + 5], "effectPalette");
+    // Faders 7..8 (CC kCCFader7, kCCFader8) default unused.
 
     // All CCs start "not taken over" — first CC after connect must wait
     // until the fader is near the current WLED value before driving it.
@@ -856,7 +894,7 @@ class MidiUsermod : public Usermod {
   }
 
   void setup() override {
-    DEBUG_PRINTLN(F("[MIDI] usermod_v2_midi loaded"));
+    USER_PRINTLN(F("[MIDI] usermod_v2_midi loaded"));
     initDone = true;
   }
 
@@ -889,8 +927,35 @@ class MidiUsermod : public Usermod {
     prev_currentPlaylist = currentPlaylist;
   }
 
-  void connected() override {
-    // Network reconnect — no-op for MIDI (USB is local).
+  // WLEDMM v3 hooks. Both default to no-op in the base Usermod class;
+  // we override to (a) latch the pre-wipe value of currentPreset
+  // (so tracked_active_preset survives the stateUpdated wipe), and
+  // (b) react to targeted events.
+  void onPreStateChange(uint8_t mode) override {
+    // Latch the current preset before stateUpdated() wipes it to 0.
+    // Without this, onStateChange() (called later in the same
+    // stateUpdated() flow) sees currentPreset == 0 even when we just
+    // applied a preset via applyPreset(). The MIDI usermod's paint
+    // logic relies on tracked_active_preset staying accurate across
+    // the wipe.
+    if (currentPreset != 0) tracked_active_preset = currentPreset;
+  }
+
+  void onEvent(const wled::Event& ev) override {
+    // Targeted events we care about:
+    //   PlaylistEnded: a finite playlist just stopped. Force a repaint
+    //     so the controller reverts the parent's slow-pulse magenta
+    //     and the last child's fast-blink to their idle colors.
+    //   PowerEdge: handled by handlePowerPaint() via its own static
+    //     until Phase 4 fully migrates. We no-op for now.
+    if (ev.type == wled::EventType::PlaylistEnded) {
+      // The new event is fired in addition to the legacy loop() watch
+      // above. The loop() check is still active (and harmless — it
+      // only fires on the rare no-end-preset case), and the event
+      // gives us the more reliable path. Force a repaint now.
+      tracked_active_preset = 0;
+      stateUpdated(CALL_MODE_BUTTON);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -905,49 +970,46 @@ class MidiUsermod : public Usermod {
   // so a controller-initiated change doesn't echo back.
   // ---------------------------------------------------------------------------
   void onStateChange(uint8_t mode) override {
-    // FULL-FEATURE repaint: for each of the 64 pads, light it up based on
-    // whether its preset slot is saved (from preset_saved[] cache — we do
-    // NOT call getPresetName here, it acquires the JSON buffer), and
-    // whether that preset is the currently-active one (green if so,
-    // magenta if a playlist is also running, blue if saved but not active,
-    // off if not saved / unmapped). Also drives the Track 1/2 LEDs and
-    // Scene Launch 8.
-    //
-    // Each color is compared against last_pad_color[] / last_track_led /
-    // last_scene_led and only sent when it actually changed. This cuts
-    // bulk-OUT traffic from 64+ packets per state change to just the
-    // pads that actually need updating.
+    // FULL-FEATURE repaint: paint all 64 RGB pads and all 16 single-
+    // color buttons (Track 1-8 + Scene 1-8). Each color is compared
+    // against the per-LED dedup slot and only sent when it actually
+    // changed — this cuts bulk-OUT traffic from 64+ packets per state
+    // change to just the LEDs that actually need updating.
     if (!enabled || !midi_connected || !feedback_enabled) return;
     if (mode == CALL_MODE_INIT || mode == CALL_MODE_NO_NOTIFY) return;
     uint32_t now = millis();
     // Only suppress feedback echoes for state changes that WE caused
-    // (CALL_MODE_BUTTON_PRESET — the mode our MIDI handler uses). For all
-    // other modes (NOTIFICATION, button, etc. — i.e., changes from the
-    // web UI, IR, schedule, etc.), always repaint the controller so the
-    // pads reflect the new state immediately.
+    // (CALL_MODE_BUTTON_PRESET). For all other modes (NOTIFICATION,
+    // button, etc. — i.e., changes from the web UI, IR, schedule,
+    // etc.), always repaint the controller so the pads reflect the
+    // new state immediately.
     if (mode == CALL_MODE_BUTTON_PRESET &&
         (int32_t)(now - suppress_feedback_until_ms) < 0) return;
-    // The previous feedback_throttle block was removed: it was causing
-    // rapid controller-driven state changes (e.g., a second toggle
-    // press within feedback_throttle_ms) to be silently dropped, leaving
-    // the LED stuck on its old color. The per-LED dedup arrays
-    // (last_pad_color[] / last_pad_status[]) already prevent redundant
-    // sends, so the throttle is not needed for traffic shaping — the
-    // only cost is the cost of computing the new color, which is cheap.
 
-    // WLED's stateUpdated() does `if (stateChanged) currentPreset = 0;`
-    // before calling us (led.cpp:106), and only restores currentPreset for
-    // Path A preset requests (`{pd: ...}`) via presetToRestore in json.cpp.
-    // For Path B (`{ps: N}` — the GUI dropdown), handlePresets sets
-    // currentPreset = N at presets.cpp:210 and then stateUpdated wipes it
-    // back to 0. So when our onStateChange fires for a GUI-driven preset
-    // change, currentPreset is 0 and no pad lights up green.
-    //
-    // Workaround: track the active preset ourselves. We trust currentPreset
-    // whenever it's non-zero (the only way it can be non-zero at this point
-    // is if some path restored it after the reset, e.g. Path A's
-    // presetToRestore). Otherwise we keep our last-known active preset.
-    DEBUG_PRINTF("[MIDI] onStateChange mode=%u currentPreset=%u tracked=%u\n", (unsigned)mode, (unsigned)currentPreset, (unsigned)tracked_active_preset);
+    USER_PRINTF("[MIDI] onStateChange mode=%u currentPreset=%u tracked=%u\n",
+                (unsigned)mode, (unsigned)currentPreset,
+                (unsigned)tracked_active_preset);
+    updateTrackedActivePreset(mode);
+    if (handlePowerPaint()) return;
+    paintPads();
+    paintSingleColorButtons();   // also calls disarmExpiredRebootArm() internally
+  }
+
+  // WLED's stateUpdated() does `if (stateChanged) currentPreset = 0;`
+  // before calling us (led.cpp:106), and only restores currentPreset
+  // for Path A preset requests (`{pd: ...}`) via presetToRestore in
+  // json.cpp. For Path B (`{ps: N}` — the GUI dropdown), handlePresets
+  // sets currentPreset = N at presets.cpp:210 and then stateUpdated
+  // wipes it back to 0. So when our onStateChange fires for a
+  // GUI-driven preset change, currentPreset is 0 and no pad lights
+  // up green.
+  //
+  // Workaround: track the active preset ourselves. We trust
+  // currentPreset whenever it's non-zero (the only way it can be
+  // non-zero at this point is if some path restored it after the
+  // reset, e.g. Path A's presetToRestore). Otherwise we keep our
+  // last-known active preset.
+  void updateTrackedActivePreset(uint8_t mode) {
     if (currentPreset != 0) {
       tracked_active_preset = currentPreset;
     } else if (currentPlaylist > 0) {
@@ -966,178 +1028,106 @@ class MidiUsermod : public Usermod {
     // (else: CALL_MODE_BUTTON_PRESET with currentPreset==0 means
     // our own preset apply just ran; handleIncomingMidi already set
     // tracked_active_preset, so leave it alone.)
+  }
 
-    bool playlist_active = (currentPlaylist > 0);  // matches WLED's own check
-    byte active = tracked_active_preset;          // currently-playing child preset
-    byte playlist_parent = playlist_active ? (byte)currentPlaylist : 0;
-    uint8_t active_color = playlist_active ? 53 : 21;  // magenta if playlist, green otherwise
-
-    // Detect "playlist just stopped" — currentPlaylist went from positive
-    // (>=1) to negative (-1, the value WLED's unloadPlaylist() sets). This
-    // happens when:
-    //   * a non-looping playlist finishes its last entry (playlist.cpp:149),
-    //   * the user changes state via web UI/IR/etc. without selecting a
-    //     preset (json.cpp:297 — `if (!presetId && currentPlaylist>=0)
-    //     unloadPlaylist();`),
-    //   * the user calls `{"playlist":{}}` or similar to clear,
-    //   * the user clicks a different preset (regular or playlist) while
-    //     a playlist is running.
-    //
-    // We deliberately do NOT clear tracked_active_preset here. Reasoning:
-    // when the user clicks a regular preset via MIDI while a playlist is
-    // running, handleIncomingMidi sets tracked_active_preset to the new
-    // slot BEFORE calling applyPreset, and we want that pad to light up
-    // green ("active") in the post-click paint. Clearing it here would
-    // wipe the new active preset.
-    //
-    // Cost: when a non-looping playlist finishes naturally without
-    // playlistEndPreset, the last child pad stays green until the next
-    // state change. Acceptable trade-off for the click-while-playing bug
-    // being fixed — and handlePresets still applies playlistEndPreset if
-    // it's set, which fires its own stateUpdated.
-    static int8_t prev_current_playlist = -2;  // sentinel: uninitialized
-    (void)prev_current_playlist;  // referenced here for clarity
-    prev_current_playlist = currentPlaylist;
-
-    // Track power state across paints so we can detect transitions
-    // (off→on or on→off) and handle the off state specially.
-    static bool prev_power_off = false;  // tracks bri == 0 across paints
+  // Power-state paint. Owns the prev_power_off static so it's
+  // updated on every onStateChange call (the previous split between
+  // handlePowerOffPaint and handlePowerTransitionPaint left the
+  // static stranded in the on-only path, so off→on transitions
+  // were never detected).
+  //
+  // Returns true if power-off is being painted (caller should skip
+  // the normal pad-color logic). Otherwise returns false and
+  // applies any off→on transition paint.
+  bool handlePowerPaint() {
+    static bool prev_power_off = false;
     bool power_off = (bri == 0);
-    bool power_transition = (power_off != prev_power_off);
+    // Always update the static so the off→on transition is reliably
+    // detected next time. (This was the regression: the static
+    // wasn't being updated when handlePowerOffPaint returned early,
+    // so the transition check in handlePowerTransitionPaint always
+    // saw "no change".)
+    bool transition = (power_off != prev_power_off);
     prev_power_off = power_off;
 
     if (power_off) {
-      // POWER OFF pattern: ALL pads off, ALL track buttons off, ALL scene
-      // buttons off EXCEPT scene 8 (the power button itself), which
-      // blinks to indicate the device is in standby.
+      // POWER OFF pattern: ALL pads off, ALL track buttons off, ALL
+      // scene buttons off EXCEPT scene 8 (the power button itself),
+      // which blinks to indicate the device is in standby.
       //
-      // We touch every LED every paint so that any state that may have
-      // drifted (a new pad color from a preset save, a track that wasn't
-      // cleared by wipeAllLeds, etc.) is reliably turned off — and
-      // scene 8 reliably blinks. The dedup arrays are reset on the
-      // power-on transition (see below), so the next paint will re-send
-      // everything that matters.
-      for (int i = 0; i < 64; i++) {
+      // We touch every LED every paint so that any state that may
+      // have drifted (a new pad color from a preset save, a track
+      // that wasn't cleared by wipeAllLeds, etc.) is reliably
+      // turned off — and scene 8 reliably blinks. The dedup
+      // arrays are reset on the off→on transition (below), so the
+      // next paint will re-send everything that matters.
+      for (int i = 0; i < kNumPads; i++) {
         if (last_pad_color[i] != 0 || last_pad_status[i] != 0x96) {
           midi_out_queue(0x96, (uint8_t)i, 0);  // solid off
           last_pad_color[i] = 0;
           last_pad_status[i] = 0x96;
         }
       }
-      for (uint8_t n = 0x64; n <= 0x6B; n++) {  // tracks 1..8
-        uint8_t cur = (n == 0x6B + 1) ? 0 : 0;  // all off
-        // Just send off for every track button. We don't track last
-        // values for tracks here (they're single-color buttons whose
-        // velocity encodes color, not RGB pads), so we rely on the
-        // state_updated chain to also push them when needed.
+      for (uint8_t n = kNoteFirstTrack; n <= kNoteLastTrack; n++) {
+        // Just send off for every track button. We don't track
+        // last values for tracks here (they're single-color
+        // buttons whose velocity encodes color, not RGB pads), so
+        // we rely on the state_updated chain to also push them
+        // when needed.
         midi_out_queue(0x90, n, 0);
       }
-      for (uint8_t n = 0x70; n <= 0x77; n++) {  // scenes 1..8
-        uint8_t v = (n == 0x77) ? 2 : 0;  // scene 8 (0x77) blinks, others off
+      for (uint8_t n = kNoteFirstScene; n <= kNoteLastScene; n++) {
+        uint8_t v = (n == kNoteLastScene) ? 2 : 0;  // scene 8 blinks
         midi_out_queue(0x90, n, v);
       }
-      // Stamp throttle here so repeated stateUpdates (e.g. a long
-      // playlist tick chain) don't queue 80 packets per call. Power-off
-      // is a user action and the controller doesn't need a sub-50ms
-      // re-paint anyway. Critically, we stamp AFTER the power-on path
-      // (below) would have run — so coming back from power-off won't
-      // be throttled by this stamp.
-      last_feedback_ms = now;
-      return;  // skip the normal pad-color logic while off
+      return true;  // signal to caller: skip normal paint
     }
 
-    if (power_transition) {
-      // Just powered on. Reset dedup so the fall-through paint loop
-      // repaints the entire controller fresh. We do NOT call
+    if (transition) {
+      // Just powered on. Reset dedup so the fall-through paint
+      // loop repaints the entire controller fresh. We do NOT call
       // wipeAllLeds() here because wiping takes 80 slots in the
-      // OUT ring buffer, which is redundant: the dedup reset forces
-      // the fall-through to send the correct color for every LED.
-      // The controller ends up at the right state without the wipe.
-      memset(last_pad_color, 0xFF, sizeof(last_pad_color));
-      memset(last_pad_status, 0xFF, sizeof(last_pad_status));
-      last_check1_led = 0xFF;
-      last_check2_led = 0xFF;
-      last_check3_led = 0xFF;
-      last_scene1_led = 0xFF;
-      last_scene5_led = 0xFF;
-      last_scene8_led = 0xFF;
+      // OUT ring buffer; the dedup reset forces the fall-through
+      // to send the correct color for every LED.
+      invalidateAllLedDedup();
       // Explicit scene 8 (power button) so it lands solid green
-      // immediately, in case the fall-through paint loop is delayed
-      // for any reason.
-      midi_out_queue(0x90, 0x77, 21);  // solid green
+      // immediately, in case the fall-through paint loop is
+      // delayed for any reason.
+      midi_out_queue(0x90, kNoteLastScene, 21);  // solid green (scene 8)
       last_scene8_led = 21;
     }
+    return false;
+  }
 
-    // Status-byte colors per the APC protocol:
-    //   0x96 = solid 100%
-    //   0x99 = Pulse 1/4 (slow pulse)
-    //   0x9B = Blink 1/24 (fast blink)
-    //
-    // Pad state precedence (first match wins):
-    //   1. Pad's preset is the playlist parent AND playlist is active →
-    //      SLOW PULSE magenta — "this is the playlist anchor, currently
-    //      playing"
-    //   2. Pad's preset is the currently-playing child of the active
-    //      playlist → FAST BLINK magenta — "this is what's playing right
-    //      now"
-    //   3. Pad's preset is a PLAYLIST (any, active or not) → SOLID magenta
-    //      — "click me to start/manage a playlist" (visual differentiator
-    //      from regular presets, which are blue)
-    //   4. Pad's preset is the currently-active regular preset → SOLID
-    //      green
-    //   5. Pad's preset is saved → SOLID blue
-    //   6. otherwise → off
+  // Paint the 64 RGB pads. The status byte (0x96/0x99/0x9B) drives
+  // the animation: solid, slow pulse, or fast blink. Color is
+  // per-category: yellow for music playlists, red for finite
+  // playlists, magenta for looping playlists, green for the active
+  // regular preset, blue for any other saved preset, off otherwise.
+  void paintPads() {
+    const bool playlist_active = (currentPlaylist > 0);
+    const byte active = tracked_active_preset;
+    const byte playlist_parent = playlist_active ? (byte)currentPlaylist : 0;
 
     AutoPlaylistState aps = queryAutoPlaylist();
-    bool music_playing = aps.musicIsActive;
-    uint8_t music_playlist_preset = aps.musicPlaylist;  // 0 if unset
-    // True when the currently-active WLED playlist IS the configured music
-    // playlist. Used to swap magenta→yellow for the currently-playing child
-    // pad (and the parent pad) so the user sees a unified yellow palette
-    // for the music playlist's full state.
-    bool active_playlist_is_music = (music_playlist_preset > 0
-                                  && (uint8_t)playlist_parent == music_playlist_preset);
-    // Refresh the per-preset playlist repeat cache (used for idle pad
-    // coloring — one-shot cyan vs. looping magenta). Inexpensive when
-    // cached; only re-reads /presets.json when presetsModifiedTime
-    // changes (i.e. after a save).
-    ensurePlaylistRepeatCache();
-    // The currently-active playlist's "finite" status — used to drive
-    // the active parent/child into cyan while playing. For IDLE
-    // playlists, we use cached_playlist_repeat[preset] directly in
-    // the pad branch below, so each pad colors itself based on its
-    // OWN playlist's repeat count (not the currently-active one).
-    //
-    // Convention: playlistRepeat <= 0 (or 0 after deserialisation)
-    // means infinite loop; playlistRepeat > 0 means finite (will stop
-    // after N+1 passes per WLED's +1 on load). So "finite / non-
-    // looping" = "any positive value".
-    bool active_playlist_is_finite = (playlist_active && playlistRepeat > 0);
+    const uint8_t music_playlist_preset = aps.musicPlaylist;  // 0 if unset
+    // Per-preset playlist repeat is read directly from the WLED
+    // core's preset cache (presetCache[].repeat, populated in
+    // buildPresetCache). No usermod-side cache needed anymore —
+    // getPresetRepeat() is O(1) and always reads the latest value.
 
-    // Pad paint: one helper, table-style precedence.
-    //
-    // The previous version was a 14-branch if-else chain that
-    // repeated the same `is_music_playlist_pad` / `isPlaylist` /
-    // `cached_playlist_repeat[preset] > 0` checks in every branch.
-    // That redundancy is what made the finite-vs-looping logic so
-    // easy to get wrong (a saved finite playlist could fall through
-    // to the looping branch whenever another playlist was active).
-    //
-    // The refactor computes the categorisation once per pad, then
-    // picks (color, status) by precedence:
+    // Pad state precedence (first match wins):
     //   1. Unmapped pad               → off
     //   2. Music playlist pad         → yellow (13) in all states
-    //   3. Finite playlist pad        → red (5) in all states
-    //   4. Looping playlist pad      → magenta (53) in all states
-    //   5. Active regular preset       → green (21) solid
-    //   6. Saved regular preset        → blue (45) solid
+    //   3. Finite playlist pad        → red (32) in all states
+    //   4. Looping playlist pad       → magenta (53) in all states
+    //   5. Active regular preset      → green (21) solid
+    //   6. Saved regular preset       → blue (45) solid
     //   7. Mapped but not saved       → off
     //
     // Within a category, the animation byte (0x96/0x99/0x9B)
-    // distinguishes solid / parent-playing-slow-pulse / child-playing-
-    // fast-blink, so the same color is reused across the 3 playlist
-    // states — matching the autoplaylist (yellow) and infinite-
-    // playlist (magenta) pattern the user requested.
+    // distinguishes solid / parent-playing-slow-pulse /
+    // child-playing-fast-blink.
     auto paint_pad = [&](int8_t preset) -> std::pair<uint8_t, uint8_t> {
       if (preset <= 0) return {0, 0x96};
 
@@ -1156,11 +1146,10 @@ class MidiUsermod : public Usermod {
         return {13, 0x96};
       }
 
-      // Playlist parent: a saved playlist preset that's currently
-      // playing.
+      // Playlist parent: a saved playlist preset that's currently playing.
       if (is_playlist && playlist_active
           && (uint8_t)preset == playlist_parent) {
-        const bool finite = (cached_playlist_repeat[preset] > 0);
+        const bool finite = (getPresetRepeat(preset) > 0);
         return {finite ? uint8_t(32) : uint8_t(53), 0x99};
       }
 
@@ -1169,28 +1158,22 @@ class MidiUsermod : public Usermod {
       // playlist preset (it's a regular preset in the playlist's
       // child list), so this check deliberately does NOT require
       // `is_playlist`. Pick the parent's color category so the child
-      // blends with the parent (yellow for music, 32 for finite,
-      // magenta for looping) — matching the "same color, different
-      // animation" pattern across the 3 states of any given
-      // playlist type.
+      // blends with the parent.
       if (playlist_active && (uint8_t)preset == active
           && (uint8_t)preset != playlist_parent) {
-        // Music playlist parent → yellow child
         if (music_playlist_preset > 0
             && playlist_parent == music_playlist_preset) {
           return {13, 0x9B};
         }
-        // Finite/looping parent — read repeat from the parent slot
-        // since the child itself usually isn't a playlist preset.
         const bool parent_finite = (playlist_parent > 0
                                   && playlist_parent <= 250
-                                  && cached_playlist_repeat[playlist_parent] > 0);
+                                  && getPresetRepeat(playlist_parent) > 0);
         return {parent_finite ? uint8_t(32) : uint8_t(53), 0x9B};
       }
 
       // Playlist idle: a saved playlist that's NOT currently playing.
       if (is_playlist) {
-        const bool finite = (cached_playlist_repeat[preset] > 0);
+        const bool finite = (getPresetRepeat(preset) > 0);
         return {finite ? uint8_t(32) : uint8_t(53), 0x96};
       }
 
@@ -1200,48 +1183,43 @@ class MidiUsermod : public Usermod {
       return {0, 0x96};
     };
 
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < kNumPads; i++) {
       const int8_t preset = pad_to_preset[i];
       const auto [color, status] = paint_pad(preset);
-      // A switch from solid to pulse (e.g., when a playlist starts and
-      // the parent should pulse) needs to be sent even if the color
-      // didn't change.
+      // A switch from solid to pulse (e.g., when a playlist starts
+      // and the parent should pulse) needs to be sent even if the
+      // color didn't change.
       if (color != last_pad_color[i] || status != last_pad_status[i]) {
         midi_out_queue(status, (uint8_t)i, color);
         last_pad_color[i] = color;
         last_pad_status[i] = status;
       }
     }
+  }
 
-    // Track button LEDs (single-color, status 0x90). LED feedback is
-    // derived from each button's *assigned action*, not its physical
-    // position — so if the user re-assigns Track 5 to toggleMirrorX
-    // (or any other action), the LED automatically reflects that new
-    // action's state instead of the prev-FX red indicator.
-    //
-    // Action → LED mapping:
-    //   toggleCheck1/2/3           → green/yellow/red if corresponding
-    //                                Segment::checkN is set
-    //   toggleMirrorX/ReverseX,
-    //   toggleMirrorY/ReverseY,
-    //   toggleTranspose,
-    //   toggleFreeze               → green if corresponding flag set
-    //   power                       → green if bri > 0, blink if off
-    //   selectMode                  → blink while select_mode_active
-    //   fullRepaint                 → red (and blinks while
-    //                                reboot_armed — but only on the
-    //                                button that triggers shift+ reboot
-    //                                arming, see Track 4 below)
-    //   nextfx/prevfx/nextpal/
-    //   prevpal/nextpreset/
-    //   prevpreset                  → red if no playlist active, off
-    //                                while a playlist is driving the
-    //                                show (these are navigation, not
-    //                                segment flags)
-    //   full/blackout/nightlight,
-    //   "" (unassigned),
-    //   anything else                → off
+  // Paint all 16 single-color buttons (Track 1-8 + Scene 1-8). The
+  // LED feedback is derived from each button's *assigned action*, not
+  // its physical position — so if the user re-assigns Track 5 to
+  // toggleMirrorX (or any other action), the LED automatically
+  // reflects that new action's state.
+  //
+  // APC Mini MK2 single-LED protocol: status 0x90 only. Velocity
+  // determines behavior:
+  //   0x00 = off
+  //   0x02 = blink (built-in blink rate; color fixed by APC)
+  //   0x01 / 0x03..0x7F = solid on (color by velocity table)
+  // The 0x96/0x99/0x9B status bytes are silently dropped, so the
+  // only way to get a non-solid indicator is velocity 0x02.
+  void paintSingleColorButtons() {
+    const bool playlist_active = (currentPlaylist > 0);
     Segment& seg_for_leds = strip.getMainSegment();
+
+    // Action → LED color mapping. Per-action state comes from
+    // Segment::checkN (per-effect toggles), Segment::mirror/reverse/
+    // transpose/freeze (segment transforms), `bri` (power), or
+    // `playlist_active` (navigation actions darken during a playlist).
+    // The selectMode/fullRepaint blink overrides are applied per-button
+    // in paintSingleColorButton() below.
     auto action_led = [&](const char* action) -> uint8_t {
       if (!action || !action[0]) return 0;
       if (!strcmp(action, "toggleCheck1"))    return seg_for_leds.check1 ? 21 : 0;
@@ -1254,113 +1232,81 @@ class MidiUsermod : public Usermod {
       if (!strcmp(action, "toggleTranspose")) return seg_for_leds.transpose ? 21 : 0;
       if (!strcmp(action, "toggleFreeze"))    return seg_for_leds.freeze    ? 21 : 0;
       if (!strcmp(action, "power"))           return (bri > 0) ? 21 : 0;
-      // rebootArm button: red normally, blink when armed (handled below
-      // by the override). The "selectMode" button blinks when armed too;
-      // the override is per-button below.
       if (!strcmp(action, "rebootArm"))       return 5;
-      // Navigation actions: red when enabled, off during a playlist.
       if (!strcmp(action, "nextfx") || !strcmp(action, "prevfx") ||
           !strcmp(action, "nextpal") || !strcmp(action, "prevpal") ||
           !strcmp(action, "nextpreset") || !strcmp(action, "prevpreset")) {
         return playlist_active ? 0 : 5;
       }
-      // selectMode, fullRepaint, etc. handled as "off" here; their
-      // LEDs are painted by the per-button lambda below (so they can
-      // use special blink/sent status-byte behavior).
       return 0;
     };
-    // For each track button, look up its assigned action's LED. The
-    // rebootArm blink override (status byte 0x99) is applied separately
-    // below.
-    auto paint_track_led = [&](uint8_t idx, uint8_t& dedup,
-                               const char* plain_act,
-                               const char* shift_act) {
-      // Shift overrides plain when shift is held. We need to check
-      // both because the user might have assigned rebootArm to
-      // either the plain or the shift action of this button.
+
+    // Per-button painter. Two blink overrides:
+    //   * `reboot_armed` while this button's action is rebootArm or
+    //     fullRepaint → blink (the "press again to confirm" prompt).
+    //   * `select_mode_active` while this button's action is selectMode
+    //     → blink (the "press two pads to copy" prompt).
+    auto paintSingleColorButton = [&](uint8_t idx, uint8_t& dedup,
+                                      uint8_t note_base,
+                                      const char* plain_act,
+                                      const char* shift_act) {
       const char* act = (shift_act && shift_act[0]) ? shift_act : plain_act;
-      // Track buttons are single-color LEDs on the APC Mini MK2. The
-      // ONLY supported status is 0x90 (plain NoteOn); velocity
-      // determines behavior: 0x00 = off, 0x02 = blink (the single
-      // built-in blink rate), 0x01 / 0x03..0x7F = solid on (color
-      // by velocity table). The 0x96 / 0x99 / 0x9B status bytes
-      // are silently dropped on the user's firmware, so the only
-      // way to get a non-solid indicator is velocity 0x02 (blink).
-      // The blink rate is fixed; the blink color is also fixed
-      // (APC's per-button blink palette), so we just send 0x02 to
-      // indicate "this is a blinking state" regardless of what the
-      // desired color would have been.
-      bool armed = (reboot_armed &&
-                    (!strcmp(act, "rebootArm") ||
-                     !strcmp(act, "fullRepaint")));
+      const bool armed = (reboot_armed &&
+                          (!strcmp(act, "rebootArm") ||
+                           !strcmp(act, "fullRepaint")))
+                      || (select_mode_active &&
+                          !strcmp(act, "selectMode"));
       uint8_t led = armed ? 0x02 : action_led(act);
       if (led != dedup) {
-        // Always 0x90 status; velocity carries the meaning.
-        midi_out_queue(0x90, (uint8_t)(0x64 + idx), led);
+        midi_out_queue(0x90, (uint8_t)(note_base + idx), led);
         dedup = led;
       }
     };
-    paint_track_led(0, last_check1_led, track_button_action[0], track_button_shift_action[0]);
-    paint_track_led(1, last_check2_led, track_button_action[1], track_button_shift_action[1]);
-    paint_track_led(2, last_check3_led, track_button_action[2], track_button_shift_action[2]);
-    paint_track_led(3, last_track4_led, track_button_action[3], track_button_shift_action[3]);
-    paint_track_led(4, last_track5_led, track_button_action[4], track_button_shift_action[4]);
-    paint_track_led(5, last_track6_led, track_button_action[5], track_button_shift_action[5]);
-    paint_track_led(6, last_track7_led, track_button_action[6], track_button_shift_action[6]);
-    paint_track_led(7, last_track8_led, track_button_action[7], track_button_shift_action[7]);
 
-    // Disarm the reboot arm state if it has timed out (no second press
-    // arrived within REBOOT_ARM_TIMEOUT_MS).
-    if (reboot_armed && (millis() - reboot_armed_ms) > REBOOT_ARM_TIMEOUT_MS) {
-      reboot_armed = false;
-      // Force a re-paint on the next iteration (fall through).
+    // Track buttons 1..8 (notes kNoteFirstTrack..+7). Tracks 1..3 use
+    // last_checkN_led as the dedup slot; tracks 4..8 use
+    // last_trackN_led. Mirrors the member-field naming.
+    uint8_t* const track_dedup[kNumTracks] = {
+      &last_check1_led, &last_check2_led, &last_check3_led,
+      &last_track4_led, &last_track5_led, &last_track6_led,
+      &last_track7_led, &last_track8_led,
+    };
+    for (uint8_t i = 0; i < kNumTracks; i++) {
+      paintSingleColorButton(i, *track_dedup[i], kNoteFirstTrack,
+                             track_button_action[i],
+                             track_button_shift_action[i]);
     }
 
-    // Scene launches 1..8 — LED feedback is driven by each button's
-    // *assigned action* (same action_led() helper used above). So
-    // swapping a button's action automatically updates its LED.
-    //
-    // The "selectMode" action gets a blink (velocity 2) override while
-    // select_mode_active is true — eye-catching "armed" indicator.
-    // This applies to whichever scene button the user has assigned
-    // selectMode to (not hardcoded to Scene 7).
-    auto paint_scene_led = [&](uint8_t idx, uint8_t& dedup) {
-      const char* plain_act = scene_button_action[idx];
-      const char* shift_act = scene_button_shift_action[idx];
-      const char* act = (shift_act && shift_act[0]) ? shift_act : plain_act;
-      // Scene buttons are single-color LEDs, same as track buttons
-      // (0x90 only; 0x96/0x99/0x9B silently dropped on the user's
-      // firmware). Velocity 0x02 is the only way to get a blinking
-      // indicator — the blink color is fixed by the APC palette.
-      const bool select_armed = (select_mode_active &&
-                                 !strcmp(act, "selectMode"));
-      const bool reboot_armed_here = (reboot_armed &&
-                                     (!strcmp(act, "rebootArm") ||
-                                      !strcmp(act, "fullRepaint")));
-      uint8_t led;
-      if (select_armed || reboot_armed_here) {
-        led = 0x02;  // blink sentinel (single-LED built-in blink rate)
-      } else {
-        led = action_led(act);
-      }
-      if (led != dedup) {
-        midi_out_queue(0x90, (uint8_t)(0x70 + idx), led);
-        dedup = led;
-      }
+    // Disarm the reboot arm state if it has timed out BEFORE painting
+    // scene buttons — scene buttons often hold the rebootArm action,
+    // and we want them to see the disarmed state in this same paint.
+    // (Track buttons keep their pre-disarm state for this paint; the
+    // next paint will reflect the new value. Matches the original
+    // onStateChange ordering where the disarm sat between the two
+    // button loops.)
+    disarmExpiredRebootArm();
+
+    // Scene launches 1..8 (notes kNoteFirstScene..+7). Same
+    // paintSingleColorButton() helper.
+    uint8_t* const scene_dedup[kNumScenes] = {
+      &last_scene1_led, &last_scene2_led, &last_scene3_led, &last_scene4_led,
+      &last_scene5_led, &last_scene6_led, &last_scene7_led, &last_scene8_led,
     };
-    paint_scene_led(0, last_scene1_led);
-    paint_scene_led(1, last_scene2_led);
-    paint_scene_led(2, last_scene3_led);
-    paint_scene_led(3, last_scene4_led);
-    paint_scene_led(4, last_scene5_led);
-    paint_scene_led(5, last_scene5_led);  // scene 6 unused — share dedup; harmless
-    paint_scene_led(6, last_scene7_led);
-    paint_scene_led(7, last_scene8_led);
+    for (uint8_t i = 0; i < kNumScenes; i++) {
+      paintSingleColorButton(i, *scene_dedup[i], kNoteFirstScene,
+                             scene_button_action[i],
+                             scene_button_shift_action[i]);
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // Public hooks called from wled.cpp's app_queue drain
-  // ---------------------------------------------------------------------------
+  // Disarm the reboot arm state if the second press didn't arrive
+  // within REBOOT_ARM_TIMEOUT_MS. The fall-through paint loop will
+  // then re-render the affected button to its non-armed color.
+  void disarmExpiredRebootArm() {
+    if (reboot_armed && (millis() - reboot_armed_ms) > REBOOT_ARM_TIMEOUT_MS) {
+      reboot_armed = false;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Public hooks called from wled.cpp's app_queue drain
@@ -1374,11 +1320,11 @@ class MidiUsermod : public Usermod {
     // Per-packet trace — gated by WLED_DEBUG so the log isn't spammed while
     // you're just running. Lets you confirm "USB Host delivered to usermod"
     // end-to-end.
-    DEBUG_PRINTF("[MIDI] usermod IN: status=0x%02X d1=%u d2=%u\n", status, d1, d2);
+    USER_PRINTF("[MIDI] usermod IN: status=0x%02X d1=%u d2=%u\n", status, d1, d2);
 
     if (status == 0x90) {                // NoteOn
       if (d2 == 0) {                     // velocity 0 = NoteOff
-        if (d1 == 0x7A) {
+        if (d1 == kNoteShift) {
           shift_held = false;
           // Track 9 (shift) has no LED per the APC Mini MK2 docs, so no
           // visual feedback to clear. Just update internal state.
@@ -1395,14 +1341,14 @@ class MidiUsermod : public Usermod {
         }
         return;
       }
-      if (d1 == 0x7A) {                  // Shift button (Track 9, note 122)
+      if (d1 == kNoteShift) {            // Shift button (Track 9)
         shift_held = true;
         // Track 9 (shift) has no LED per the APC Mini MK2 docs, so no
         // visual feedback to send. Just update internal state; the
         // shift modifier is applied to subsequent track/scene presses.
         return;
       }
-      if (d1 < 64) {                     // Pad 0..63
+      if (d1 < kNumPads) {               // Pad 0..63
         int8_t preset = pad_to_preset[d1];
         if (preset <= 0) {
           // Unmapped pad (pad_to_preset[d1] <= 0 — either no preset
@@ -1412,7 +1358,6 @@ class MidiUsermod : public Usermod {
           // a running playlist without having to navigate to a known
           // preset slot.
           if (currentPlaylist >= 0) {
-            // (broken DEBUG_PRINTF removed)d1, (int)currentPlaylist);
             unloadPlaylist();
             tracked_active_preset = 0;
             stateUpdated(CALL_MODE_BUTTON_PRESET);
@@ -1426,18 +1371,18 @@ class MidiUsermod : public Usermod {
           if (select_source_pad == 0xFF) {
             // First pad = source.
             select_source_pad = (uint8_t)d1;
-            DEBUG_PRINTF("[MIDI] select-mode source = pad %u (preset %d)\n",
+            USER_PRINTF("[MIDI] select-mode source = pad %u (preset %d)\n",
                          (unsigned)d1, (int)preset);
           } else if ((uint8_t)d1 != select_source_pad) {
             // Second pad = destination. Copy preset if destination is empty.
             if (!copy_enabled) {
-              DEBUG_PRINTLN(F("[MIDI] select-mode copy ignored — copy_enabled is false"));
+              USER_PRINTLN(F("[MIDI] select-mode copy ignored — copy_enabled is false"));
             } else {
               int8_t dest_preset = pad_to_preset[d1];
               if (dest_preset > 0 && !getCachedPresetExists(dest_preset)) {
                 copyPresetToSlot(pad_to_preset[select_source_pad], dest_preset);
               } else {
-                DEBUG_PRINTLN(F("[MIDI] select-mode copy: destination occupied or invalid, no-op"));
+                USER_PRINTLN(F("[MIDI] select-mode copy: destination occupied or invalid, no-op"));
               }
             }
             // Auto-exit select mode after the second pad.
@@ -1452,7 +1397,6 @@ class MidiUsermod : public Usermod {
           // AND the preset slot is already occupied. Saving stays on the
           // current preset; deleting fires a state change so the pad clears.
           if (delete_enabled && getCachedPresetExists(preset)) {
-            // (broken DEBUG_PRINTF removed)d1, (int)preset);
             deletePreset((uint8_t)preset);
             tracked_active_preset = 0;  // no preset active after delete (unless GUI restores)
             stateUpdated(CALL_MODE_BUTTON_PRESET);
@@ -1462,35 +1406,16 @@ class MidiUsermod : public Usermod {
             // change (add/delete/copy) doesn't trip that path, so we set
             // it directly here. We also bypass the 1.2s cooldown by
             // clearing lastInterfaceUpdate so the WS push fires right away.
-            interfaceUpdateCallMode = CALL_MODE_BUTTON_PRESET;
-            lastInterfaceUpdate = 0;
-            updateInterfaces(CALL_MODE_BUTTON_PRESET);
+            pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
           } else {
-            // Default: save current state to this preset slot.
+            // Default: save current state to this preset slot. The preset
+            // number in the name uses the MAPPED slot (e.g., preset 1) not
+            // the raw MIDI note, so the label matches what the user sees
+            // in the WLED UI.
             char name[40];
-            // Build the preset name from the current effect's name, with
-            // unicode/special chars stripped via WLED's strip_unicode(),
-            // then append " (Pad X)" where X is the MAPPED preset number
-            // (not the raw MIDI note). The APC Mini MK2 sends notes 0..63
-            // with note 0 = bottom-left, note 56 = top-left. Our pad layout
-            // row-flips that (bottom-left → preset 57, top-left → preset 1),
-            // so for an unmapped layout d1 (note) and `preset` (mapped slot)
-            // differ. We want the label to match the preset slot the user
-            // will see in the WLED UI, so use `preset` here. FX names in
-            // WLED often have a "@" suffix with secondary metadata
-            // ("Akemi PPA @Speed,Intensi"), so trim everything from the
-            // first "@" onwards to keep the base name clean.
-            const char* fx_name = strip.getModeData(strip.getMainSegment().mode);
-            String fx_clean = strip_unicode(String(fx_name ? fx_name : ""));
-            int at_pos = fx_clean.indexOf('@');
-            if (at_pos >= 0) fx_clean = fx_clean.substring(0, at_pos);
-            // Trim trailing whitespace introduced by the cut.
-            while (fx_clean.length() > 0 && isspace((unsigned char)fx_clean[fx_clean.length()-1])) {
-              fx_clean.remove(fx_clean.length()-1);
-            }
-            snprintf(name, sizeof(name), "%.*s (Pad %d)",
-                     (int)(sizeof(name) - 16),  // leave room for " (Pad XX)"
-                     fx_clean.c_str(), (int)preset);
+            char suffix[16];
+            snprintf(suffix, sizeof(suffix), " (Pad %d)", (int)preset);
+            buildPresetSaveName(name, sizeof(name), suffix);
             savePreset((uint8_t)preset, name);
             // doSaveState() automatically updates presetCache[index].exists,
             // so onStateChange's getCachedPresetExists() check will now show
@@ -1499,9 +1424,7 @@ class MidiUsermod : public Usermod {
             stateUpdated(CALL_MODE_BUTTON_PRESET);
             // Same — set the interface update flag directly and bypass
             // the cooldown so the GUI sees the new preset list right away.
-            interfaceUpdateCallMode = CALL_MODE_BUTTON_PRESET;
-            lastInterfaceUpdate = 0;
-            updateInterfaces(CALL_MODE_BUTTON_PRESET);
+            pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
           }
           // Suppress feedback echo briefly so the pad-light feedback doesn't
           // immediately re-fire.
@@ -1514,18 +1437,32 @@ class MidiUsermod : public Usermod {
           tracked_active_preset = (uint8_t)preset;  // survives currentPreset=0 wipes from stateUpdated
           applyPreset((uint8_t)preset, CALL_MODE_BUTTON_PRESET);
           handlePresets();
-          suppress_feedback_until_ms = millis() + 5;
+          // applyPreset already calls stateUpdated internally, which
+          // fires our onStateChange and fills the OUT queue with the
+          // correct pad paint (including the playlist child fast-blink
+          // for a playlist preset). We just need to drain the queue
+          // immediately rather than waiting ~1s for the main loop's
+          // midi_usb_poll() to run — which is held up by the playlist
+          // engine's JSON lock while it reads /presets.json.
+          //
+          // Earlier versions of this code also called stateUpdated
+          // here to "force" a paint, but that races the natural one
+          // from applyPreset and overwrites the correct child-blink
+          // paint with a wrong "regular preset" paint. Forcing the
+          // drain alone gives instant feedback without the race.
+          midi_usb_poll();
         }
         return;
       }
-      if (d1 >= 0x64 && d1 < 0x6C) {     // Track buttons 100..107
+      if (d1 >= kNoteFirstTrack && d1 < kNoteFirstTrack + kNumTracks) {     // Track buttons 100..107
         // Plain press runs track_button_action[N]; shift+press runs
         // track_button_shift_action[N] (if non-empty; otherwise no-op).
         // Every verb goes through runAction so the action vocabulary
         // is the single source of truth.
-        const char* act = shift_held && track_button_shift_action[d1 - 0x64][0]
-                              ? track_button_shift_action[d1 - 0x64]
-                              : track_button_action[d1 - 0x64];
+        const uint8_t ti = d1 - kNoteFirstTrack;
+        const char* act = shift_held && track_button_shift_action[ti][0]
+                              ? track_button_shift_action[ti]
+                              : track_button_action[ti];
         // Any non-reboot Track press also cancels an in-progress
         // reboot arm — accidental press shouldn't leave it stuck.
         // We skip the cancel for the reboot button itself; if the user
@@ -1539,12 +1476,13 @@ class MidiUsermod : public Usermod {
         runAction(act);
         return;
       }
-      if (d1 >= 0x70 && d1 < 0x78) {     // Scene launches 112..119
+      if (d1 >= kNoteFirstScene && d1 < kNoteFirstScene + kNumScenes) {     // Scene launches 112..119
         // Plain press runs scene_button_action[N]; shift+press runs
         // scene_button_shift_action[N] (if non-empty; otherwise no-op).
-        const char* act = shift_held && scene_button_shift_action[d1 - 0x70][0]
-                              ? scene_button_shift_action[d1 - 0x70]
-                              : scene_button_action[d1 - 0x70];
+        const uint8_t si = d1 - kNoteFirstScene;
+        const char* act = shift_held && scene_button_shift_action[si][0]
+                              ? scene_button_shift_action[si]
+                              : scene_button_action[si];
         // Any non-shift Scene press also cancels an in-progress reboot
         // arm — accidental press shouldn't leave it stuck.
         if (reboot_armed) reboot_armed = false;
@@ -1555,25 +1493,16 @@ class MidiUsermod : public Usermod {
     }
 
     if (status == 0x80) {                // NoteOff
-      if (d1 == 0x7A) shift_held = false;
+      if (d1 == kNoteShift) shift_held = false;
       return;
     }
 
     if (status == 0xB0) {                // Control Change
       if (save_preset_cc != 0 && d1 == save_preset_cc && d2 >= 1 && d2 <= 16) {
         char name[40];
-        // Same naming convention as shift+pad: FX name (trimmed at '@')
-        // + " (CC X)".
-        const char* fx_name = strip.getModeData(strip.getMainSegment().mode);
-        String fx_clean = strip_unicode(String(fx_name ? fx_name : ""));
-        int at_pos = fx_clean.indexOf('@');
-        if (at_pos >= 0) fx_clean = fx_clean.substring(0, at_pos);
-        while (fx_clean.length() > 0 && isspace((unsigned char)fx_clean[fx_clean.length()-1])) {
-          fx_clean.remove(fx_clean.length()-1);
-        }
-        snprintf(name, sizeof(name), "%.*s (CC %d)",
-                 (int)(sizeof(name) - 12),  // leave room for " (CC XX)"
-                 fx_clean.c_str(), (int)save_preset_cc);
+        char suffix[16];
+        snprintf(suffix, sizeof(suffix), " (CC %d)", (int)save_preset_cc);
+        buildPresetSaveName(name, sizeof(name), suffix);
         savePreset(d2, name);
         // doSaveState() already updated presetCache[index].exists; the next
         // onStateChange will see the new state via getCachedPresetExists().
@@ -1581,9 +1510,7 @@ class MidiUsermod : public Usermod {
         // Force websocket refresh (preset-list change doesn't trip the
         // state-changed path inside stateUpdated()), and bypass the 1.2s
         // cooldown so the GUI sees the new preset list right away.
-        interfaceUpdateCallMode = CALL_MODE_BUTTON_PRESET;
-        lastInterfaceUpdate = 0;
-        updateInterfaces(CALL_MODE_BUTTON_PRESET);
+        pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
         suppress_feedback_until_ms = millis() + 5;
         return;
       }
@@ -1593,7 +1520,7 @@ class MidiUsermod : public Usermod {
       // value that would map to the current parameter. The first time the
       // fader crosses the current value (with wiggle) we mark it taken
       // over and start driving the parameter.
-      if (soft_takeover_enabled && d1 < 128 && !cc_taken_over[d1]) {
+      if (soft_takeover_enabled && d1 < kNumCCs && !cc_taken_over[d1]) {
         const char* act = cc_to_action[d1];
         if (act[0] != '\0') {
           int current_value = -1;
@@ -1613,7 +1540,9 @@ class MidiUsermod : public Usermod {
             int delta = (int)d2 - expected_cc;
             if (delta < 0) delta = -delta;
             if (delta > SOFT_TAKEOVER_WIGGLE) {
-              USER_PRINTF("broken DEBUG_PRINTF removed)\n", (unsigned)d1, (unsigned)d2, expected_cc, SOFT_TAKEOVER_WIGGLE);
+              USER_PRINTF("[MIDI] CC %u dropped (val=%u, expected~%u, wiggle=%u)\n",
+                           (unsigned)d1, (unsigned)d2, (unsigned)expected_cc,
+                           (unsigned)SOFT_TAKEOVER_WIGGLE);
               return;  // drop packet; fader hasn't reached the value yet
             }
             // Within wiggle — take over and apply below.
@@ -1665,24 +1594,19 @@ class MidiUsermod : public Usermod {
     if (preset != 0) tracked_active_preset = preset;
   }
 
-  // Music playlist helper — light the music playlist pad in yellow (instead
-// of the default magenta) so the user can find it at a glance. Pulls
-// state from the AutoPlaylist usermod (if compiled in and registered),
-// with a fallback to the local music_playlist_id config field.
-
-// Wipe every LED on the controller — all 64 RGB pads (NoteOn velocity
-// 0 = off) and all 16 single-color buttons (Track 1-8 + Scene 1-8).
-// Used right before ESP.restart() so the user sees the device go dark
-// rather than freeze mid-state.
-void wipeAllLeds() {
+  // Wipe every LED on the controller — all 64 RGB pads (NoteOn velocity
+  // 0 = off) and all 16 single-color buttons (Track 1-8 + Scene 1-8).
+  // Used right before ESP.restart() so the user sees the device go dark
+  // rather than freeze mid-state.
+  void wipeAllLeds() {
     // All 64 pads off
-    for (uint8_t i = 0; i < 64; i++) {
+    for (uint8_t i = 0; i < kNumPads; i++) {
       midi_out_queue(0x96, i, 0);
     }
     // Track 1-8 (notes 100..107) off
-    for (uint8_t n = 0x64; n <= 0x6B; n++) midi_out_queue(0x90, n, 0);
+    for (uint8_t n = kNoteFirstTrack; n <= kNoteLastTrack; n++) midi_out_queue(0x90, n, 0);
     // Scene 1-8 (notes 112..119) off
-    for (uint8_t n = 0x70; n <= 0x77; n++) midi_out_queue(0x90, n, 0);
+    for (uint8_t n = kNoteFirstScene; n <= kNoteLastScene; n++) midi_out_queue(0x90, n, 0);
   }
 
   // Called by the USB Host client 500ms after device connect to do a
@@ -1709,7 +1633,6 @@ void wipeAllLeds() {
     // no longer exposed in the settings UI.
     top[FPSTR(_key_enabled)]               = enabled;
     top[FPSTR(_key_feedback_enabled)]      = feedback_enabled;
-    top[FPSTR(_key_feedback_throttle_ms)]  = feedback_throttle_ms;
     top["copy_enabled"]                    = copy_enabled;
     top["delete_enabled"]                  = delete_enabled;
     top["reboot_enabled"]                  = reboot_enabled;
@@ -1747,7 +1670,6 @@ void wipeAllLeds() {
 
     configComplete &= getJsonValue(top[FPSTR(_key_enabled)],              enabled, true);
     configComplete &= getJsonValue(top[FPSTR(_key_feedback_enabled)],     feedback_enabled, true);
-    configComplete &= getJsonValue(top[FPSTR(_key_feedback_throttle_ms)], feedback_throttle_ms, (uint16_t)50);
     configComplete &= getJsonValue(top["copy_enabled"],                   copy_enabled, true);
     configComplete &= getJsonValue(top["delete_enabled"],                 delete_enabled, true);
     configComplete &= getJsonValue(top["reboot_enabled"],                 reboot_enabled, true);
@@ -1845,19 +1767,8 @@ void wipeAllLeds() {
       oappend(SET_F("addOption(__s,'(unassigned)','');"));
       // All available action verbs, with the ones that are defaults
       // for this button+shift combination marked "(default)".
-      // The verb list mirrors the action vocabulary in runAction().
-      static const char* verbs[] = {
-        "power", "blackout", "full", "nightlight",
-        "nextfx", "prevfx", "nextpal", "prevpal",
-        "nextpreset", "prevpreset",
-        "toggleCheck1", "toggleCheck2", "toggleCheck3",
-        "toggleMirrorX", "toggleReverseX",
-        "toggleMirrorY", "toggleReverseY",
-        "toggleTranspose", "toggleFreeze",
-        "fullRepaint", "rebootArm", "selectMode",
-      };
-      static const uint8_t nverbs = sizeof(verbs) / sizeof(verbs[0]);
-      for (uint8_t v = 0; v < nverbs; v++) {
+      // The verb list is the same kGUIVerbs that runAction() dispatches.
+      for (uint8_t v = 0; v < kNumGUIVerbs; v++) {
         // Mark defaults so the user can see what's pre-assigned.
         const char* suffix = "";
         bool is_default = false;
@@ -1865,41 +1776,41 @@ void wipeAllLeds() {
         const bool is_scene = (group && !strcmp(group, "scene_buttons"));
         if (!shift && is_track) {
           // Plain defaults for TRACK buttons only.
-          if (idx == 0 && !strcmp(verbs[v], "toggleCheck1")) is_default = true;
-          if (idx == 1 && !strcmp(verbs[v], "toggleCheck2")) is_default = true;
-          if (idx == 2 && !strcmp(verbs[v], "toggleCheck3")) is_default = true;
-          if (idx == 3 && !strcmp(verbs[v], "fullRepaint")) is_default = true;
-          if (idx == 4 && !strcmp(verbs[v], "prevfx")) is_default = true;
-          if (idx == 5 && !strcmp(verbs[v], "nextfx")) is_default = true;
-          if (idx == 6 && !strcmp(verbs[v], "prevpreset")) is_default = true;
-          if (idx == 7 && !strcmp(verbs[v], "nextpreset")) is_default = true;
+          if (idx == 0 && !strcmp(kGUIVerbs[v], "toggleCheck1")) is_default = true;
+          if (idx == 1 && !strcmp(kGUIVerbs[v], "toggleCheck2")) is_default = true;
+          if (idx == 2 && !strcmp(kGUIVerbs[v], "toggleCheck3")) is_default = true;
+          if (idx == 3 && !strcmp(kGUIVerbs[v], "fullRepaint")) is_default = true;
+          if (idx == 4 && !strcmp(kGUIVerbs[v], "prevfx")) is_default = true;
+          if (idx == 5 && !strcmp(kGUIVerbs[v], "nextfx")) is_default = true;
+          if (idx == 6 && !strcmp(kGUIVerbs[v], "prevpreset")) is_default = true;
+          if (idx == 7 && !strcmp(kGUIVerbs[v], "nextpreset")) is_default = true;
         } else if (shift && is_track) {
           // Shift defaults for TRACK buttons only.
-          if (idx == 0 && !strcmp(verbs[v], "toggleCheck1")) is_default = true;
-          if (idx == 1 && !strcmp(verbs[v], "toggleCheck2")) is_default = true;
-          if (idx == 2 && !strcmp(verbs[v], "toggleCheck3")) is_default = true;
-          if (idx == 3 && !strcmp(verbs[v], "fullRepaint")) is_default = true;
-          if (idx == 4 && !strcmp(verbs[v], "prevpal")) is_default = true;
-          if (idx == 5 && !strcmp(verbs[v], "nextpal")) is_default = true;
-          if (idx == 6 && !strcmp(verbs[v], "prevpreset")) is_default = true;
-          if (idx == 7 && !strcmp(verbs[v], "nextpreset")) is_default = true;
+          if (idx == 0 && !strcmp(kGUIVerbs[v], "toggleCheck1")) is_default = true;
+          if (idx == 1 && !strcmp(kGUIVerbs[v], "toggleCheck2")) is_default = true;
+          if (idx == 2 && !strcmp(kGUIVerbs[v], "toggleCheck3")) is_default = true;
+          if (idx == 3 && !strcmp(kGUIVerbs[v], "fullRepaint")) is_default = true;
+          if (idx == 4 && !strcmp(kGUIVerbs[v], "prevpal")) is_default = true;
+          if (idx == 5 && !strcmp(kGUIVerbs[v], "nextpal")) is_default = true;
+          if (idx == 6 && !strcmp(kGUIVerbs[v], "prevpreset")) is_default = true;
+          if (idx == 7 && !strcmp(kGUIVerbs[v], "nextpreset")) is_default = true;
         } else if (!shift && is_scene) {
           // Scene defaults for SCENE buttons only.
-          if (idx == 0 && !strcmp(verbs[v], "toggleMirrorX")) is_default = true;
-          if (idx == 1 && !strcmp(verbs[v], "toggleReverseX")) is_default = true;
-          if (idx == 2 && !strcmp(verbs[v], "toggleMirrorY")) is_default = true;
-          if (idx == 3 && !strcmp(verbs[v], "toggleReverseY")) is_default = true;
-          if (idx == 4 && !strcmp(verbs[v], "toggleTranspose")) is_default = true;
-          if (idx == 6 && !strcmp(verbs[v], "selectMode")) is_default = true;
-          if (idx == 7 && !strcmp(verbs[v], "power")) is_default = true;
+          if (idx == 0 && !strcmp(kGUIVerbs[v], "toggleMirrorX")) is_default = true;
+          if (idx == 1 && !strcmp(kGUIVerbs[v], "toggleReverseX")) is_default = true;
+          if (idx == 2 && !strcmp(kGUIVerbs[v], "toggleMirrorY")) is_default = true;
+          if (idx == 3 && !strcmp(kGUIVerbs[v], "toggleReverseY")) is_default = true;
+          if (idx == 4 && !strcmp(kGUIVerbs[v], "toggleTranspose")) is_default = true;
+          if (idx == 6 && !strcmp(kGUIVerbs[v], "selectMode")) is_default = true;
+          if (idx == 7 && !strcmp(kGUIVerbs[v], "power")) is_default = true;
         }
         // (scene_buttons_shift has no defaults — leave unassigned)
         if (is_default) suffix = " (default)";
         oappend(SET_F("addOption(__s,'"));
-        oappend(verbs[v]);
+        oappend(kGUIVerbs[v]);
         oappend(suffix);
         oappend(SET_F("','"));
-        oappend(verbs[v]);
+        oappend(kGUIVerbs[v]);
         oappend(SET_F("');"));
       }
     };

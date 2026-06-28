@@ -1,5 +1,6 @@
 #include "wled.h"
 #include "ImageCacheManager.h"
+#include "event_log.h"  // WLEDMM v3: /json/eventlog endpoint
 #if defined(SOC_USB_OTG_SUPPORTED)
 #include "esp_vfs_fat.h"
 #endif
@@ -1783,6 +1784,23 @@ void serveJson(AsyncWebServerRequest* request)
     return;
   }
   else if (url.indexOf("cfg") > 0 && handleFileRead(request, "/cfg.json")) {
+    return;
+  }
+  // WLEDMM v3: /json/eventlog returns the v3 event bus ring buffer
+  // (most-recent first). Optional ?since=<ms> filters by timestamp.
+  else if (url.indexOf("eventlog") > 0) {
+    if (requestJSONBufferLock(19)) {
+      AsyncJsonResponse* response = new AsyncJsonResponse(&doc, true);
+      JsonArray arr = response->getRoot();
+      uint32_t since_ms = 0;
+      if (request->hasParam("since")) since_ms = request->getParam("since")->value().toInt();
+      wled::EventLog::toJson(arr, (unsigned long)since_ms);
+      response->setLength();
+      request->send(response);
+      releaseJSONBufferLock();
+    } else {
+      request->send(503, "application/json", F("{\"error\":3}"));
+    }
     return;
   }
   else if (url.length() > 6) { //not just /json

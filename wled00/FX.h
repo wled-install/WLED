@@ -1186,4 +1186,11 @@ class WS2812FX {  // 96 bytes
 extern const char JSON_mode_names[];
 extern const char JSON_palette_names[];
 
+// WLEDMM v3: sorted effect index accessors. The internal effect id
+// sequence (returned by strip.getModeData(i)) is NOT alphabetical —
+// it's the order modes were added in FX_fcn.cpp. Consumers that need
+// the web-UI display order (alphabetical) use these helpers instead.
+uint16_t getEffectDisplayCount();
+uint8_t  getEffectIdByDisplayIndex(uint16_t pos);
+
 #endif

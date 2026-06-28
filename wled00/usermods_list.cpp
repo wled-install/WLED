@@ -157,6 +157,13 @@
 #include "../usermods/usermod_v2_pioneer_prolink/usermod_v2_pioneer_prolink.h"
 #endif
 
+// WLEDMM v3: Pioneer Prolink v3 usermod. Mutually exclusive with
+// USERMOD_PIONEER_PROLINK (both share the prolink_*_public file-scope
+// symbols that FX.cpp reads). Define only one.
+#ifdef USERMOD_PIONEER_PROLINK_V3
+#include "../usermods/usermod_v2_pioneer_prolink_v3/usermod_v2_pioneer_prolink_v3.h"
+#endif
+
 #ifdef USERMOD_MIDI_USB
 #include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
 MidiUsermod* midiUsermodPtr = nullptr;
@@ -365,6 +372,11 @@ void registerUsermods()
 
 #ifdef USERMOD_PIONEER_PROLINK
   usermods.add(new ProLinkUsermod());
+#endif
+
+// WLEDMM v3: register the v3 Pioneer. Same mutually-exclusive caveat.
+#ifdef USERMOD_PIONEER_PROLINK_V3
+  usermods.add(new ProLinkUsermodV3());
 #endif
 
 #ifdef USERMOD_MIDI_USB
