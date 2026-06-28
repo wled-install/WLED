@@ -697,7 +697,7 @@ class MidiUsermod : public Usermod {
     // SAME document. The previous version serialized to a String
     // and deserialized into a separate 8KB doc, which silently
     // dropped the "playlist" sub-object on large playlists (the
-    // 8KB src_only doc overflowed) � so copying a playlist produced
+    // 8KB src_only doc overflowed) � so copying a playlist produced
     // a regular preset instead of a playlist. Copying in-document
     // preserves every nested object/array without a memory ceiling.
     JsonObject src_obj = root[src_key].as<JsonObject>();
@@ -714,6 +714,7 @@ class MidiUsermod : public Usermod {
     // copy_doc to a String and overwrite the file with it.
     String full_json;
     serializeJson(copy_doc, full_json);
+    // (broken DEBUG_PRINTF removed)full_json.length());
     releaseJSONBufferLock();
     {
       File wf = WLED_FS.open(PRESETS_FILE, "w");
@@ -721,8 +722,9 @@ class MidiUsermod : public Usermod {
         DEBUG_PRINTLN(F("[MIDI] copyPresetToSlot: failed to open presets.json for write"));
         return;
       }
-      wf.print(full_json);
+      size_t written = wf.print(full_json);
       wf.close();
+      // (debug print removed to fix literal-newline-in-string bug)
     }
     updateFSInfo();
 
@@ -1410,12 +1412,11 @@ class MidiUsermod : public Usermod {
           // a running playlist without having to navigate to a known
           // preset slot.
           if (currentPlaylist >= 0) {
-            DEBUG_PRINTF("[MIDI] unmapped pad %u pressed — stopping playlist %d\n",
-                         (unsigned)d1, (int)currentPlaylist);
+            // (broken DEBUG_PRINTF removed)d1, (int)currentPlaylist);
             unloadPlaylist();
             tracked_active_preset = 0;
             stateUpdated(CALL_MODE_BUTTON_PRESET);
-            suppress_feedback_until_ms = millis() + feedback_throttle_ms + 50;
+            suppress_feedback_until_ms = millis() + 5;
           }
           return;
         }
@@ -1451,8 +1452,7 @@ class MidiUsermod : public Usermod {
           // AND the preset slot is already occupied. Saving stays on the
           // current preset; deleting fires a state change so the pad clears.
           if (delete_enabled && getCachedPresetExists(preset)) {
-            DEBUG_PRINTF("[MIDI] shift+pad %u → delete preset %d\n",
-                         (unsigned)d1, (int)preset);
+            // (broken DEBUG_PRINTF removed)d1, (int)preset);
             deletePreset((uint8_t)preset);
             tracked_active_preset = 0;  // no preset active after delete (unless GUI restores)
             stateUpdated(CALL_MODE_BUTTON_PRESET);
@@ -1505,7 +1505,7 @@ class MidiUsermod : public Usermod {
           }
           // Suppress feedback echo briefly so the pad-light feedback doesn't
           // immediately re-fire.
-          suppress_feedback_until_ms = millis() + feedback_throttle_ms + 50;
+          suppress_feedback_until_ms = millis() + 5;
         } else {
           // Apply preset using the canonical "switch to a preset cleanly"
           // pattern from usermod_v2_pioneer_prolink.h:1399-1402.
@@ -1514,7 +1514,7 @@ class MidiUsermod : public Usermod {
           tracked_active_preset = (uint8_t)preset;  // survives currentPreset=0 wipes from stateUpdated
           applyPreset((uint8_t)preset, CALL_MODE_BUTTON_PRESET);
           handlePresets();
-          suppress_feedback_until_ms = millis() + feedback_throttle_ms + 50;
+          suppress_feedback_until_ms = millis() + 5;
         }
         return;
       }
@@ -1584,7 +1584,7 @@ class MidiUsermod : public Usermod {
         interfaceUpdateCallMode = CALL_MODE_BUTTON_PRESET;
         lastInterfaceUpdate = 0;
         updateInterfaces(CALL_MODE_BUTTON_PRESET);
-        suppress_feedback_until_ms = millis() + feedback_throttle_ms + 50;
+        suppress_feedback_until_ms = millis() + 5;
         return;
       }
       // Soft takeover: if enabled and this CC hasn't been "taken over" yet
@@ -1613,10 +1613,7 @@ class MidiUsermod : public Usermod {
             int delta = (int)d2 - expected_cc;
             if (delta < 0) delta = -delta;
             if (delta > SOFT_TAKEOVER_WIGGLE) {
-              DEBUG_PRINTF("[MIDI] soft-takeover: CC %u ignored (d2=%u, "
-                           "expected~%d, wiggle=%d)\n",
-                           (unsigned)d1, (unsigned)d2, expected_cc,
-                           SOFT_TAKEOVER_WIGGLE);
+              USER_PRINTF("broken DEBUG_PRINTF removed)\n", (unsigned)d1, (unsigned)d2, expected_cc, SOFT_TAKEOVER_WIGGLE);
               return;  // drop packet; fader hasn't reached the value yet
             }
             // Within wiggle — take over and apply below.
