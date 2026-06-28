@@ -475,13 +475,7 @@ On the P4, with `pio run -e esp32p4_8MB_troyhacks`:
    `midi_usb_poll()` in the pad-press handler is what fixed
    that.
 
-3. **MIDI usermod "100% works" but with a rare 1% glitch** where
-   the child pads don't fast-blink on the very first frame of
-   a playlist. Unreproducible for the user; suspected to be a
-   race between the natural `stateUpdated` and the
-   `midi_usb_poll()` drain. Not yet root-caused.
-
-4. **Pioneer v3** is opt-in via `-D USERMOD_PIONEER_PROLINK_V3`
+3. **Pioneer v3** is opt-in via `-D USERMOD_PIONEER_PROLINK_V3`
    (and remove `-D USERMOD_PIONEER_PROLINK`). Requires DJ gear
    to actually exercise; the v3 hooks log every event to
    serial. When you're ready, replace the

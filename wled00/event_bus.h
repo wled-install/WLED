@@ -43,6 +43,12 @@ enum class EventType : uint16_t {
                                  // code — defined for forward
                                  // compatibility (e.g., AutoPlaylist
                                  // v3 could publish it).
+  SilenceEntered      = 0x0008,  // no payload — AutoPlaylist's silence
+                                 // detector crossed the silence threshold
+                                 // (silenceDetected false→true).
+  SoundEntered        = 0x0009,  // no payload — AutoPlaylist's silence
+                                 // detector crossed the sound threshold
+                                 // (silenceDetected true→false).
 
   // Hardware
   UsbDeviceChanged    = 0x0101,  // payload: { connected, vid, pid, name }

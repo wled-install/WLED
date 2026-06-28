@@ -264,6 +264,11 @@ void handleNightlight()
 
         strip.setMode(strip.getFirstSelectedSegId(), FX_MODE_STATIC); // make sure seg runtime is reset if it was in sunrise mode
         effectCurrent = FX_MODE_SUNRISE;
+        // WLEDMM v3: publish EffectIndexChanged
+        { wled::Event ev = {}; ev.type = wled::EventType::EffectIndexChanged;
+          ev.timestamp_ms = millis(); ev.source_id = 0;
+          ev.payload.effectIndexChanged.newIndex = FX_MODE_SUNRISE;
+          wled::EventBus::publish(ev); }
         effectSpeed = nightlightDelayMins;
         effectPalette = 0;
         if (effectSpeed > 60) effectSpeed = 60; //currently limited to 60 minutes
@@ -296,6 +301,11 @@ void handleNightlight()
       {
         if (!briNlT) { //turn off if sunset
           effectCurrent = colNlT[0];
+          // WLEDMM v3: publish EffectIndexChanged
+          { wled::Event ev = {}; ev.type = wled::EventType::EffectIndexChanged;
+            ev.timestamp_ms = millis(); ev.source_id = 0;
+            ev.payload.effectIndexChanged.newIndex = (uint8_t)colNlT[0];
+            wled::EventBus::publish(ev); }
           effectSpeed = colNlT[1];
           effectPalette = colNlT[2];
           toggleOnOff();
@@ -311,6 +321,11 @@ void handleNightlight()
   {
     if (nightlightMode == NL_MODE_SUN) { //restore previous effect
       effectCurrent = colNlT[0];
+      // WLEDMM v3: publish EffectIndexChanged
+      { wled::Event ev = {}; ev.type = wled::EventType::EffectIndexChanged;
+        ev.timestamp_ms = millis(); ev.source_id = 0;
+        ev.payload.effectIndexChanged.newIndex = (uint8_t)colNlT[0];
+        wled::EventBus::publish(ev); }
       effectSpeed = colNlT[1];
       effectPalette = colNlT[2];
       colorUpdated(CALL_MODE_NO_NOTIFY);

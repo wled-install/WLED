@@ -381,12 +381,30 @@ class AutoPlaylistUsermod : public Usermod {
           silenceDetected = true;
           USER_PRINTLN("AutoPlaylist: Silence detected");
           changePlaylist(ambientPlaylist);
+          // WLEDMM v3: publish SilenceEntered on the false→true edge.
+          // Subscribers (LED feedback, "now playing" displays, etc.) can
+          // react without polling silenceDetected in their loop().
+          {
+            wled::Event ev = {};
+            ev.type = wled::EventType::SilenceEntered;
+            ev.timestamp_ms = millis();
+            ev.source_id = getId();
+            wled::EventBus::publish(ev);
+          }
         }
       } else {
         if (silenceDetected) {
           silenceDetected = false;
           USER_PRINTLN("AutoPlaylist: Sound detected");
           changePlaylist(musicPlaylist);
+          // WLEDMM v3: publish SoundEntered on the true→false edge.
+          {
+            wled::Event ev = {};
+            ev.type = wled::EventType::SoundEntered;
+            ev.timestamp_ms = millis();
+            ev.source_id = getId();
+            wled::EventBus::publish(ev);
+          }
         }
         if (autoChange && millis() >= autochange_timer+22) {
           change(um_data);

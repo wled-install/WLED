@@ -149,6 +149,18 @@ void applyPresetWithFallback(uint8_t index, uint8_t callMode, uint8_t effectID, 
   //these two will be overwritten if preset exists in handlePresets()
   effectCurrent = effectID;
   effectPalette = paletteID;
+  // WLEDMM v3: publish EffectIndexChanged so subscribers (e.g., a
+  // future LED feedback usermod, or anything watching for the legacy
+  // global) can react. Posted AFTER the assignment so subscribers
+  // reading the global see the new value.
+  {
+    wled::Event ev = {};
+    ev.type = wled::EventType::EffectIndexChanged;
+    ev.timestamp_ms = millis();
+    ev.source_id = 0;  // WLED core
+    ev.payload.effectIndexChanged.newIndex = effectID;
+    wled::EventBus::publish(ev);
+  }
 }
 
 void handlePresets() {

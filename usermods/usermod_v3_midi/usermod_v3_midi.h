@@ -160,11 +160,9 @@ class MidiUsermod : public Usermod {
   uint16_t    midi_product                = 0;
   char        midi_device_name[32]        = {0};
 
-  uint32_t    suppress_feedback_until_ms  = 0;
-
-  // Active preset tracker — see onStateChange() comment for why we need this.
-  // Updated whenever we see a trustworthy currentPreset value, and used as a
-  // fallback when WLED's stateUpdated() wipes currentPreset to 0.
+  // Active preset tracker — latched in onPreStateChange() before WLED
+  // wipes currentPreset to 0 inside stateUpdated(). The MIDI usermod's
+  // paint logic relies on this staying accurate across the wipe.
   byte        tracked_active_preset      = 0;
 
   // "Is this preset slot actually saved on disk?" — uses WLED's built-in
@@ -253,41 +251,11 @@ class MidiUsermod : public Usermod {
     dst[N - 1] = '\0';
   }
 
-  // Wipe every per-LED "last sent" dedup slot back to UNSENT, so the next
-  // paint loop re-sends every LED instead of deduping. Used by the
-  // fullRepaint action and the power-on transition. Cheaper than
-  // wipeAllLeds() (no midi_out_queue traffic) and works for pads AND
-  // single-color buttons in one call.
-  void invalidateAllLedDedup() {
-    memset(last_pad_color,  UNSENT, sizeof(last_pad_color));
-    memset(last_pad_status, UNSENT, sizeof(last_pad_status));
-    last_scene1_led  = UNSENT;
-    last_scene2_led  = UNSENT;
-    last_scene3_led  = UNSENT;
-    last_scene4_led  = UNSENT;
-    last_scene5_led  = UNSENT;
-    last_scene6_led  = UNSENT;  // see note: scene 6 is unused but kept for symmetry
-    last_scene7_led  = UNSENT;
-    last_scene8_led  = UNSENT;
-    last_check1_led  = UNSENT;
-    last_check2_led  = UNSENT;
-    last_check3_led  = UNSENT;
-    last_track4_led  = UNSENT;
-    last_track5_led  = UNSENT;
-    last_track6_led  = UNSENT;
-    last_track7_led  = UNSENT;
-    last_track8_led  = UNSENT;
-  }
-
-  // Reset the 1.2s interface-update cooldown and force a WS push. Used
-  // after preset-list mutations (save/copy/delete) that stateUpdated()
-  // doesn't itself trip. Same pattern as wsPushIfDue() but unconditional
-  // and a different mode.
-  void pushInterfaceUpdate(uint8_t mode) {
-    interfaceUpdateCallMode = mode;
-    lastInterfaceUpdate = 0;
-    updateInterfaces(mode);
-  }
+  // WLEDMM v3: the pushInterfaceUpdate() helper is gone. Its body
+  // (bypass the 1.2s interface-update cooldown, force updateInterfaces)
+  // now lives in the onEvent(PresetListMutated) handler below,
+  // driven by the event that core's presets.cpp already publishes
+  // after doSaveState() and deletePreset().
 
   // Wipe every LED and reboot. Used by both the rebootArm action and the
   // shift+fullRepaint action; the 200ms drain keeps the OUT ring from
@@ -647,11 +615,13 @@ class MidiUsermod : public Usermod {
     stateUpdated(CALL_MODE_BUTTON);
   }
   void act_selectMode(uint8_t) {
-    select_mode_active = !select_mode_active;
-    select_source_pad = 0xFF;
-    USER_PRINTF("[MIDI] select-mode %s\n",
-                select_mode_active ? "ENABLED" : "DISABLED");
-    stateUpdated(CALL_MODE_BUTTON);
+    // WLEDMM v3: selectMode is now driven by NoteOn/NoteOff for
+    // Scene 7 (a "hold to activate" gesture like shift). The action
+    // handler itself is a no-op — the actual state change happens in
+    // the NoteOn path (sets select_mode_active = true) and the
+    // NoteOff path (sets it to false). This is more like shift and
+    // avoids the "stays flashing forever" bug where a single press
+    // would toggle select mode on and nothing would turn it off.
   }
 
   // Push a websocket state update if it's been long enough since the
@@ -706,8 +676,14 @@ class MidiUsermod : public Usermod {
   static constexpr const char PRESETS_FILE[] = "/presets.json";
 
   void copyPresetToSlot(int src, int dest) {
-    if (src <= 0 || src > 250 || dest <= 0 || dest > 250 || src == dest) return;
-    if (getCachedPresetExists(dest)) {
+    USER_PRINTF("[MIDI] copyPresetToSlot entry: src=%d dest=%d\n", src, dest);
+    if (src <= 0 || src > 250 || dest <= 0 || dest > 250 || src == dest) {
+      USER_PRINTF("[MIDI] copyPresetToSlot: invalid args src=%d dest=%d\n", src, dest);
+      return;
+    }
+    bool dest_exists = getCachedPresetExists(dest);
+    USER_PRINTF("[MIDI] copyPresetToSlot: getCachedPresetExists(%d) = %d\n", dest, dest_exists ? 1 : 0);
+    if (dest_exists) {
       USER_PRINTLN(F("[MIDI] copyPresetToSlot: destination already exists, no-op"));
       return;
     }
@@ -717,8 +693,16 @@ class MidiUsermod : public Usermod {
     }
     // Allocate our own JsonDocument for the presets.json content (don't
     // touch WLED's fileDoc — it's owned by the JSON / preset subsystem).
-    DynamicJsonDocument copy_doc(16384);
+    // 64 KB supports 128+ presets; on the P4 the malloc routes to
+    // PSRAM (MALLOC_CAP_SPIRAM) when available, so this doesn't eat
+    // internal RAM. The previous 16 KB silently overflowed around the
+    // 3rd copy, producing a truncated JSON that WLED's next read
+    // couldn't parse.
+    DynamicJsonDocument copy_doc(64 * 1024);
+    USER_PRINTF("[MIDI] copyPresetToSlot: copy_doc size=%d\n", (int)copy_doc.size());
     bool ok = readObjectFromFile(PRESETS_FILE, nullptr, &copy_doc);
+    USER_PRINTF("[MIDI] copyPresetToSlot: readObjectFromFile ok=%d copy_doc used=%d\n",
+                ok ? 1 : 0, (int)copy_doc.memoryUsage());
     if (!ok) {
       releaseJSONBufferLock();
       USER_PRINTLN(F("[MIDI] copyPresetToSlot: read presets.json failed"));
@@ -746,17 +730,22 @@ class MidiUsermod : public Usermod {
     JsonObject dest_obj = root.createNestedObject(dest_key);
     // Copy all top-level fields including the "playlist" sub-object
     // (which itself contains ps/dur/transition arrays).
+    uint16_t kv_count = 0;
     for (JsonPair kv : src_obj) {
       dest_obj[kv.key().c_str()] = kv.value();
+      kv_count++;
     }
+    USER_PRINTF("[MIDI] copyPresetToSlot: copied %u top-level fields from src=%d to dest=%d\n",
+                (unsigned)kv_count, src, dest);
 
     // Write the file ourselves. writeObjectToFile() can't be used here:
     // it calls bufferedFind(key), and passing key=nullptr dereferences
     // a null pointer inside strlen() at file.cpp:65. So we serialize
     // copy_doc to a String and overwrite the file with it.
     String full_json;
-    serializeJson(copy_doc, full_json);
+    size_t serialized_len = serializeJson(copy_doc, full_json);
     releaseJSONBufferLock();
+    bool write_ok = false;
     {
       File wf = WLED_FS.open(PRESETS_FILE, "w");
       if (!wf) {
@@ -765,6 +754,25 @@ class MidiUsermod : public Usermod {
       }
       size_t written = wf.print(full_json);
       wf.close();
+      // WLEDMM v3: verify the write by re-reading the destination
+      // preset. Without this, a truncated/overwritten file (e.g., from
+      // a doc overflow before the PSRAM upgrade) would leave the cache
+      // saying the preset exists while the file says it doesn't, and
+      // the next load attempt says "preset does not exist" while the
+      // LED is stuck lit. Verify and skip the cache update if the
+      // destination didn't actually make it into the file.
+      DynamicJsonDocument verify_doc(8 * 1024);
+      char dest_key[4];
+      snprintf(dest_key, sizeof(dest_key), "%d", dest);
+      if (readObjectFromFileUsingId(PRESETS_FILE, dest, &verify_doc)) {
+        write_ok = true;
+      }
+      USER_PRINTF("[MIDI] copyPresetToSlot: wrote %u bytes, verify %s\n",
+                  (unsigned)written, write_ok ? "OK" : "FAIL");
+    }
+    if (!write_ok) {
+      USER_PRINTLN(F("[MIDI] copyPresetToSlot: file write did not produce a readable destination — bailing"));
+      return;
     }
     updateFSInfo();
 
@@ -781,6 +789,16 @@ class MidiUsermod : public Usermod {
       // it and the destination pad would paint blue instead of magenta.
       presetCache[dest].exists = true;
       presetCache[dest].isPlaylist = !src_obj[F("playlist")].isNull();
+      // Propagate the repeat value so the pad paints as finite (32) or
+      // infinite (53) according to the source. Without this, getPresetRepeat
+      // would return 0 for the destination and the pad would always paint
+      // as infinite (53) regardless of the source's actual repeat value.
+      if (presetCache[dest].isPlaylist) {
+        JsonObject pl = src_obj[F("playlist")];
+        presetCache[dest].repeat = (uint8_t)(pl[F("repeat")].as<int>() | 0);
+      } else {
+        presetCache[dest].repeat = 0;
+      }
       String nm;
       if (src_obj["n"]) {
         nm = (const char*)(src_obj["n"]);
@@ -788,10 +806,42 @@ class MidiUsermod : public Usermod {
       strlcpy(presetCache[dest].name, nm.c_str(), sizeof(presetCache[dest].name));
     }
     stateUpdated(CALL_MODE_BUTTON_PRESET);
-    // Bypass the 1.2s interface-update cooldown so the GUI sees the new
-    // preset list immediately.
-    pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
+    // WLEDMM v3: the onEvent(PresetListMutated) handler in this
+    // class forces the WS push with cooldown bypass. No need to
+    // call pushInterfaceUpdate() here — the event has already been
+    // published by core's writeObjectToFileUsingId path.
     USER_PRINTF("[MIDI] copyPresetToSlot: %d -> %d OK\n", src, dest);
+  }
+
+ public:
+  // Wipe every per-LED "last sent" dedup slot back to UNSENT, so the next
+  // paint loop re-sends every LED instead of deduping. Used by the
+  // fullRepaint action and the power-on transition. Cheaper than
+  // wipeAllLeds() (no midi_out_queue traffic) and works for pads AND
+  // single-color buttons in one call.
+  //
+  // Public so the v3 USB host task (midi_usb_host.cpp, a separate
+  // TU) can call this from its repaint task. The onEvent
+  // (UsbDeviceChanged) handler also calls this internally.
+  void invalidateAllLedDedup() {
+    memset(last_pad_color,  UNSENT, sizeof(last_pad_color));
+    memset(last_pad_status, UNSENT, sizeof(last_pad_status));
+    last_scene1_led  = UNSENT;
+    last_scene2_led  = UNSENT;
+    last_scene3_led  = UNSENT;
+    last_scene4_led  = UNSENT;
+    last_scene5_led  = UNSENT;
+    last_scene6_led  = UNSENT;
+    last_scene7_led  = UNSENT;
+    last_scene8_led  = UNSENT;
+    last_check1_led  = UNSENT;
+    last_check2_led  = UNSENT;
+    last_check3_led  = UNSENT;
+    last_track4_led  = UNSENT;
+    last_track5_led  = UNSENT;
+    last_track6_led  = UNSENT;
+    last_track7_led  = UNSENT;
+    last_track8_led  = UNSENT;
   }
 
  public:
@@ -942,12 +992,52 @@ class MidiUsermod : public Usermod {
   }
 
   void onEvent(const wled::Event& ev) override {
-    // Targeted events we care about:
-    //   PlaylistEnded: a finite playlist just stopped. Force a repaint
-    //     so the controller reverts the parent's slow-pulse magenta
-    //     and the last child's fast-blink to their idle colors.
-    //   PowerEdge: handled by handlePowerPaint() via its own static
-    //     until Phase 4 fully migrates. We no-op for now.
+    // WLEDMM v3: handle v3 events directly here. The v2 callbacks
+    // (setConnected/setDeviceInfo/captureActivePreset/requestFullRepaint)
+    // were the previous way the USB host pushed this state; they
+    // are gone. The USB host now publishes a UsbDeviceChanged event
+    // from wled.cpp, and we consume it here.
+    if (ev.type == wled::EventType::UsbDeviceChanged) {
+      midi_connected     = ev.payload.usbDevice.connected;
+      midi_vendor        = ev.payload.usbDevice.vid;
+      midi_product       = ev.payload.usbDevice.pid;
+      if (ev.payload.usbDevice.name[0]) {
+        strncpy(midi_device_name, ev.payload.usbDevice.name,
+                sizeof(midi_device_name) - 1);
+        midi_device_name[sizeof(midi_device_name) - 1] = '\0';
+      } else {
+        midi_device_name[0] = '\0';
+      }
+      if (!midi_connected) {
+        // Device disconnected — reset soft-takeover state so the next
+        // device connection starts fresh (the user may have changed
+        // WLED values via the GUI while we were disconnected, so the
+        // previous "taken over" flags would now point at stale values).
+        memset(cc_taken_over, 0, sizeof(cc_taken_over));
+        select_mode_active = false;
+        select_source_pad = 0xFF;
+      } else {
+        // Force a full repaint on (re)connect so the controller
+        // re-paints the new active preset and any on-state LED
+        // indicators. This is what the v2 requestFullRepaint() callback
+        // used to do, now driven by the connect event.
+        invalidateAllLedDedup();
+        onStateChange(CALL_MODE_BUTTON);
+      }
+      return;
+    }
+    if (ev.type == wled::EventType::PresetListMutated) {
+      // WLEDMM v3: replaces pushInterfaceUpdate(). Core's
+      // doSaveState() and deletePreset() publish this event after
+      // mutating /presets.json. We bypass the 1.2s interface-update
+      // cooldown and force a WS push so the GUI sees the new
+      // preset list immediately. updateInterfaces() reads
+      // interfaceUpdateCallMode to know which mode to broadcast.
+      interfaceUpdateCallMode = (uint8_t)wled::EventType::PresetListMutated;
+      lastInterfaceUpdate = 0;
+      updateInterfaces((uint8_t)wled::EventType::PresetListMutated);
+      return;
+    }
     if (ev.type == wled::EventType::PlaylistEnded) {
       // The new event is fired in addition to the legacy loop() watch
       // above. The loop() check is still active (and harmless — it
@@ -965,70 +1055,30 @@ class MidiUsermod : public Usermod {
   //   green     = active preset (no playlist)
   //   magenta   = active preset (playlist active)
   //
-  // Called by WLED core after every state mutation. We throttle to avoid
-  // spamming the controller and skip calls during the suppress_feedback window
-  // so a controller-initiated change doesn't echo back.
+  // Called by WLED core after every state mutation. Repaints all
+  // 64 RGB pads and 16 single-color buttons (Track 1-8 + Scene 1-8).
+  // Each color is compared against the per-LED dedup slot and only
+  // sent when it actually changed — this cuts bulk-OUT traffic from
+  // 64+ packets per state change to just the LEDs that actually
+  // need updating.
   // ---------------------------------------------------------------------------
   void onStateChange(uint8_t mode) override {
-    // FULL-FEATURE repaint: paint all 64 RGB pads and all 16 single-
-    // color buttons (Track 1-8 + Scene 1-8). Each color is compared
-    // against the per-LED dedup slot and only sent when it actually
-    // changed — this cuts bulk-OUT traffic from 64+ packets per state
-    // change to just the LEDs that actually need updating.
     if (!enabled || !midi_connected || !feedback_enabled) return;
     if (mode == CALL_MODE_INIT || mode == CALL_MODE_NO_NOTIFY) return;
-    uint32_t now = millis();
-    // Only suppress feedback echoes for state changes that WE caused
-    // (CALL_MODE_BUTTON_PRESET). For all other modes (NOTIFICATION,
-    // button, etc. — i.e., changes from the web UI, IR, schedule,
-    // etc.), always repaint the controller so the pads reflect the
-    // new state immediately.
-    if (mode == CALL_MODE_BUTTON_PRESET &&
-        (int32_t)(now - suppress_feedback_until_ms) < 0) return;
 
     USER_PRINTF("[MIDI] onStateChange mode=%u currentPreset=%u tracked=%u\n",
                 (unsigned)mode, (unsigned)currentPreset,
                 (unsigned)tracked_active_preset);
-    updateTrackedActivePreset(mode);
     if (handlePowerPaint()) return;
     paintPads();
     paintSingleColorButtons();   // also calls disarmExpiredRebootArm() internally
   }
 
-  // WLED's stateUpdated() does `if (stateChanged) currentPreset = 0;`
-  // before calling us (led.cpp:106), and only restores currentPreset
-  // for Path A preset requests (`{pd: ...}`) via presetToRestore in
-  // json.cpp. For Path B (`{ps: N}` — the GUI dropdown), handlePresets
-  // sets currentPreset = N at presets.cpp:210 and then stateUpdated
-  // wipes it back to 0. So when our onStateChange fires for a
-  // GUI-driven preset change, currentPreset is 0 and no pad lights
-  // up green.
-  //
-  // Workaround: track the active preset ourselves. We trust
-  // currentPreset whenever it's non-zero (the only way it can be
-  // non-zero at this point is if some path restored it after the
-  // reset, e.g. Path A's presetToRestore). Otherwise we keep our
-  // last-known active preset.
-  void updateTrackedActivePreset(uint8_t mode) {
-    if (currentPreset != 0) {
-      tracked_active_preset = currentPreset;
-    } else if (currentPlaylist > 0) {
-      // A playlist is still running. WLED's stateUpdated wiped
-      // currentPreset to 0 during the slider change, but the active
-      // CHILD preset is still the same one the playlist is playing.
-      // Don't clear tracked — the child's fast-blink keeps painting.
-    } else if (mode != CALL_MODE_BUTTON_PRESET) {
-      // No playlist running AND currentPreset is 0 AND this state
-      // change didn't originate from our own preset apply. So this is
-      // an external change (web GUI effect slider, IR remote, etc.)
-      // that deselected the active preset — clear the controller
-      // indicator so the "active preset" pad no longer stays green.
-      tracked_active_preset = 0;
-    }
-    // (else: CALL_MODE_BUTTON_PRESET with currentPreset==0 means
-    // our own preset apply just ran; handleIncomingMidi already set
-    // tracked_active_preset, so leave it alone.)
-  }
+  // WLEDMM v3: the pre-state-change latch in onPreStateChange()
+  // captures the pre-wipe value of currentPreset directly. The
+  // heuristic tree that used to live here (updateTrackedActivePreset)
+  // is gone. tracked_active_preset is set ONCE in onPreStateChange,
+  // before stateUpdated() wipes currentPreset to 0.
 
   // Power-state paint. Owns the prev_power_off static so it's
   // updated on every onStateChange call (the previous split between
@@ -1090,11 +1140,11 @@ class MidiUsermod : public Usermod {
       // OUT ring buffer; the dedup reset forces the fall-through
       // to send the correct color for every LED.
       invalidateAllLedDedup();
-      // Explicit scene 8 (power button) so it lands solid green
+      // Explicit scene 8 (power button) so it lands solid on
       // immediately, in case the fall-through paint loop is
       // delayed for any reason.
-      midi_out_queue(0x90, kNoteLastScene, 21);  // solid green (scene 8)
-      last_scene8_led = 21;
+      midi_out_queue(0x90, kNoteLastScene, 1);  // solid on (scene 8)
+      last_scene8_led = 1;
     }
     return false;
   }
@@ -1222,21 +1272,21 @@ class MidiUsermod : public Usermod {
     // in paintSingleColorButton() below.
     auto action_led = [&](const char* action) -> uint8_t {
       if (!action || !action[0]) return 0;
-      if (!strcmp(action, "toggleCheck1"))    return seg_for_leds.check1 ? 21 : 0;
-      if (!strcmp(action, "toggleCheck2"))    return seg_for_leds.check2 ? 13 : 0;
-      if (!strcmp(action, "toggleCheck3"))    return seg_for_leds.check3 ? 5  : 0;
-      if (!strcmp(action, "toggleMirrorX"))   return seg_for_leds.mirror    ? 21 : 0;
-      if (!strcmp(action, "toggleReverseX"))  return seg_for_leds.reverse   ? 21 : 0;
-      if (!strcmp(action, "toggleMirrorY"))   return seg_for_leds.mirror_y  ? 21 : 0;
-      if (!strcmp(action, "toggleReverseY"))  return seg_for_leds.reverse_y ? 21 : 0;
-      if (!strcmp(action, "toggleTranspose")) return seg_for_leds.transpose ? 21 : 0;
-      if (!strcmp(action, "toggleFreeze"))    return seg_for_leds.freeze    ? 21 : 0;
-      if (!strcmp(action, "power"))           return (bri > 0) ? 21 : 0;
-      if (!strcmp(action, "rebootArm"))       return 5;
+      if (!strcmp(action, "toggleCheck1"))    return seg_for_leds.check1 ? 1 : 0;
+      if (!strcmp(action, "toggleCheck2"))    return seg_for_leds.check2 ? 1 : 0;
+      if (!strcmp(action, "toggleCheck3"))    return seg_for_leds.check3 ? 1 : 0;
+      if (!strcmp(action, "toggleMirrorX"))   return seg_for_leds.mirror    ? 1 : 0;
+      if (!strcmp(action, "toggleReverseX"))  return seg_for_leds.reverse   ? 1 : 0;
+      if (!strcmp(action, "toggleMirrorY"))   return seg_for_leds.mirror_y  ? 1 : 0;
+      if (!strcmp(action, "toggleReverseY"))  return seg_for_leds.reverse_y ? 1 : 0;
+      if (!strcmp(action, "toggleTranspose")) return seg_for_leds.transpose ? 1 : 0;
+      if (!strcmp(action, "toggleFreeze"))    return seg_for_leds.freeze    ? 1 : 0;
+      if (!strcmp(action, "power"))           return (bri > 0) ? 1 : 0;
+      if (!strcmp(action, "rebootArm"))       return 1;
       if (!strcmp(action, "nextfx") || !strcmp(action, "prevfx") ||
           !strcmp(action, "nextpal") || !strcmp(action, "prevpal") ||
           !strcmp(action, "nextpreset") || !strcmp(action, "prevpreset")) {
-        return playlist_active ? 0 : 5;
+        return playlist_active ? 0 : 1;
       }
       return 0;
     };
@@ -1339,6 +1389,13 @@ class MidiUsermod : public Usermod {
             stateUpdated(CALL_MODE_BUTTON);
           }
         }
+        // WLEDMM v3: also clear select_mode_active when Scene 7 is
+        // released via the velocity-0 NoteOn path (some controllers
+        // send a 0-velocity NoteOn instead of a true NoteOff).
+        if (d1 == kNoteFirstScene + 6) {
+          USER_PRINTF("[MIDI] select-mode: velocity-0 NoteOn on Scene 7, clear select_mode_active\n");
+          select_mode_active = false;
+        }
         return;
       }
       if (d1 == kNoteShift) {            // Shift button (Track 9)
@@ -1346,6 +1403,21 @@ class MidiUsermod : public Usermod {
         // Track 9 (shift) has no LED per the APC Mini MK2 docs, so no
         // visual feedback to send. Just update internal state; the
         // shift modifier is applied to subsequent track/scene presses.
+        return;
+      }
+      // WLEDMM v3: select mode (Scene 7 with selectMode action) is
+      // now a "hold to activate" gesture. The action handler itself
+      // is a no-op; we drive the state here on NoteOn (set active)
+      // and clear it in the NoteOff path below. This mirrors how
+      // shift is handled and prevents the "stays flashing forever"
+      // bug where a single press would toggle select mode on with
+      // no way to turn it off.
+      if (d1 == kNoteFirstScene + 6) {   // Scene 7 (kNoteFirstScene=0x70, +6=0x76)
+        if (copy_enabled) {
+          USER_PRINTF("[MIDI] select-mode: NoteOn Scene 7, set select_mode_active=true\n");
+          select_mode_active = true;
+          select_source_pad  = 0xFF;  // no source selected yet
+        }
         return;
       }
       if (d1 < kNumPads) {               // Pad 0..63
@@ -1361,13 +1433,14 @@ class MidiUsermod : public Usermod {
             unloadPlaylist();
             tracked_active_preset = 0;
             stateUpdated(CALL_MODE_BUTTON_PRESET);
-            suppress_feedback_until_ms = millis() + 5;
           }
           return;
         }
 
         // --- Select mode: Scene 5 pressed, waiting for source then dest ---
         if (select_mode_active) {
+          USER_PRINTF("[MIDI] select-mode: d1=%u preset=%d src=%d\n",
+                      (unsigned)d1, (int)preset, (int)pad_to_preset[d1]);
           if (select_source_pad == 0xFF) {
             // First pad = source.
             select_source_pad = (uint8_t)d1;
@@ -1375,19 +1448,54 @@ class MidiUsermod : public Usermod {
                          (unsigned)d1, (int)preset);
           } else if ((uint8_t)d1 != select_source_pad) {
             // Second pad = destination. Copy preset if destination is empty.
+            //
+            // WLEDMM v3: set select_mode_active = false BEFORE the
+            // copy so the LED paint triggered by copyPresetToSlot's
+            // internal stateUpdated() reflects the post-copy state.
+            // Otherwise the LED would render with the "in select mode"
+            // state for one paint cycle, then never re-paint (the
+            // select_mode_active=false is set after, but no second
+            // stateUpdated runs), leaving the Scene 7 LED stuck in
+            // its blinking state.
             if (!copy_enabled) {
               USER_PRINTLN(F("[MIDI] select-mode copy ignored — copy_enabled is false"));
+              select_mode_active = false;
+              select_source_pad = 0xFF;
+              stateUpdated(CALL_MODE_BUTTON);   // refresh LEDs so the
+                                              // source/destination pad
+                                              // LEDs revert to their normal
+                                              // color (otherwise they stay in
+                                              // the "selected" state forever).
             } else {
               int8_t dest_preset = pad_to_preset[d1];
-              if (dest_preset > 0 && !getCachedPresetExists(dest_preset)) {
-                copyPresetToSlot(pad_to_preset[select_source_pad], dest_preset);
+              bool dest_free = (dest_preset > 0) && !getCachedPresetExists(dest_preset);
+              USER_PRINTF("[MIDI] select-mode dest=%d copy_enabled=%d dest_free=%d (cached)\n",
+                          (int)dest_preset, 1, dest_free ? 1 : 0);
+              if (dest_free) {
+                // Capture the source preset before clearing
+                // select_source_pad; copyPresetToSlot needs it.
+                int8_t src_preset = pad_to_preset[select_source_pad];
+                USER_PRINTF("[MIDI] select-mode copying src=%d to dest=%d\n",
+                            (int)src_preset, (int)dest_preset);
+                select_mode_active = false;
+                select_source_pad = 0xFF;
+                copyPresetToSlot(src_preset, dest_preset);
               } else {
                 USER_PRINTLN(F("[MIDI] select-mode copy: destination occupied or invalid, no-op"));
+                select_mode_active = false;
+                select_source_pad = 0xFF;
+                // WLEDMM v3: refresh the LEDs so the source/destination
+                // pad LEDs revert to their non-select-mode state. Without
+                // this, the destination pad appears to "light up" because
+                // it stays in whatever state the last paint set it to
+                // (e.g., the "active destination" indicator from a
+                // previous copy).
+                stateUpdated(CALL_MODE_BUTTON);
               }
             }
-            // Auto-exit select mode after the second pad.
-            select_mode_active = false;
-            select_source_pad = 0xFF;
+          } else {
+            USER_PRINTF("[MIDI] select-mode: second pad is same as source (d1=%u), ignored\n",
+                        (unsigned)d1);
           }
           return;
         }
@@ -1400,13 +1508,9 @@ class MidiUsermod : public Usermod {
             deletePreset((uint8_t)preset);
             tracked_active_preset = 0;  // no preset active after delete (unless GUI restores)
             stateUpdated(CALL_MODE_BUTTON_PRESET);
-            // Force a websocket refresh so the GUI sees the new preset list.
-            // stateUpdated() only sets interfaceUpdateCallMode when state
-            // actually changed (bri/segments/etc); a pure preset-list
-            // change (add/delete/copy) doesn't trip that path, so we set
-            // it directly here. We also bypass the 1.2s cooldown by
-            // clearing lastInterfaceUpdate so the WS push fires right away.
-            pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
+            // WLEDMM v3: the onEvent(PresetListMutated) handler
+            // forces the WS push with cooldown bypass. No need for
+            // pushInterfaceUpdate() here.
           } else {
             // Default: save current state to this preset slot. The preset
             // number in the name uses the MAPPED slot (e.g., preset 1) not
@@ -1422,13 +1526,10 @@ class MidiUsermod : public Usermod {
             // this slot as saved without any JSON buffer acquisition.
             // Stay on the currently-active preset — saving doesn't switch.
             stateUpdated(CALL_MODE_BUTTON_PRESET);
-            // Same — set the interface update flag directly and bypass
-            // the cooldown so the GUI sees the new preset list right away.
-            pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
+            // WLEDMM v3: the onEvent(PresetListMutated) handler
+            // forces the WS push with cooldown bypass. No need for
+            // pushInterfaceUpdate() here.
           }
-          // Suppress feedback echo briefly so the pad-light feedback doesn't
-          // immediately re-fire.
-          suppress_feedback_until_ms = millis() + 5;
         } else {
           // Apply preset using the canonical "switch to a preset cleanly"
           // pattern from usermod_v2_pioneer_prolink.h:1399-1402.
@@ -1460,7 +1561,13 @@ class MidiUsermod : public Usermod {
         // Every verb goes through runAction so the action vocabulary
         // is the single source of truth.
         const uint8_t ti = d1 - kNoteFirstTrack;
-        const char* act = shift_held && track_button_shift_action[ti][0]
+        // WLEDMM v3: shift+track always uses the shift action. If the
+        // shift action is empty, runAction() is a no-op (no-op of the
+        // underlying toggle). Previously the check also tested
+        // track_button_shift_action[ti][0] (non-empty), which caused
+        // shift+TB1 to fall through to TB1's plain action when no
+        // shift action was configured.
+        const char* act = shift_held
                               ? track_button_shift_action[ti]
                               : track_button_action[ti];
         // Any non-reboot Track press also cancels an in-progress
@@ -1480,7 +1587,9 @@ class MidiUsermod : public Usermod {
         // Plain press runs scene_button_action[N]; shift+press runs
         // scene_button_shift_action[N] (if non-empty; otherwise no-op).
         const uint8_t si = d1 - kNoteFirstScene;
-        const char* act = shift_held && scene_button_shift_action[si][0]
+        // WLEDMM v3: shift+scene always uses the shift action. If
+        // the shift action is empty, runAction() is a no-op.
+        const char* act = shift_held
                               ? scene_button_shift_action[si]
                               : scene_button_action[si];
         // Any non-shift Scene press also cancels an in-progress reboot
@@ -1493,7 +1602,16 @@ class MidiUsermod : public Usermod {
     }
 
     if (status == 0x80) {                // NoteOff
-      if (d1 == kNoteShift) shift_held = false;
+      if (d1 == kNoteShift) {
+        USER_PRINTF("[MIDI] NoteOff shift d1=%u, clear shift_held\n", (unsigned)d1);
+        shift_held = false;
+      }
+      // WLEDMM v3: clear select_mode_active on Scene 7 release
+      // (pairs with the NoteOn "hold to activate" handling above).
+      if (d1 == kNoteFirstScene + 6) {
+        USER_PRINTF("[MIDI] select-mode: NoteOff Scene 7, clear select_mode_active\n");
+        select_mode_active = false;
+      }
       return;
     }
 
@@ -1507,11 +1625,9 @@ class MidiUsermod : public Usermod {
         // doSaveState() already updated presetCache[index].exists; the next
         // onStateChange will see the new state via getCachedPresetExists().
         stateUpdated(CALL_MODE_BUTTON_PRESET);
-        // Force websocket refresh (preset-list change doesn't trip the
-        // state-changed path inside stateUpdated()), and bypass the 1.2s
-        // cooldown so the GUI sees the new preset list right away.
-        pushInterfaceUpdate(CALL_MODE_BUTTON_PRESET);
-        suppress_feedback_until_ms = millis() + 5;
+        // WLEDMM v3: the onEvent(PresetListMutated) handler
+        // forces the WS push with cooldown bypass. No need for
+        // pushInterfaceUpdate() or suppress_feedback_until_ms here.
         return;
       }
       // Soft takeover: if enabled and this CC hasn't been "taken over" yet
@@ -1556,43 +1672,13 @@ class MidiUsermod : public Usermod {
     }
   }
 
-  // Called by the USB Host client event callback when a device enumerates
-  // successfully. Sets the runtime "connected" flag.
-  void setConnected(bool c) {
-    midi_connected = c;
-    if (!c) {
-      // Device disconnected — reset soft-takeover state so the next
-      // device connection starts fresh (the user may have changed WLED
-      // values via the GUI while we were disconnected, so the previous
-      // "taken over" flags would now point at stale values).
-      memset(cc_taken_over, 0, sizeof(cc_taken_over));
-      select_mode_active = false;
-      select_source_pad = 0xFF;
-    }
-  }
-
-  // Called by the USB Host client after a device is identified, so /json/info
-  // can show a human-readable name (looked up from kMidiDevices in
-  // midi_usb_host.cpp).
-  void setDeviceInfo(uint16_t vid, uint16_t pid, const char* name) {
-    midi_vendor  = vid;
-    midi_product = pid;
-    if (name) {
-      strncpy(midi_device_name, name, sizeof(midi_device_name) - 1);
-      midi_device_name[sizeof(midi_device_name) - 1] = '\0';
-    } else {
-      midi_device_name[0] = '\0';
-    }
-  }
-
-  // Called by the USB Host client right before setConnected(true), so the
-  // usermod can capture the active preset BEFORE stateUpdated() wipes
-  // currentPreset to 0 (led.cpp:106 — `if (stateChanged) currentPreset = 0`).
-  // Without this, the on-boot preset's identity is lost the moment the
-  // controller connects and we paint the pads.
-  void captureActivePreset(byte preset) {
-    if (preset != 0) tracked_active_preset = preset;
-  }
+  // WLEDMM v3: setConnected, setDeviceInfo, captureActivePreset,
+  // and requestFullRepaint were the v2 callbacks the USB Host used
+  // to push state into the usermod. They're gone — the USB Host now
+  // publishes a UsbDeviceChanged event from wled.cpp, and the
+  // onEvent(UsbDeviceChanged) handler at the top of this class
+  // consumes it. Disconnect-time reset of soft-takeover state
+  // happens in onEvent when payload.usbDevice.connected == false.
 
   // Wipe every LED on the controller — all 64 RGB pads (NoteOn velocity
   // 0 = off) and all 16 single-color buttons (Track 1-8 + Scene 1-8).
@@ -1607,14 +1693,6 @@ class MidiUsermod : public Usermod {
     for (uint8_t n = kNoteFirstTrack; n <= kNoteLastTrack; n++) midi_out_queue(0x90, n, 0);
     // Scene 1-8 (notes 112..119) off
     for (uint8_t n = kNoteFirstScene; n <= kNoteLastScene; n++) midi_out_queue(0x90, n, 0);
-  }
-
-  // Called by the USB Host client 500ms after device connect to do a
-  // second "settled" repaint (see midi_usb_host.cpp). Forwards to the
-  // same code path as the controller's Shift+Track 4 = full repaint.
-  void requestFullRepaint() {
-    if (!midi_connected) return;
-    runAction("fullRepaint");
   }
 
   // ---------------------------------------------------------------------------

@@ -779,7 +779,9 @@ void background_loop_nonblocking(void* pvParameters) {
 
       case app_message_t::APP_MIDI_DEVICE_CONNECTED: {
         USER_PRINTLN("USB MIDI Device Connected");
-        if (midiUsermodPtr) midiUsermodPtr->setConnected(true);
+        // WLEDMM v3: the v2 setConnected(true) callback is gone.
+        // The MIDI usermod's onEvent(UsbDeviceChanged) handler
+        // sets the local midi_connected state from the event payload.
         // WLEDMM v3: publish UsbDeviceChanged so the MIDI usermod's
         // onEvent() can update its own state from the event payload
         // (and the setConnected/setDeviceInfo callbacks can be
@@ -802,7 +804,9 @@ void background_loop_nonblocking(void* pvParameters) {
 
       case app_message_t::APP_MIDI_DEVICE_DISCONNECTED: {
         USER_PRINTLN("USB MIDI Device Disconnected");
-        if (midiUsermodPtr) midiUsermodPtr->setConnected(false);
+        // WLEDMM v3: the v2 setConnected(false) callback is gone.
+        // The MIDI usermod's onEvent(UsbDeviceChanged) handler
+        // sets the local midi_connected state from the event payload.
         // WLEDMM v3: publish UsbDeviceChanged (disconnect).
         {
           wled::Event ev = {};

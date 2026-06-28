@@ -309,31 +309,18 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
   if (msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     MIDI_LOG("event: NEW_DEV addr=%d", msg->new_dev.address);
     if (midi_open_and_configure(msg->new_dev.address) == ESP_OK) {
-      // Tell the usermod a device is now connected and which one it is.
-      // setConnected(true) flips midi_connected, which unblocks the
-      // "if (!midi_connected) return;" guard in onStateChange so the
-      // controller's LEDs light up to reflect current WLED state.
-      if (midiUsermodPtr) {
-        midiUsermodPtr->setDeviceInfo(midi_vendor, midi_product,
-          midi_device_lookup(midi_vendor, midi_product));
-        // CAPTURE currentPreset BEFORE stateUpdated() — stateUpdated
-        // does `if (stateChanged) currentPreset = 0` in led.cpp:106,
-        // which wipes the boot preset's identity right before our
-        // onStateChange sees it. Reading it here, before we fire
-        // stateUpdated, lets us preserve the active preset through the
-        // stateUpdated wipe.
-        midiUsermodPtr->captureActivePreset(currentPreset);
-        midiUsermodPtr->setConnected(true);
-      }
+      // WLEDMM v3: the v2 callbacks (setDeviceInfo, captureActivePreset,
+      // setConnected, requestFullRepaint) are gone. We just publish
+      // the device descriptor on the app_queue; wled.cpp consumes the
+      // APP_MIDI_DEVICE_CONNECTED message and publishes a v3
+      // UsbDeviceChanged event. The usermod's onEvent handler does
+      // the rest: sets the local state, latches the active preset
+      // (via onPreStateChange), and triggers the repaint.
       app_message_t m = {};
       m.id = app_message_t::APP_MIDI_DEVICE_CONNECTED;
-      // WLEDMM v3: include the device descriptor so wled.cpp can
-      // publish a UsbDeviceChanged event with the real VID/PID/name.
       m.data.midi_device_info.vid = midi_vendor;
       m.data.midi_device_info.pid = midi_product;
       {
-        // Look up the human-readable name from the VID/PID. Falls
-        // back to a hex string if no match.
         const char* nm = midi_device_lookup(midi_vendor, midi_product);
         if (nm) {
           strncpy(m.data.midi_device_info.name, nm,
@@ -344,25 +331,12 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
         }
       }
       xQueueSend(app_queue, &m, 0);
-      // USB MIDI Device Connected — always repaint the controller, on
-      // first boot AND on every re-connect. The immediate stateUpdated
-      // catches the common case; the 500ms-delayed second paint catches
-      // any state that settled after the immediate one (preset cache
-      // rebuilds on first boot, re-applied presets from prior disconnect,
-      // etc.).
+      // Single delayed "settled" repaint using a static buffer (no
+      // heap allocation, so no race with the SD-card task). The
+      // v2 setConnected+requestFullRepaint pattern is replaced by
+      // a single delayed repaint that fires after the boot state
+      // has settled.
       if (midiUsermodPtr) {
-        // USB_Task now starts after the SD card in WLED's task list
-        // (the boot-blocking mount task runs first), so by the time
-        // we get this connect callback, the segment/preset structures
-        // are already initialized and a direct repaint is safe.
-        // Always do an immediate repaint to handle the common case
-        // where the boot preset was already applied, plus a 1500ms-
-        // delayed repaint for the case where the boot playlist is
-        // still being set up (currentPlaylist may be 0 at t=0 even
-        // though currentPreset is set).
-        midiUsermodPtr->requestFullRepaint();
-        // Single delayed "settled" repaint using a static buffer (no
-        // heap allocation, so no race with the SD-card task).
         struct RepaintCtx { MidiUsermod* ptr; };
         static RepaintCtx s_repaint_ctx;
         s_repaint_ctx.ptr = midiUsermodPtr;
@@ -370,7 +344,13 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
           [](void* arg) {
             auto* c = (RepaintCtx*)arg;
             vTaskDelay(pdMS_TO_TICKS(1500));
-            if (c->ptr) c->ptr->requestFullRepaint();
+            // Force a full repaint via the runAction path that the
+            // v3 "fullRepaint" verb triggers. (Equivalent to the
+            // old requestFullRepaint() callback, now inline.)
+            if (c->ptr) {
+              c->ptr->invalidateAllLedDedup();
+              c->ptr->onStateChange(CALL_MODE_BUTTON);
+            }
             vTaskDelete(NULL);
           },
           "midi_repaint", 2048, &s_repaint_ctx, 1, nullptr);
@@ -380,9 +360,9 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
     }
   } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
     MIDI_LOG("event: DEV_GONE");
-    if (midiUsermodPtr) {
-      midiUsermodPtr->setConnected(false);
-    }
+    // WLEDMM v3: the v2 setConnected(false) callback is gone. The
+    // disconnect is now driven by the UsbDeviceChanged event
+    // (connected=false) which the usermod handles.
     midi_close_device();
     app_message_t m = {};
     m.id = app_message_t::APP_MIDI_DEVICE_DISCONNECTED;

@@ -33,6 +33,8 @@ namespace {
       case EventType::PowerEdge:           return "PowerEdge";
       case EventType::EffectIndexChanged:  return "EffectIndexChanged";
       case EventType::PresetCycleRequested: return "PresetCycleRequested";
+      case EventType::SilenceEntered:      return "SilenceEntered";
+      case EventType::SoundEntered:        return "SoundEntered";
       case EventType::UsbDeviceChanged:    return "UsbDeviceChanged";
     }
     return "Unknown";
