@@ -2,6 +2,15 @@
 // Implementation of the v3 debug event log.
 
 #include "event_log.h"
+// WLEDMM v3: forward declarations of the preset accessors we use in
+// writePayload(). Defined in presets.cpp. We don't include
+// fcn_declare.h here because event_log.h is included from headers
+// that don't have the full UsermodManager context yet, and a
+// transitive include of fcn_declare.h from event_log.h breaks
+// the wled.h compile order (UsermodManager would be referenced
+// before it's defined).
+extern const char* getPresetQL(byte slot);
+extern int8_t      getPresetLedmap(byte slot);
 #include "src/dependencies/json/ArduinoJson-v6.h"
 
 namespace wled {
@@ -37,6 +46,10 @@ namespace {
       case EventType::PresetListMutated:
         obj["kind"] = (unsigned)p.presetListMutated.kind;
         obj["slot"] = p.presetListMutated.slot;
+        // WLEDMM v3: surface ql/ledmap so the eventlog shows
+        // what changed. Empty string / -1 means "not set".
+        obj["ql"]     = getPresetQL(p.presetListMutated.slot);
+        obj["ledmap"] = (int)getPresetLedmap(p.presetListMutated.slot);
         break;
       case EventType::PlaylistStarted:
         obj["playlist"] = p.playlistStarted.playlist;

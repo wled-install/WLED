@@ -36,16 +36,16 @@ static const char *TAG = "WLED";
   #include "ImageCacheManager.h"
 
   #ifdef USERMOD_MIDI_USB
-    #include "../usermods/usermod_v2_midi/midi_usb_host.h"
+    #include "../usermods/usermod_v3_midi/midi_usb_host.h"
     // Pull in the full MidiUsermod class definition so background_loop_nonblocking
     // can call handleIncomingMidi() / setConnected() through midiUsermodPtr.
     // (wled.h only forward-declares it to keep the include light.)
-    #include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
+    #include "../usermods/usermod_v3_midi/usermod_v3_midi.h"
     // midi_usb_host.cpp provides the USB Host client implementation. The
     // WLED build_src_filter only scans wled00/, so this .cpp is pulled in
     // here (gated by USERMOD_MIDI_USB so it never ships on non-MIDI builds).
     // All definitions are `static` so there's no ODR risk.
-    #include "../usermods/usermod_v2_midi/midi_usb_host.cpp"
+    #include "../usermods/usermod_v3_midi/midi_usb_host.cpp"
   #endif
   
   #define MNT_PATH "/usb"     // Base mount path prefix, devices will be mounted as /usb0, /usb1, /usb2...
@@ -158,7 +158,7 @@ static const char *TAG = "WLED";
 
   // app_message_t (incl. MIDI event IDs) lives in usb_host_messages.h so that
   // midi_usb_host.cpp can build & submit them with the same layout.
-  #include "../usermods/usermod_v2_midi/usb_host_messages.h"
+  #include "../usermods/usermod_v3_midi/usb_host_messages.h"
 
   static inline int find_free_slot(void)
   {

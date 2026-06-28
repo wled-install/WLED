@@ -2,12 +2,12 @@
 
 /*
    @title     Pro DJ Link v3 (With Metadata, Waveform & Artwork)
-   @file      usermod_v2_pioneer_prolink_v3.h
+   @file      usermod_v3_pioneer_prolink.h
    @brief     Syncs WLED to Pioneer CDJs including Phrase/Mood analysis,
               track metadata, preview waveform, and album artwork.
-              v3 copy of the original usermod_v2_pioneer_prolink.h,
-              modified to use the v3 event bus hooks (onPreStateChange,
-              onEvent). The original Pioneer is untouched.
+              v3 successor to usermod_v2_pioneer_prolink.h, using the
+              v3 event bus hooks (onPreStateChange, onEvent). The
+              original v2 Pioneer is untouched.
    @target    ESP32 (Requires AsyncUDP, PSRAM recommended for waveform/artwork)
    @repo      WLED MoonModules
 
@@ -1383,7 +1383,11 @@ private:
       }
     }
 
-    if (prolink_presetMover && activeIdx != previousPhraseIdx && previousPhraseIdx != -1 && activeIdx != -1) {
+    // WLEDMM v3: was `if (prolink_presetMover && ...)` — the global
+    // flag was borrowed from another module and synced via a
+    // static-guard hack in readFromConfig(). v3 uses the Pioneer-local
+    // enableRandomPreset config directly.
+    if (enableRandomPreset && activeIdx != previousPhraseIdx && previousPhraseIdx != -1 && activeIdx != -1) {
       auto pool = buildPresetPool();
       int newPreset = getPresetForPhraseNoRepeat(activeIdx, pool);
 
@@ -1607,17 +1611,11 @@ public:
     virtualDeckNumber = top[FPSTR(_deckNumber)] | WLED_DEVICE_ID_DEFAULT;
     virtualDeckNumber = constrain(virtualDeckNumber, 1, 127);
 
-    // Static guards to persist across calls
-    static bool prolink_presetMover_init = false;
-    static bool enableRandomPreset_config_val;  // cache of last config value
+    // WLEDMM v3: removed the static-guard hack that synced the
+    // external `prolink_presetMover` global flag from enableRandomPreset.
+    // Pioneer v3 now uses enableRandomPreset directly (see the
+    // updatePhraseState check), so no shadow state is needed.
 
-    // Seed once, or resync if config changes externally
-    if (!prolink_presetMover_init || enableRandomPreset_config_val != enableRandomPreset) {
-      prolink_presetMover = enableRandomPreset;          // sync from config
-      enableRandomPreset_config_val = enableRandomPreset; // update cache
-      prolink_presetMover_init = true;
-    }
-    
     return true;
   }
 
@@ -1648,14 +1646,12 @@ public:
 
   // WLEDMM v3 hooks. Both default to no-op in the Usermod base
   // class. The v3 Pioneer overrides them to:
-  //   (a) log a debug line to the v3 eventlog whenever a
-  //       pre-state-change fires (so we can confirm the hook is
-  //       being called on a real device).
-  //   (b) listen for targeted events we care about. For now the
-  //       only consumer is the debug log; the `prolink_presetMover`
-  //       external-flag borrow and `updatePhraseState()` driving of
-  //       applyPreset() are unchanged. Future work can replace
-  //       those with event-driven paths.
+  //   (a) log every v3 event for runtime debugging, and
+  //   (b) update Pioneer-local state from v3 events (e.g., when
+  //       an external usermod publishes PresetCycleRequested,
+  //       Pioneer knows the new preset is "active" for display).
+  //   Phrase-level detection (Pioneer-internal audio structure
+  //   analysis) stays in loop() and is not part of the v3 surface.
   void onPreStateChange(uint8_t mode) override {
     // No-op for now. The latch was added in case we later want to
     // capture the pre-wipe value of currentPreset, but the v2

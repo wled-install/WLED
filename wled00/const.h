@@ -149,7 +149,7 @@
 #define USERMOD_ID_AUTOPLAYLIST          94     //Usermod "usermod_v2_auto_playlist.h"
 #define USERMOD_ID_PIONEER_PROLINK       95     //Usermod "usermod_v2_pioneer_prolink.h"
 #define USERMOD_ID_ARTNETMAP             95     //Usermod "usermod_v2_artnetmap.h"
-#define USERMOD_ID_MIDI_USB              96     //Usermod "usermod_v2_midi.h" — USB-MIDI control surface (ESP32-P4)
+#define USERMOD_ID_MIDI_USB              96     //Usermod "usermod_v3_midi.h" — USB-MIDI control surface (ESP32-P4)
 
 //Access point behavior
 #define AP_BEHAVIOR_BOOT_NO_CONN          0     //Open AP when no connection after boot

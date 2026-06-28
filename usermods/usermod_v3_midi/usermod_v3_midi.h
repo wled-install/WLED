@@ -1,4 +1,4 @@
-// usermod_v2_midi.h
+// usermod_v3_midi.h
 // USB-MIDI control surface usermod for WLED-MoonModules on ESP32-P4.
 //
 // Default mapping:
@@ -894,7 +894,7 @@ class MidiUsermod : public Usermod {
   }
 
   void setup() override {
-    USER_PRINTLN(F("[MIDI] usermod_v2_midi loaded"));
+    USER_PRINTLN(F("[MIDI] usermod_v3_midi loaded"));
     initDone = true;
   }
 

@@ -161,11 +161,11 @@
 // USERMOD_PIONEER_PROLINK (both share the prolink_*_public file-scope
 // symbols that FX.cpp reads). Define only one.
 #ifdef USERMOD_PIONEER_PROLINK_V3
-#include "../usermods/usermod_v2_pioneer_prolink_v3/usermod_v2_pioneer_prolink_v3.h"
+#include "../usermods/usermod_v3_pioneer_prolink/usermod_v3_pioneer_prolink.h"
 #endif
 
 #ifdef USERMOD_MIDI_USB
-#include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
+#include "../usermods/usermod_v3_midi/usermod_v3_midi.h"
 MidiUsermod* midiUsermodPtr = nullptr;
 #endif
 
@@ -220,7 +220,7 @@ MidiUsermod* midiUsermodPtr = nullptr;
 #include "../usermods/usermod_v2_animartrix/usermod_v2_animartrix.h"
 #endif
 #ifdef USERMOD_AUTO_PLAYLIST
-#include "../usermods/usermod_v2_auto_playlist/usermod_v2_auto_playlist.h"
+#include "../usermods/usermod_v3_auto_playlist/usermod_v3_auto_playlist.h"
 #endif
 #ifdef USERMOD_ARTNETMAP
 #include "../usermods/usermod_v2_artnetmap/usermod_v2_artnetmap.h"

@@ -14,9 +14,9 @@
 // Targets: pioarduino + framework-arduinoespressif32 (ESP-IDF v5 USB Host).
 
 #include "wled.h"
-#include "../usermods/usermod_v2_midi/midi_usb_host.h"
-#include "../usermods/usermod_v2_midi/usb_host_messages.h"
-#include "../usermods/usermod_v2_midi/usermod_v2_midi.h"
+#include "../usermods/usermod_v3_midi/midi_usb_host.h"
+#include "../usermods/usermod_v3_midi/usb_host_messages.h"
+#include "../usermods/usermod_v3_midi/usermod_v3_midi.h"
 
 #include <cstring>
 #include "usb/usb_host.h"

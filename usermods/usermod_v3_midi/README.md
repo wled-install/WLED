@@ -1,4 +1,4 @@
-# usermod_v2_midi — USB-MIDI Control Surface for WLED
+# usermod_v3_midi — USB-MIDI Control Surface for WLED
 
 Use a class-compliant USB-MIDI controller (Akai APC Mini MK2, Donner Starrypad, etc.) as a control surface for WLED. Plugs into one of the ESP32-P4 EV board's USB-A ports.
 
@@ -129,7 +129,7 @@ cd c:/Users/troys/WLED
 
 ## Files
 
-- `usermod_v2_midi.h` — main usermod class (header-only, ~480 LOC).
+- `usermod_v3_midi.h` — main usermod class (header-only, ~1850 LOC).
 - `midi_usb_host.h` / `midi_usb_host.cpp` — USB Host client (descriptor walk, IN/OUT transfers, packet parser).
 - `usb_host_messages.h` — shared `app_message_t` (MSC events + MIDI events).
 - Modifies `wled00/wled.cpp` (extends `app_message_t`, calls `midi_usb_init`/`midi_usb_poll` in `usb_task`, dispatches MIDI in `WLED::loop`).

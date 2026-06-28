@@ -251,6 +251,12 @@ struct PresetMetadata {
   bool isPlaylist;
   uint8_t repeat;     // WLEDMM v3: playlist repeat count (0 = infinite, N>0 = finite N+1)
   char name[33]; // adjust size to match your actual struct
+  char ql[9];   // WLEDMM v3: quickload name from preset's "ql" field.
+                // Empty string if unset. WLED's web UI uses 2 chars; we
+                // size for 8 to allow unicode (matches quickLoad[9]
+                // in presets.cpp).
+  int8_t ledmap;  // WLEDMM v3: ledmap at save time, or -1 if unset.
+                   // Mirrors the saveLedmap in presets.cpp.
 };
 
 extern PresetMetadata* presetCache;
@@ -261,6 +267,15 @@ extern PresetMetadata* presetCache;
 // playlist — callers that need to distinguish should check
 // getCachedPresetExists(slot) && isPlaylist first.
 uint8_t getPresetRepeat(byte slot);
+
+// WLEDMM v3: read the saved quickload name for a preset slot. Returns
+// an empty string ("") if unset or the slot doesn't exist. Caller does
+// not own the returned pointer; do not free it.
+const char* getPresetQL(byte slot);
+
+// WLEDMM v3: read the ledmap associated with a saved preset, or -1 if
+// unset. Mirrors saveLedmap in presets.cpp.
+int8_t getPresetLedmap(byte slot);
 
 // WLEDMM v3: preset navigation helpers. The MIDI usermod's
 // jumpPreset() and similar code in other usermods (e.g., Pioneer

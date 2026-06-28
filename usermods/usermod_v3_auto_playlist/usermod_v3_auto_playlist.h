@@ -1,12 +1,16 @@
 #pragma once
 
-/* 
-   @title     MoonModules WLED - auto-playlist usermod
-   @file      usermod_v2_auto_playlist.h
+/*
+   @title     MoonModules WLED - auto-playlist usermod (v3)
+   @file      usermod_v3_auto_playlist.h
    @repo      https://github.com/MoonModules/WLED, submit changes to this file as PRs to MoonModules/WLED
    @Authors   https://github.com/MoonModules/WLED/commits/mdev/
    @Copyright © 2024 Github MoonModules Commit Authors (contact moonmodules@icloud.com for details)
    @license   Licensed under the EUPL-1.2 or later
+
+   WLEDMM v3: publishes PresetCycleRequested from the AutoChange branch
+   of change() so subscribers (e.g., the Pioneer v3 usermod) can react
+   to "AutoPlaylist decided to advance" without polling getMidiState().
 
 */
 
@@ -283,7 +287,22 @@ class AutoPlaylistUsermod : public Usermod {
 
             suspendPlaylist();       // suspend the playlist engine before changing to another preset
             applyPreset(newpreset);
-            
+
+            // WLEDMM v3: publish PresetCycleRequested so subscribers
+            // (e.g., Pioneer v3 usermod) can react to "AutoPlaylist
+            // decided to advance" without polling getMidiState() or
+            // borrowing global flags. Synchronous fan-out; runs in
+            // the change() caller's task context (BG_Blocking from
+            // loop()). Handler must be short.
+            {
+              wled::Event ev = {};
+              ev.type = wled::EventType::PresetCycleRequested;
+              ev.timestamp_ms = millis();
+              ev.source_id = getId();
+              ev.payload.presetApplied.preset = (uint8_t)newpreset;
+              wled::EventBus::publish(ev);
+            }
+
             #ifdef USERMOD_AUTO_PLAYLIST_DEBUG
             USER_PRINTF("*** CHANGE distance = %4lu - change_interval was %5ldms - next change_threshold is %4u (%4u diff aprox)\n",(unsigned long)distance,change_interval,change_threshold,change_threshold_change);
             #endif

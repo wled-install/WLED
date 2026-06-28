@@ -2,7 +2,7 @@
 // Shared USB Host app_message_t used by wled.cpp (producer/consumer) and
 // midi_usb_host.cpp (producer of MIDI events).
 //
-// Lives in the usermod_v2_midi directory because the MIDI-specific event
+// Lives in the usermod_v3_midi directory because the MIDI-specific event
 // IDs are added here; the MSC events are kept around so the existing
 // background_loop_nonblocking() switch keeps working unchanged.
 //

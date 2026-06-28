@@ -313,6 +313,8 @@ void deletePreset(byte index) {
     presetCache[index].exists = false;
     presetCache[index].isPlaylist = false;
     presetCache[index].repeat = 0;  // WLEDMM v3
+    presetCache[index].ql[0] = '\0';  // WLEDMM v3
+    presetCache[index].ledmap = -1;   // WLEDMM v3
     presetCache[index].name[0] = '\0';
     #if defined(CONFIG_SOC_PPA_SUPPORTED)
     update_screen_background = true;
@@ -407,6 +409,19 @@ void buildPresetCache() {
       if (presetCache[i].isPlaylist) {
         JsonObject pl = presetObj[F("playlist")];
         presetCache[i].repeat = (uint8_t)(pl[F("repeat")].as<int>() | 0);
+      }
+
+      // WLEDMM v3: capture quickload name and ledmap (the same
+      // fields doSaveState() writes when persisting). Both default
+      // to "unset" via the memset(0) at the top of this function.
+      if (presetObj[F("ql")].is<const char*>()) {
+        strlcpy(presetCache[i].ql, presetObj[F("ql")].as<const char*>(),
+                sizeof(presetCache[i].ql));
+      }
+      if (!presetObj[F("ledmap")].isNull()) {
+        presetCache[i].ledmap = (int8_t)presetObj[F("ledmap")].as<int>();
+      } else {
+        presetCache[i].ledmap = -1;  // explicit "no ledmap"
       }
 
       if (presetObj["n"]) {
@@ -721,4 +736,19 @@ uint16_t getPlaylistPresetCount() {
     if (presetCache[i].exists && presetCache[i].isPlaylist) n++;
   }
   return n;
+}
+
+// WLEDMM v3: accessors for the new PresetMetadata fields. Both
+// return safe defaults for missing slots or unbuilt cache, so
+// callers don't have to do their own bounds checks.
+const char* getPresetQL(byte slot) {
+  if (presetCache == nullptr || slot == 0 || slot > 250) return "";
+  if (!presetCache[slot].exists) return "";
+  return presetCache[slot].ql;
+}
+
+int8_t getPresetLedmap(byte slot) {
+  if (presetCache == nullptr || slot == 0 || slot > 250) return -1;
+  if (!presetCache[slot].exists) return -1;
+  return presetCache[slot].ledmap;
 }
