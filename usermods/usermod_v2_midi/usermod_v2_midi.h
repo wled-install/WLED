@@ -219,9 +219,6 @@ class MidiUsermod : public Usermod {
   // the first repaint sends everything once.
   uint8_t     last_pad_color[64]          = {};
   uint8_t     last_pad_status[64]         = {};  // 0x96 = solid, 0x99 = pulse, etc.
-  uint8_t     last_check1_led             = 0xFF;  // Track 1 (note 100) — check1
-  uint8_t     last_check2_led             = 0xFF;  // Track 2 (note 101) — check2
-  uint8_t     last_check3_led             = 0xFF;  // Track 3 (note 102) — check3
   uint8_t     last_scene1_led             = 0xFF;  // Scene 1 (note 112) — toggleMirrorX indicator
   uint8_t     last_scene2_led             = 0xFF;  // Scene 2 (note 113) — toggleReverseX indicator
   uint8_t     last_scene3_led             = 0xFF;  // Scene 3 (note 114) — toggleMirrorY indicator
@@ -229,6 +226,9 @@ class MidiUsermod : public Usermod {
   uint8_t     last_scene5_led             = 0xFF;  // Scene 5 (note 116) — toggleTranspose indicator
   uint8_t     last_scene7_led             = 0xFF;  // Scene 7 (note 118) — select mode (copy preset)
   uint8_t     last_scene8_led             = 0xFF;  // Scene 8 (note 119) — power
+  uint8_t     last_check1_led             = 0xFF;  // Track 1 (note 100) — check1
+  uint8_t     last_check2_led             = 0xFF;  // Track 2 (note 101) — check2
+  uint8_t     last_check3_led             = 0xFF;  // Track 3 (note 102) — check3
   uint8_t     last_track4_led             = 0xFF;  // Track 4 (note 103) — repaint / reboot-armed
   uint8_t     last_track5_led             = 0xFF;  // Track 5 (note 104) — prev FX (disabled during playlist)
   uint8_t     last_track6_led             = 0xFF;  // Track 6 (note 105) — next FX (disabled during playlist)
