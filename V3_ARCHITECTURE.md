@@ -284,12 +284,14 @@ port (`-fno-exceptions` is on), so this is academic for now. If
 that ever changes, an unhandled throw in a handler will unwind
 through the playlist engine and bad things will happen.
 
-**3. `updateInterfaces()` is bypassed for the 1.2s cooldown by
-`pushInterfaceUpdate()`.** If you need to force a WS push after
-a preset-list mutation, use `pushInterfaceUpdate(mode)`, not
-`updateInterfaces(mode)`. Or just listen for `PresetListMutated`
-and call `pushInterfaceUpdate` from your handler. The cooldown
-exists for a reason (don't blow up the WS path on every save).
+**3. `updateInterfaces()` has a 1.2s cooldown.** If you need to
+force a WS push after a preset-list mutation without waiting
+for the cooldown, set `lastInterfaceUpdate = 0` and call
+`updateInterfaces(mode)` directly with your mode (the MIDI
+usermod does this in `onEvent(PresetListMutated)`). Or listen
+for `PresetListMutated` and trigger the forced push from your
+handler. The cooldown exists for a reason — don't blow up the
+WS path on every save.
 
 **4. The ArduinoJson ABI version is sensitive.** `event_log.h`
 forces `ARDUINOJSON_DECODE_UNICODE 0` before the ArduinoJson
@@ -356,6 +358,16 @@ handler currently logs every event to `USER_PRINTF` and does
 nothing else. Migrating Pioneer v3 to actually use the
 events (replacing `prolink_presetMover` flag-borrow with
 `PresetCycleRequested` subscriptions) is future work.
+
+**16. The MIDI usermod uses two-press confirmation patterns for
+destructive actions.** Shift+pad (delete preset) and
+Shift+Track 4 (reboot) both require a first press to arm
+(LED flashes red-fast-blink) followed by a second press while
+the modifier is still held to confirm. Releasing the
+modifier or a 5s timeout cancels. See
+`usermods/usermod_v3_midi/usermod_v3_midi.h`'s
+`delete_armed_pad` / `reboot_armed` state machines for the
+reference implementation.
 
 **13. v3 is not a replacement for the existing `onStateChange`
 hook.** Both fire. `onStateChange` fires AFTER `stateUpdated`
@@ -445,20 +457,23 @@ wled00/
   wled.cpp            # UsbDeviceChanged publish from MIDI callbacks
 
 usermods/
-  usermod_v2_midi/
-    usermod_v2_midi.h  # removed: effect_index, ensureEffectIndex,
-                       # cached_playlist_repeat, prev_currentPlaylist,
-                       # prev_power_off, ensurePlaylistRepeatCache call
-                       # added: onPreStateChange, onEvent overrides
+  usermod_v3_midi/
+    usermod_v3_midi.h   # removed: effect_index, ensureEffectIndex,
+                        # cached_playlist_repeat, prev_currentPlaylist,
+                        # prev_power_off, ensurePlaylistRepeatCache call
+                        # added: onPreStateChange, onEvent overrides
+                        # delete_armed / copy_failed two-press confirmations
     usb_host_messages.h # added midi_device_info struct in app_message_t
     midi_usb_host.cpp   # populates midi_device_info on connect
-  usermod_v2_pioneer_prolink_v3/
-    usermod_v2_pioneer_prolink_v3.h  # copy of v2 Pioneer with v3 hook stubs
-                                     # class renamed to ProLinkUsermodV3
-                                     # _name is "Pro_DJ_Link_v3"
-                                     # registered in usermods_list.cpp
-                                     # gated by USERMOD_PIONEER_PROLINK_V3
-                                     # mutually exclusive with v2
+  usermod_v3_pioneer_prolink/
+    usermod_v3_pioneer_prolink.h  # copy of v2 Pioneer with v3 hook stubs
+                                  # class renamed to ProLinkUsermodV3
+                                  # _name is "Pro_DJ_Link_v3"
+                                  # registered in usermods_list.cpp
+                                  # gated by USERMOD_PIONEER_PROLINK_V3
+                                  # mutually exclusive with v2
+  usermod_v3_auto_playlist/
+    usermod_v3_auto_playlist.h    # v3 reimplementation; registers v3 hooks
 ```
 
 ## Testing the v3 work
@@ -482,3 +497,19 @@ On the P4, with `pio run -e esp32p4_8MB_troyhacks`:
    `prolink_presetMover` flag handling with a subscription to
    `PresetCycleRequested` (which AutoPlaylist would publish
    after the appropriate edit).
+
+4. **MIDI usermod destructive flows.** Verify the two-press
+   confirmation works end-to-end:
+   - Hold Shift, press a saved pad. The pad should flash
+     red-fast-blink. Release Shift — the pad reverts to its
+     normal color. Hold Shift again, press the same pad twice
+     in succession — the second press confirms the delete.
+   - Hold Scene 7, press a saved pad, press an empty pad.
+     The preset should copy without a red flash on the
+     destination. Try the same flow with the destination
+     already occupied — the destination should flash
+     red-fast-blink while Scene 7 is held, reverting on
+     release.
+   - Hold Shift, press Track 4 (fullRepaint). Track 4 should
+     blink. Press Track 4 again while still holding Shift —
+     the controller should reboot.

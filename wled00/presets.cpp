@@ -333,8 +333,8 @@ void deletePreset(byte index) {
     #endif
   }
   // WLEDMM v3: publish PresetListMutated so subscribers can react
-  // (e.g., the MIDI usermod's pushInterfaceUpdate() workaround
-  // becomes an onEvent handler).
+  // (e.g., the MIDI usermod's onEvent(PresetListMutated) handler
+  // forces the WS push with cooldown bypass).
   if (index > 0 && index <= 250) {
     wled::Event ev = {};
     ev.type = wled::EventType::PresetListMutated;

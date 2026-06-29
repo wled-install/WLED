@@ -1,14 +1,15 @@
 // usb_host_messages.h
-// Shared USB Host app_message_t used by wled.cpp (producer/consumer) and
-// midi_usb_host.cpp (producer of MIDI events).
+// Shared USB Host app_message_t used by wled.cpp (producer/consumer)
+// and midi_usb_host.cpp (producer of MIDI events).
 //
-// Lives in the usermod_v3_midi directory because the MIDI-specific event
-// IDs are added here; the MSC events are kept around so the existing
+// Lives in the usermod_v3_midi directory because the MIDI-specific
+// event IDs are added here; the MSC events are kept so the existing
 // background_loop_nonblocking() switch keeps working unchanged.
 //
-// Gated by SOC_USB_OTG_SUPPORTED (only the P4 USB Host subsystem uses it).
-// The underlying msc_host_device_handle_t / usb_host includes are ESP-IDF
-// headers, so we only attempt to include them when the target supports it.
+// Gated by SOC_USB_OTG_SUPPORTED (only the P4 USB Host subsystem uses
+// it). The underlying msc_host_device_handle_t / usb_host includes
+// are ESP-IDF headers, so we only attempt to include them when the
+// target supports it.
 
 #pragma once
 
@@ -41,9 +42,9 @@ typedef struct {
       uint8_t data1;
       uint8_t data2;
     } midi;
-    // WLEDMM v3: device descriptor populated by the USB Host client when
-    // posting APP_MIDI_DEVICE_CONNECTED. wled.cpp publishes a
-    // UsbDeviceChanged v3 event with this payload.
+    // Device descriptor populated by the USB Host client when posting
+    // APP_MIDI_DEVICE_CONNECTED. wled.cpp publishes a UsbDeviceChanged
+    // event with this payload.
     struct {
       uint16_t vid;
       uint16_t pid;

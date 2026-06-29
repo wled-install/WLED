@@ -1,14 +1,14 @@
 // midi_usb_host.cpp
 // USB-MIDI Host client for the ESP32-P4 EV board.
 //
-// BASICS version (Phase 2 of the user's debugging plan):
-//  - Adds a per-client VID/PID filter in midi_open_and_configure so the
-//    MIDI client doesn't fight the MSC client for the same device. Only
-//    devices whose VID matches a known MIDI vendor (or whose exact
-//    VID/PID is in our known-MIDI table) get claimed.
-//  - Strips the OUT path: no data sent back to the device, no WLED
-//    state changes. The IN callback just logs received packets. The
-//    usermod can still be enabled, but it won't drive anything.
+// Responsibilities:
+//  - Register as an ESP-IDF USB Host client that coexists with the
+//    MSC client (midi_open_and_configure VID/PID filter keeps the two
+//    from fighting over the same device).
+//  - Submit IN transfers and parse USB-MIDI event packets into
+//    status/data1/data2 triplets for the usermod to handle.
+//  - Drain an OUT ring buffer (midi_out_queue()) and submit bulk-OUT
+//    URBs for LED feedback back to the controller.
 //
 // Build: -D USERMOD_MIDI_USB on the P4 env (esp32p4_8MB_troyhacks).
 // Targets: pioarduino + framework-arduinoespressif32 (ESP-IDF v5 USB Host).
@@ -111,8 +111,7 @@ static volatile bool midi_in_resubmit_needed = false;
 // toggle would have been reset anyway.
 static volatile bool midi_in_error_recovery_needed = false;
 
-// OUT path is disabled for the "basics" version — see header.
-#if 1
+// OUT path state.
 static usb_transfer_t* midi_out_xfer = nullptr;
 static volatile bool   midi_out_in_flight = false;
 // OUT ring buffer. Holds USB-MIDI event packets (4 bytes each).
@@ -124,16 +123,14 @@ static volatile bool   midi_out_in_flight = false;
 static uint8_t          out_rb_storage[2048]      __attribute__((aligned(4)));
 static StaticRingbuffer_t out_rb_struct;
 static RingbufHandle_t    midi_out_rb = nullptr;
-#endif
 
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
 static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* arg);
 static void midi_in_transfer_cb(usb_transfer_t* xfer);
-#if 1
 static void midi_out_transfer_cb(usb_transfer_t* xfer);
-#endif
 static esp_err_t midi_open_and_configure(uint8_t dev_addr);
 static void      midi_close_device(void);
 
@@ -143,7 +140,6 @@ static void      midi_close_device(void);
 void midi_usb_init(void) {
   if (midi_client) return;
 
-  #if 1
   midi_out_rb = xRingbufferCreateStatic(
     512, RINGBUF_TYPE_BYTEBUF,
     out_rb_storage, &out_rb_struct);
@@ -151,7 +147,6 @@ void midi_usb_init(void) {
     MIDI_LOG("init: OUT ring buffer alloc failed");
     return;
   }
-  #endif
 
   usb_host_client_config_t cfg = {};
   cfg.is_synchronous = false;
@@ -179,7 +174,6 @@ void midi_usb_init(void) {
     midi_in_xfer[i]->num_bytes = TRANSFER_SIZE;
   }
 
-  #if 1
   err = usb_host_transfer_alloc(TRANSFER_SIZE, 0, &midi_out_xfer);
   if (err != ESP_OK) {
     MIDI_LOG("init: usb_host_transfer_alloc OUT failed: %s", esp_err_to_name(err));
@@ -188,7 +182,6 @@ void midi_usb_init(void) {
     midi_out_xfer->callback = midi_out_transfer_cb;
     midi_out_xfer->context = nullptr;
   }
-  #endif
 
   MIDI_LOG("init: USB Host client ready");
 }
@@ -233,7 +226,6 @@ void midi_usb_poll(void) {
     }
   }
 
-  #if 1
   // OUT path: drain ring buffer and submit bulk-OUT URBs to the controller.
   // Single in-flight URB (same pattern as IN — ESP-IDF allows only one
   // in-flight URB per endpoint). midi_out_transfer_cb clears midi_out_in_flight
@@ -260,7 +252,6 @@ void midi_usb_poll(void) {
       }
     }
   }
-  #endif
 }
 
 // ---------------------------------------------------------------------------
@@ -309,11 +300,9 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
   if (msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     MIDI_LOG("event: NEW_DEV addr=%d", msg->new_dev.address);
     if (midi_open_and_configure(msg->new_dev.address) == ESP_OK) {
-      // WLEDMM v3: the v2 callbacks (setDeviceInfo, captureActivePreset,
-      // setConnected, requestFullRepaint) are gone. We just publish
-      // the device descriptor on the app_queue; wled.cpp consumes the
-      // APP_MIDI_DEVICE_CONNECTED message and publishes a v3
-      // UsbDeviceChanged event. The usermod's onEvent handler does
+      // Publish the device descriptor on the app_queue. wled.cpp
+      // consumes the APP_MIDI_DEVICE_CONNECTED message and publishes
+      // a UsbDeviceChanged event. The usermod's onEvent handler does
       // the rest: sets the local state, latches the active preset
       // (via onPreStateChange), and triggers the repaint.
       app_message_t m = {};
@@ -331,11 +320,10 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
         }
       }
       xQueueSend(app_queue, &m, 0);
-      // Single delayed "settled" repaint using a static buffer (no
-      // heap allocation, so no race with the SD-card task). The
-      // v2 setConnected+requestFullRepaint pattern is replaced by
-      // a single delayed repaint that fires after the boot state
-      // has settled.
+      // Single delayed "settled" repaint: a one-shot FreeRTOS task
+      // waits ~1.5s for the boot state to settle, then forces a full
+      // repaint. Uses a static ctx buffer (no heap, no race with the
+      // SD-card task).
       if (midiUsermodPtr) {
         struct RepaintCtx { MidiUsermod* ptr; };
         static RepaintCtx s_repaint_ctx;
@@ -344,9 +332,6 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
           [](void* arg) {
             auto* c = (RepaintCtx*)arg;
             vTaskDelay(pdMS_TO_TICKS(1500));
-            // Force a full repaint via the runAction path that the
-            // v3 "fullRepaint" verb triggers. (Equivalent to the
-            // old requestFullRepaint() callback, now inline.)
             if (c->ptr) {
               c->ptr->invalidateAllLedDedup();
               c->ptr->onStateChange(CALL_MODE_BUTTON);
@@ -360,9 +345,9 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
     }
   } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
     MIDI_LOG("event: DEV_GONE");
-    // WLEDMM v3: the v2 setConnected(false) callback is gone. The
-    // disconnect is now driven by the UsbDeviceChanged event
-    // (connected=false) which the usermod handles.
+    // wled.cpp consumes APP_MIDI_DEVICE_DISCONNECTED and publishes a
+    // UsbDeviceChanged event (connected=false); the usermod's
+    // onEvent handler resets its state.
     midi_close_device();
     app_message_t m = {};
     m.id = app_message_t::APP_MIDI_DEVICE_DISCONNECTED;
@@ -371,8 +356,9 @@ static void midi_client_event_cb(const usb_host_client_event_msg_t* msg, void* /
 }
 
 // ---------------------------------------------------------------------------
-// IN transfer callback — basics: just log the received packet.
-// (Previous behavior: parse + push to app_queue for the usermod to handle.)
+// IN transfer callback — parses USB-MIDI event packets and dispatches
+// them to the usermod, which drives WLED state and queues LED
+// feedback back through midi_out_queue().
 // ---------------------------------------------------------------------------
 static void midi_in_transfer_cb(usb_transfer_t* xfer) {
   if (!xfer) return;
@@ -386,10 +372,6 @@ static void midi_in_transfer_cb(usb_transfer_t* xfer) {
       uint8_t d1 = p[i + 2];
       uint8_t d2 = p[i + 3];
       if (cin < 0x8 || cin > 0xE) continue;
-      // Full-feature: dispatch to the usermod so faders/pads/track buttons
-      // actually drive WLED state (bri, presets, effect params, etc).
-      // The usermod will call midi_out_queue() to push LED feedback, which
-      // midi_usb_poll() drains and submits as bulk-OUT URBs.
       if (midiUsermodPtr) {
         midiUsermodPtr->handleIncomingMidi(status, d1, d2);
       }
@@ -413,13 +395,12 @@ static void midi_in_transfer_cb(usb_transfer_t* xfer) {
   midi_in_resubmit_needed = true;
 }
 
-#if 1
-// OUT transfer callback (disabled).
+// OUT transfer callback — clears the in-flight flag so the poll loop
+// submits the next queued packet.
 static void midi_out_transfer_cb(usb_transfer_t* xfer) {
   (void)xfer;
   midi_out_in_flight = false;
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // Descriptor walking + per-client VID/PID filter.
@@ -529,7 +510,7 @@ static esp_err_t midi_open_and_configure(uint8_t dev_addr) {
       MIDI_LOG("configure: initial IN submit failed: %s", esp_err_to_name(err));
     }
   }
-  MIDI_LOG("configure: 1 IN transfer submitted (basics: no OUT)");
+  MIDI_LOG("configure: 1 IN transfer submitted");
   return ESP_OK;
 }
 
@@ -543,10 +524,8 @@ static void midi_close_device(void) {
     usb_transfer_t* x = midi_in_xfer[i];
     if (x && x->device_handle == midi_dev_hdl) x->device_handle = nullptr;
   }
-  #if 1
   if (midi_out_xfer) midi_out_xfer->device_handle = nullptr;
   midi_out_in_flight = false;
-  #endif
   usb_host_device_close(midi_client, midi_dev_hdl);
   midi_dev_hdl = nullptr;
   midi_in_ep = 0;
